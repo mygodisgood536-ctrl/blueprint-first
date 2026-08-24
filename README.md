@@ -1,0 +1,79 @@
+# Blueprint-First Platform
+
+A foundational implementation of the **Blueprint-First AI Software Engineering
+Architecture 2.0** ("nothing advances without evidence"), built incrementally
+along the architecture's additive roadmap.
+
+**Current state: roadmap Level 1a *foundations* are implemented and tested.
+No engine pretends to exist before it exists.** See [`docs/status.md`](docs/status.md)
+for the exact, evidence-backed completion record and
+[`docs/roadmap.md`](docs/roadmap.md) for what comes next.
+
+## What is actually implemented today
+
+| Subsystem | State | Where |
+|---|---|---|
+| Stable artifact IDs (`PAGE-0042`, phase lineage `…-DESIGN/-IMPL/-TEST/-DEPLOY/-OPS`) | implemented + tested | `src/core/ids.ts` |
+| Deterministic ID allocation (never reuses numbers, restart-safe) | implemented + tested | `src/core/id-allocator.ts` |
+| Artifact metadata model with append-only provenance (who/what model produced it) | implemented + tested | `src/core/artifact.ts` |
+| Artifact lifecycle state machine (enforced transitions, terminal states) | implemented + tested | `src/core/status.ts` |
+| Persistence abstraction (`ArtifactStore` port) + memory & atomic JSON-file adapters | implemented + tested | `src/core/store*.ts` |
+| Application Knowledge Graph foundation (typed relations, integrity, traversal, cycle detection) | implemented + tested | `src/core/graph.ts` |
+| AI provider seam + deterministic ScriptedProvider + OpenAI-compatible HTTP client (env-var keys only) | implemented; HTTP client unverified against live API | `src/ai/*` |
+| AI Router (task-type routing, records which model produced/verified what) | implemented + tested | `src/ai/router.ts` |
+| Eleven verification dimensions + evidence log + verifier port + independence guards (no self-certification) | implemented + tested | `src/verification/*` |
+| Worker → Self → Specialist → Boss flow (fail-fast independence enforcement) | implemented + tested | `src/orchestration/worker-boss.ts` |
+| Staged pipeline runner with honest failure reporting | implemented + tested | `src/orchestration/pipeline.ts` |
+| Traceability queries (lineage gaps located by ID, coverage summary) | implemented + tested | `src/traceability/trace.ts` |
+| Product Discovery Engine / AI Design Studio / AI Build Studio | **scaffolded only** — loudly refuse to run (`EngineNotImplementedError`) | `src/engines/*` |
+| Structured logging with secret redaction; env-driven configuration | implemented + tested | `src/core/logging.ts`, `src/core/config.ts` |
+
+## Quick start
+
+```bash
+npm install        # dev tooling only (TypeScript); runtime has zero dependencies
+npm test           # 88 behavior tests via Node's built-in runner
+npm run typecheck  # strict TypeScript gate
+npm run build      # emits dist/
+npm run demo       # end-to-end foundation demo (deterministic, offline)
+```
+
+Requires Node.js >= 24 (native TypeScript execution). No API keys are needed;
+the demo uses the deterministic ScriptedProvider and says so in its output.
+
+## Project rules baked into the code
+
+- **Production/judgment separation**: workers produce; verifiers judge. The
+  flow runner refuses to let one origin certify its own work.
+- **Honest incompleteness**: missing lineage links are reported by ID
+  (`PAGE-0001-TEST missing`), never papered over.
+- **Secrets**: resolved from environment variables at call time only; redacted
+  in logs; `.env` is gitignored; see [docs/configuration.md](docs/configuration.md).
+- **Isolation**: this repository is self-contained; nothing outside its folder
+  is referenced or required at build/test/run time.
+
+## Documentation
+
+- [Architecture](docs/architecture.md) — subsystems, ID spec, state machine, graph semantics
+- [Roadmap](docs/roadmap.md) — Levels 1a–5 mapped to modules, current position marked
+- [Status record](docs/status.md) — per-stage evidence log (what passed, what didn't)
+- [Configuration](docs/configuration.md) · [Testing](docs/testing.md) · [Decisions](docs/decisions.md)
+- The source-of-truth specification text lives at
+  [`docs/spec/blueprint-first-architecture-2.0.extracted.txt`](docs/spec/blueprint-first-architecture-2.0.extracted.txt)
+  (extracted via `tools/extract-spec.ps1`; source SHA256 recorded in status.md).
+
+## Repository layout
+
+```
+src/core/          ids, allocator, artifacts, status machine, stores, graph,
+                   logging, config, errors
+src/ai/            provider port, scripted + OpenAI-compatible providers, router
+src/verification/  dimensions, evidence, verifier port, independence guards
+src/orchestration/ pipeline runner, worker-boss flow
+src/traceability/  lineage status/gaps, traversal, coverage
+src/engines/       scaffolded Level-1a engine contracts (refuse-to-run)
+src/demo/          deterministic end-to-end foundation demo
+test/              Node built-in runner suites (88 tests)
+tools/             spec extraction utility
+docs/              architecture, roadmap, status, decisions, testing, config, spec
+```

@@ -1,0 +1,20 @@
+{
+  "name": "blueprint-first",
+  "version": "0.1.0",
+  "description": "Blueprint-First AI Software Engineering Architecture 2.0 - foundational implementation (Level 1a prerequisites)",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.build.json",
+    "test": "node --test",
+    "demo": "node src/demo/main.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.0",
+    "typescript": "^5.9.2"
+  }
+}

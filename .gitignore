@@ -1,0 +1,19 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+*.tsbuildinfo
+
+# runtime data (artifact stores, evidence snapshots)
+data/
+
+# secrets - never commit real environment files
+.env
+.env.*
+!.env.example
+
+# logs and OS noise
+*.log
+.DS_Store
+Thumbs.db

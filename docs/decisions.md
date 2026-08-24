@@ -1,0 +1,59 @@
+# Architecture & Engineering Decisions
+
+Decision records for choices that shape the foundation. Newest last.
+
+## D-001 — Zero runtime dependencies; Node-native TypeScript
+**Context:** Windows dev box, npm registry reachable but terminal tooling
+flaky; platform is foundation-layer domain logic + I/O seams.
+**Decision:** Runtime has zero npm dependencies. Dev deps: `typescript`,
+`@types/node` only. Tests run on Node's built-in runner executing TS directly
+(Node >= 24 native type-stripping). Code avoids TS-only runtime constructs
+(no enums, namespaces, parameter properties) so stripped execution and `tsc`
+emit agree.
+**Consequence:** Supply chain ≈ none; tests/builds run offline; some TS sugar
+unavailable. Accepted.
+
+## D-002 — `.ts` import extensions + `rewriteRelativeImportExtensions`
+Native Node execution requires real on-disk extensions in imports.
+tsconfig uses `allowImportingTsExtensions` + `rewriteRelativeImportExtensions`
+(TS ≥ 5.7) so the same sources both execute natively and compile cleanly to
+`dist/` (extensions rewritten `.ts → .js`).
+**Consequence:** imports look like `./ids.ts`; verified working under node,
+tsc typecheck, and tsc emit.
+
+## D-003 — Ports & adapters everywhere state or judgment flows
+`ArtifactStore`, `EvidenceLog`, `AiProvider`, `Verifier` are interfaces with
+in-memory/JSON/scripted implementations today. Database-backed stores, extra
+providers, and engine implementations plug in later without upstream rewrites.
+This is the architecture's extensibility requirement made concrete.
+
+## D-004 — JSON-file store now, database adapter later (not "fake graph")
+The Knowledge Graph is a real typed-graph module with integrity rules and
+queries; its persistence at this level is a schema-versioned atomic JSON
+snapshot. This is a deliberate Level-1a choice with an explicit upgrade path:
+the store port and graph query surface stay fixed when a SQL/graph backend
+arrives.
+
+## D-005 — ScriptedProvider as the default AI provider
+Deterministic, labeled-as-scripted responses keep demos/tests honest and
+offline-capable. The router treats it like any provider; nothing consumes AI
+content without provenance stamping. Live HTTP client exists but is explicitly
+marked unverified against a real endpoint until exercised with credentials.
+
+## D-006 — Independence = origin identity, not role label
+Two actors are "the same" iff their ids match — relabeling a worker account as
+a "verifier" does not create independence. Enforced before work runs, not
+after. Self-verification remains allowed as a non-certifying first pass,
+matching the spec's WORKER → SELF → SPECIALIST → BOSS chain.
+
+## D-007 — Stores own versioning; artifacts are immutable snapshots
+Mutators receive drafts; the store stamps `version = found + 1` and appends
+provenance via pure helpers. Optimistic concurrency (`expectedVersion`)
+protects against lost updates across adapters. A defect where this contract
+was ambiguous was caught by the shared store-contract test and fixed.
+
+## D-008 — Honest incompleteness as a feature
+Lineage gaps are first-class results located by exact ID (spec §T.3);
+certification returns explicit refusal reasons; scaffolded engines throw
+typed errors naming their roadmap level. The demo prints its own gaps and
+non-certifiability rather than a green-washed summary.

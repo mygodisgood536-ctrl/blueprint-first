@@ -1,0 +1,150 @@
+# Architecture (as implemented at this stage)
+
+This document describes what the codebase actually contains today, mapped to
+the Blueprint-First AI Software Engineering Architecture 2.0 specification
+(text in `docs/spec/`). Where a spec mechanism is only partially present, that
+is stated explicitly.
+
+## 1. Artifact identity (`src/core/ids.ts`)
+
+Implements the spec's stable ID scheme (§0.12) and extended ID chain (§T.1):
+
+```
+TYPE-NNNN                    canonical base ID      e.g. PAGE-0042
+TYPE-NNNN-PHASE              phase-extended IDs     e.g. PAGE-0042-DESIGN
+
+PAGE-0042 -> PAGE-0042-DESIGN -> PAGE-0042-IMPL
+          -> PAGE-0042-TEST   -> PAGE-0042-DEPLOY -> PAGE-0042-OPS
+```
+
+- Types are a closed set (`PROJECT`, `MODULE`, `FEATURE`, `WORKFLOW`, `PAGE`,
+  `SECTION`, `CONTENT`, `ACTION`, `STATE`, `VALIDATION`, `RULE`, `PERMISSION`,
+  `API`, `ENTITY`, `INTEGRATION`, `COMPONENT`, `TEST`, `BLUEPRINT`, `FINDING`,
+  `RISK`).
+- Canonical form is enforced: zero-padded four-digit numbers (growing beyond
+  9999), phases in canonical order without repeats; parsing rejects anything
+  not byte-identical to canonical.
+- IDs are permanent once assigned; deprecation happens in metadata/status,
+  never by reassignment.
+- Pure module: no clock, no I/O — identical inputs always yield identical IDs.
+
+Allocation (`id-allocator.ts`) is sequential per type, monotonic, never reuses
+a number, seeds from existing IDs or persisted snapshots (restart-deterministic).
+
+## 2. Artifact metadata & provenance (`src/core/artifact.ts`)
+
+Covers the §0.13 metadata fields as follows:
+
+| Spec field | Implementation today |
+|---|---|
+| purpose | `title` + `description` |
+| dependencies | `dependencies: readonly string[]` (validated artifact IDs) |
+| parent/children | Knowledge Graph `CONTAINS` edges (graph-owned, not duplicated on the artifact) |
+| evidence | append-only Evidence Log (`verification/evidence.ts`) referenced from provenance/graph edges |
+| discovered-by / verified-by | `Actor` records (`kind`, `id`, AI `modelId`) in provenance entries |
+| status | enforced lifecycle state machine (`status.ts`) |
+| change history | append-only `provenance[]` on every artifact |
+| **confidence** | **not yet implemented** — planned with Level 1b discovery scoring |
+
+Artifacts are frozen objects; updates go through store `update()` with
+optimistic concurrency (expectedVersion) — the *store* owns versioning.
+
+## 3. Lifecycle state machine (`src/core/status.ts`)
+
+Ten statuses with an explicit transition table:
+
+```
+DRAFT → IN_REVIEW → VERIFIED → APPROVED → ARCHIVED/SUPERSEDED/DEPRECATED
+IN_REVIEW → CHANGES_REQUESTED → IN_REVIEW | DRAFT
+IN_REVIEW → REJECTED → DRAFT        any(pre-terminal) → BLOCKED → recover
+```
+
+Illegal transitions throw typed errors listing legal alternatives. ARCHIVED is
+terminal. This is the foundation for the spec's Definition-of-Complete state
+machine (§0.17); the full DoC machine is Level 2 work.
+
+## 4. Persistence (`src/core/store.ts`, `memory-store.ts`, `json-file-store.ts`)
+
+A single async port (`ArtifactStore`) with two adapters:
+
+- **Memory** — tests/ephemeral runs.
+- **JSON file** — durable snapshot file, schema-versioned, written atomically
+  (temp file + rename, Windows-safe fallback) on every mutation; persists
+  allocator state so IDs continue correctly across restarts.
+
+Both enforce: duplicate-ID rejection, version-conflict rejection, clone-on-read
+(no aliasing corruption), deterministic ID-ordered listings. A database-backed
+adapter can be added later behind the same port without upstream changes.
+
+## 5. Application Knowledge Graph (`src/core/graph.ts`)
+
+Nodes = artifact IDs; edges = eight typed relations (`CONTAINS`, `DEPENDS_ON`,
+`DERIVED_FROM`, `TRACES_TO`, `VERIFIED_BY`, `PRODUCED_BY`, `CONFLICTS_WITH`,
+`RELATES_TO`). Enforces referential integrity, forbids self-dependency and
+self-derivation, deduplicates triples, provides deterministic traversal
+(upstream/downstream, relation-filtered, transitive) and DEPENDS_ON cycle
+detection. Storage-free by design; a DB-backed graph adapter will implement
+the same query surface.
+
+## 6. Verification (`src/verification/*`)
+
+- The eleven dimensions (§0.16) as a closed tuple with a runtime integrity
+  guard: COUNT, COVERAGE, IDENTITY, CORRECTNESS, QUALITY, TRACEABILITY,
+  DEPENDENCY_INTEGRITY, DUPLICATION, CONFLICTS, CONSISTENCY, EVIDENCE_OF_WORK.
+- Append-only evidence log with monotonic `EV-NNNNNN` IDs; artifact references
+  validated against canonical IDs.
+- Verifier port producing per-dimension findings; aggregation reports verdict
+  counts, missing dimensions, blocking failures.
+- **Independence guards**: same-origin verification is refused *before any work
+  runs*; certification requires an independent verifier of kind
+  verifier/system, all-eleven coverage, and zero failures. Self-checks by the
+  producer are allowed but structurally non-certifying.
+
+## 7. Orchestration (`src/orchestration/*`)
+
+- Pipeline runner: ordered stages over shared services/state, per-stage timing
+  records, failures captured and reflected in the summary (never swallowed).
+- Worker-Boss flow implementing WORKER → SELF-VERIFICATION (non-certifying) →
+  SPECIALIST VERIFIER → BOSS, failing fast when specialist/boss share the
+  worker's origin. Independent audit + certification stages are Level-2
+  extensions of this same flow.
+
+## 8. AI provider seam & router (`src/ai/*`)
+
+- `AiProvider` port; responses always carry `providerId` + `modelId` so calls
+  can stamp provenance ("which model produced/verified this").
+- **ScriptedProvider**: deterministic rules/queue; test/demo infrastructure,
+  clearly labeled wherever used.
+- **OpenAiCompatibleProvider**: real HTTP chat-completions client with injected
+  fetch (offline-testable), timeout, typed HTTP errors, env-var-only keys.
+  Status: implemented and unit-tested offline; **not yet exercised against a
+  live endpoint** (needs real credentials).
+- **AiRouter**: task-type routing table with default fallback, loud errors for
+  unregistered routes, completed-selection log recording task/provider/model.
+
+## 9. Traceability (`src/traceability/trace.ts`)
+
+- Lineage status per base artifact: which links exist and their statuses,
+  where the contiguous chain stops, gaps located **by exact ID** (spec §T.3),
+  including orphan detection (`-IMPL` existing while `-DESIGN` is missing).
+- Upstream/downstream traversal and requirement-coverage summaries with
+  untraced lists.
+
+## 10. Cross-cutting
+
+- Logging (`core/logging.ts`): JSON entries, levels, child bindings, deep
+  secret redaction (api-key/authorization/token/secret/password patterns).
+- Configuration (`core/config.ts`): env-driven, fail-fast validation,
+  credentials resolved at call time — variable names in errors, never values.
+- Errors (`core/errors.ts`): typed hierarchy with stable machine codes.
+
+## Deliberately NOT here yet
+
+Discovery Worker Corps, Design/Build/Test departments, Digital Twin, Living
+Blueprint, Operations, self-healing, Engineering Memory, Safe Change
+Intelligence, Continuous Learning Engine, Multi-Perspective Reasoning Council,
+Blueprint Certification/Confidence engines — see `docs/roadmap.md`. Their seams
+exist: engine contracts refuse to run, and the orchestration/verification
+primitives they will need already work under test.
+
+
