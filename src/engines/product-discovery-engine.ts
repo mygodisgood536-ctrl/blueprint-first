@@ -1,42 +1,28 @@
 /**
- * Single-pass Product Discovery Engine contract (roadmap Level 1a).
+ * Product Discovery Engine - Level 1a contract.
  *
- * Input: a raw product brief. Output: a first-pass discovery result covering
- * candidate pages/features, assumptions and open questions - the seed of the
- * Application Knowledge Graph for a new product.
+ * IMPLEMENTED by src/discovery/engine.ts (SinglePassDiscoveryEngine): a
+ * single-pass pipeline that turns a Product Understanding Brief into a
+ * verified, graph-registered discovery baseline.
  *
- * STATUS: scaffolded. The full implementation (Discovery Worker Corps,
- * Understanding + Structural clusters, self/specialist verification) is the
- * next implementation stage after this foundation batch.
+ * The multi-worker Discovery Department (worker corps, independent
+ * reconstruction boss, red team) remains a later-level extension of this same
+ * seam - see docs/roadmap.md.
  */
 
-import { ScaffoldedEngine } from './scaffold.ts';
 import type { EngineDescriptor } from './scaffold.ts';
-
-export interface DiscoveryPageCandidate {
-  title: string;
-  purpose: string;
-  candidateFeatures: readonly string[];
-}
-
-export interface DiscoveryOutput {
-  productName: string;
-  pages: readonly DiscoveryPageCandidate[];
-  assumptions: readonly string[];
-  openQuestions: readonly string[];
-}
+import type { ProductUnderstandingBrief } from '../discovery/types.ts';
+import type { DiscoveryRunResult } from '../discovery/engine.ts';
 
 export interface ProductDiscoveryEngine {
   readonly descriptor: EngineDescriptor;
-  discover(brief: string): Promise<DiscoveryOutput>;
+  discover(brief: ProductUnderstandingBrief): Promise<DiscoveryRunResult>;
 }
 
-export class ScaffoldedProductDiscoveryEngine extends ScaffoldedEngine implements ProductDiscoveryEngine {
-  constructor() {
-    super({ name: 'ProductDiscoveryEngine', targetLevel: '1a', status: 'scaffolded' });
-  }
+export type {
+  ProductUnderstandingBrief,
+  RawDiscoveryResult,
+  DiscoveryKey,
+} from '../discovery/types.ts';
+export type { DiscoveryRunResult } from '../discovery/engine.ts';
 
-  async discover(_brief: string): Promise<DiscoveryOutput> {
-    this.refuse('discover');
-  }
-}
