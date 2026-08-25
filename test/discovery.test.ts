@@ -12,6 +12,17 @@ const BRIEF = {
   targetUsers: ['small teams'],
 };
 
+/**
+ * Fully-mutable deep copy of the sample inventory. SAMPLE_DISCOVERY_JSON is
+ * `as const` (readonly literal types); a JSON round-trip erases both the
+ * readonly flags and the literal narrowings so patches read naturally.
+ */
+function cloneWith(patch: (json: Record<string, any>) => void): unknown {
+  const json = JSON.parse(JSON.stringify(SAMPLE_DISCOVERY_JSON)) as Record<string, any>;
+  patch(json);
+  return json;
+}
+
 describe('brief validation', () => {
   it('rejects empty name / short vision / missing users', async () => {
     const engine = () => new SinglePassDiscoveryEngine(makeServices());
@@ -53,8 +64,9 @@ describe('structural parsing', () => {
 
 describe('semantic normalization', () => {
   it('detects duplicate keys', () => {
-    const duped = structuredClone(SAMPLE_DISCOVERY_JSON);
-    (duped.modules as unknown[]).push({ key: 'tasks', title: 'Dup', purpose: 'dup' });
+    const duped = cloneWith((json) => {
+      json.modules.push({ key: 'tasks', title: 'Dup', purpose: 'dup' });
+    });
     assert.throws(
       () => normalizeDiscovery(parseDiscoveryResult(duped)),
       (error: unknown) =>
@@ -63,12 +75,14 @@ describe('semantic normalization', () => {
   });
 
   it('detects dangling references (feature->module, api->entity)', () => {
-    const bad1 = structuredClone(SAMPLE_DISCOVERY_JSON);
-    (bad1.features as { moduleKey: string }[])[0].moduleKey = 'ghost';
+    const bad1 = cloneWith((json) => {
+      json.features[0].moduleKey = 'ghost';
+    });
     assert.throws(() => normalizeDiscovery(parseDiscoveryResult(bad1)), /unknown module "ghost"/);
 
-    const bad2 = structuredClone(SAMPLE_DISCOVERY_JSON);
-    (bad2.apis as { requestEntityKey?: string }[])[0].requestEntityKey = 'unicorn';
+    const bad2 = cloneWith((json) => {
+      json.apis[0].requestEntityKey = 'unicorn';
+    });
     assert.throws(
       () => normalizeDiscovery(parseDiscoveryResult(bad2)),
       /unknown entity "unicorn"/,
@@ -76,10 +90,9 @@ describe('semantic normalization', () => {
   });
 
   it('sorts collections deterministically and reports counts', () => {
-    const shuffled = structuredClone(SAMPLE_DISCOVERY_JSON);
-    const modules = [...(shuffled.modules as unknown[])];
-    modules.reverse();
-    (shuffled.modules as unknown[]) = modules;
+    const shuffled = cloneWith((json) => {
+      json.modules.reverse();
+    });
     const inventory = normalizeDiscovery(parseDiscoveryResult(shuffled));
     assert.deepEqual(inventory.sorted.modules.map((m) => m.key), ['projects', 'tasks']);
     assert.equal(inventory.counts.actions, 4);

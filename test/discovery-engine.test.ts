@@ -43,7 +43,10 @@ describe('discovery engine end-to-end (scripted provider)', () => {
     assert.equal(result.baseline.sections[0]?.key, 'task-board/board-columns');
 
     // Cross-reference dependency: API -> ENTITY.
-    const api = await services.store.require(result.baseline.apis[0].artifactId);
+    const firstApi = result.baseline.apis[0];
+    assert.ok(firstApi !== undefined);
+    const api = await services.store.require(firstApi.artifactId);
+    assert.ok(taskEntity !== undefined);
     assert.ok(api.dependencies.includes(taskEntity.artifactId));
 
     // Evidence anchored to the raw AI response.

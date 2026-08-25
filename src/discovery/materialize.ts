@@ -94,8 +94,9 @@ export async function executeMaterializationPlan(
       services.graph.link(parentId, 'CONTAINS', p.id);
     }
 
-    if ((entries[p.type] ?? undefined) !== undefined) {
-      entries[p.type].push({
+    const bucket = entries[p.type];
+    if (bucket !== undefined) {
+      bucket.push({
         key: p.key,
         artifactId: p.id,
         ...(parentId !== undefined && parentId !== '' ? { parentId } : {}),
@@ -106,17 +107,17 @@ export async function executeMaterializationPlan(
 
   return {
     projectId,
-    modules: entries['MODULE'],
-    features: entries['FEATURE'],
-    workflows: entries['WORKFLOW'],
-    pages: entries['PAGE'],
-    sections: entries['SECTION'],
-    actions: entries['ACTION'],
-    rules: entries['RULE'],
-    permissions: entries['PERMISSION'],
-    entities: entries['ENTITY'],
-    apis: entries['API'],
-    integrations: entries['INTEGRATION'],
+    modules: entries['MODULE'] ?? [],
+    features: entries['FEATURE'] ?? [],
+    workflows: entries['WORKFLOW'] ?? [],
+    pages: entries['PAGE'] ?? [],
+    sections: entries['SECTION'] ?? [],
+    actions: entries['ACTION'] ?? [],
+    rules: entries['RULE'] ?? [],
+    permissions: entries['PERMISSION'] ?? [],
+    entities: entries['ENTITY'] ?? [],
+    apis: entries['API'] ?? [],
+    integrations: entries['INTEGRATION'] ?? [],
     totalArtifacts: total,
   };
 }

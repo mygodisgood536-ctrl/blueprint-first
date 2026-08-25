@@ -99,7 +99,7 @@ export function planDiscoveryMaterialization(
     add({ type: 'ENTITY', key: e.key, title: e.name, attributes: { fields: e.fields.map((f) => ({ ...f })) } });
   }
   for (const api of sorted.apis) {
-    const extraDeps: ArtifactPlan['extraDeps'] = [];
+    const extraDeps: { type: ArtifactType; key: string }[] = [];
     if (api.requestEntityKey !== undefined) extraDeps.push({ type: 'ENTITY', key: api.requestEntityKey });
     if (api.responseEntityKey !== undefined) extraDeps.push({ type: 'ENTITY', key: api.responseEntityKey });
     add({

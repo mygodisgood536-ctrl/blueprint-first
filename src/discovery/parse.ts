@@ -38,7 +38,9 @@ export function parseDiscoveryResult(value: unknown): RawDiscoveryResult {
     field: string,
     checkItem: (item: Obj, label: string) => void,
   ): void {
-    const raw = value[field];
+    // Narrowing does not flow into closures; alias the guarded object once.
+    const root = value as Obj;
+    const raw = root[field];
     if (raw === undefined) return; // optional collections default to empty
     if (!Array.isArray(raw)) {
       problems.push(`${field}: must be an array when present.`);
