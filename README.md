@@ -4,10 +4,12 @@ A foundational implementation of the **Blueprint-First AI Software Engineering
 Architecture 2.0** ("nothing advances without evidence"), built incrementally
 along the architecture's additive roadmap.
 
-**Current state: roadmap Level 1a *foundations* are implemented and tested.
-No engine pretends to exist before it exists.** See [`docs/status.md`](docs/status.md)
-for the exact, evidence-backed completion record and
-[`docs/roadmap.md`](docs/roadmap.md) for what comes next.
+**Current state: roadmap Level 1a (Blueprint-First MVP) is implemented and
+tested end-to-end — foundations plus all three engines (Discovery, Design,
+Build) driving one verified chain from a product brief to an implementation
+manifest. No engine pretends to exist before it exists.**
+See [`docs/status.md`](docs/status.md) for the exact, evidence-backed completion
+record and [`docs/roadmap.md`](docs/roadmap.md) for what comes next.
 
 ## What is actually implemented today
 
@@ -25,17 +27,20 @@ for the exact, evidence-backed completion record and
 | Worker → Self → Specialist → Boss flow (fail-fast independence enforcement) | implemented + tested | `src/orchestration/worker-boss.ts` |
 | Staged pipeline runner with honest failure reporting | implemented + tested | `src/orchestration/pipeline.ts` |
 | Traceability queries (lineage gaps located by ID, coverage summary) | implemented + tested | `src/traceability/trace.ts` |
-| Product Discovery Engine / AI Design Studio / AI Build Studio | **scaffolded only** — loudly refuse to run (`EngineNotImplementedError`) | `src/engines/*` |
+| Single-pass Product Discovery Engine | **implemented + tested** — brief validation, AI-routed single pass, structural parse + semantic normalization, deterministic materialization, independent verification, boss decision | `src/discovery/*`, `src/engines/product-discovery-engine.ts` |
+| AI Design Studio → approvable blueprint | **implemented + tested** — deterministic derivation from VERIFIED baselines, evidence-anchored AI rationales, BLUEPRINT aggregation, eleven-dimension verification, real approval gate | `src/design/*`, `src/engines/ai-design-studio.ts` |
+| AI Build Studio implements blueprint | **implemented + tested** — APPROVED-blueprint gate, -IMPL lineage artifacts, COMPONENT implementation manifest with persisted unit plan, evidence-backed AI notes, independent verification | `src/build/*`, `src/engines/ai-build-studio.ts` |
+| Engine contracts & descriptors | implemented — every engine reports name/target-level/status; scaffolding helper remains for future levels | `src/engines/*` |
 | Structured logging with secret redaction; env-driven configuration | implemented + tested | `src/core/logging.ts`, `src/core/config.ts` |
 
 ## Quick start
 
 ```bash
 npm install        # dev tooling only (TypeScript); runtime has zero dependencies
-npm test           # 88 behavior tests via Node's built-in runner
+npm test           # 121 behavior tests / 35 suites via Node's built-in runner
 npm run typecheck  # strict TypeScript gate
 npm run build      # emits dist/
-npm run demo       # end-to-end foundation demo (deterministic, offline)
+npm run demo       # Level-1a end-to-end demo: discovery -> design -> approval -> build
 ```
 
 Requires Node.js >= 24 (native TypeScript execution). No API keys are needed;
@@ -71,9 +76,12 @@ src/ai/            provider port, scripted + OpenAI-compatible providers, router
 src/verification/  dimensions, evidence, verifier port, independence guards
 src/orchestration/ pipeline runner, worker-boss flow
 src/traceability/  lineage status/gaps, traversal, coverage
-src/engines/       scaffolded Level-1a engine contracts (refuse-to-run)
-src/demo/          deterministic end-to-end foundation demo
-test/              Node built-in runner suites (88 tests)
+src/discovery/     single-pass Product Discovery Engine (brief -> verified baseline)
+src/design/        AI Design Studio (verified baseline -> approvable blueprint)
+src/build/         AI Build Studio (approved blueprint -> -IMPL artifacts + manifest)
+src/engines/       engine contracts + descriptors for the Level-1a engines
+src/demo/          deterministic Level-1a end-to-end demo
+test/              Node built-in runner suites (121 tests / 35 suites)
 tools/             spec extraction utility
 docs/              architecture, roadmap, status, decisions, testing, config, spec
 ```

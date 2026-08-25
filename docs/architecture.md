@@ -138,13 +138,55 @@ the same query surface.
   credentials resolved at call time — variable names in errors, never values.
 - Errors (`core/errors.ts`): typed hierarchy with stable machine codes.
 
+## 11. Level-1a engines (Discovery, Design, Build)
+
+Three engines implement the Level-1a product chain on the shared
+`CoreServices` bundle (one allocator/store/graph/evidence log/router per run,
+so IDs stay continuous and provenance uniform across stages):
+
+- **Single-pass Product Discovery Engine** (`src/discovery/*`): brief
+  validation → AI call via router (DISCOVERY) → JSON extraction → structural
+  parsing (collects all problems before failing) → semantic normalization
+  (duplicate keys / dangling references rejected) → deterministic
+  materialization of 14 artifact types with provenance + graph edges →
+  sha256-anchored evidence → independent specialist verification across all
+  eleven dimensions → boss accept/reject → status promotion. Rejected baselines
+  stay in the store marked CHANGES_REQUESTED.
+- **AI Design Studio** (`src/design/*`): refuses anything but a fully VERIFIED
+  baseline; derives page/feature design docs deterministically from stored
+  discovery attributes (layout hints from section content types; interactions
+  joined with their validations; state handling; security notes incl. a derived
+  destructive-action guard; feature→page wiring by module membership);
+  enriches each page design with an AI rationale via the router (DESIGN task)
+  recorded as evidence only; materializes `PAGE-n-DESIGN` / `FEATURE-n-DESIGN`
+  plus a `BLUEPRINT-n` aggregation (DERIVED_FROM + CONTAINS edges); independent
+  specialist verification; boss decision. The **approval gate**
+  (`src/design/approval.ts`, D-010) re-derives approval from stored state —
+  statuses, DERIVED_FROM tracing, two-directional coverage against the
+  certified baseline, approver-origin independence — and records review
+  evidence on APPROVED.
+- **AI Build Studio** (`src/build/*`): refuses anything but an APPROVED
+  blueprint whose listed designs are VERIFIED and trace to VERIFIED discovery
+  origins; derives implementation docs from approved design docs plus api/
+  entity/integration units from the certified inventory (the unit plan is
+  persisted on the manifest); adds AI implementation notes per page via the
+  router (BUILD task) as evidence only; materializes `PAGE-n-IMPL` /
+  `FEATURE-n-IMPL` (DERIVED_FROM to their -DESIGN) aggregated by one COMPONENT
+  implementation manifest (D-011); independent specialist verification; boss
+  decision.
+
+All three share the same verification shape: mechanical dimensions run real
+checks against store/graph; CORRECTNESS/QUALITY/CONFLICTS are honestly
+inconclusive at this level; no origin ever certifies its own work.
+
 ## Deliberately NOT here yet
 
-Discovery Worker Corps, Design/Build/Test departments, Digital Twin, Living
-Blueprint, Operations, self-healing, Engineering Memory, Safe Change
-Intelligence, Continuous Learning Engine, Multi-Perspective Reasoning Council,
-Blueprint Certification/Confidence engines — see `docs/roadmap.md`. Their seams
-exist: engine contracts refuse to run, and the orchestration/verification
-primitives they will need already work under test.
+Multi-worker Discovery Worker Corps, independent-reconstruction bosses, red
+teams, Multi-Perspective Reasoning Council, Live/Master Verification Engines,
+Digital Twin, Living Blueprint, Operations, self-healing, Engineering Memory,
+Safe Change Intelligence, Continuous Learning Engine, Blueprint Certification/
+Confidence engines — see `docs/roadmap.md`. Their seams exist: engine
+descriptors report their level/status, later-level orgs extend the same
+ports/flows under test, and the certification gate already refuses honestly.
 
 

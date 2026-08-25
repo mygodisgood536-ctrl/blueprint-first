@@ -7,13 +7,14 @@ thrown away, and no level claims completeness it does not have.
 ## Current position
 
 ```
-LEVEL 1a  Blueprint-First MVP
-├── FOUNDATIONS (this batch) .................. IMPLEMENTED + TESTED (88 tests)
-├── Single-pass Product Discovery Engine ...... SCAFFOLDED (contract refuses to run)
-├── AI Design Studio producing approvable blueprint ... SCAFFOLDED
-└── AI Build Studio implementing the blueprint ........ SCAFFOLDED
+LEVEL 1a  Blueprint-First MVP ...................... COMPLETE (verified)
+├── FOUNDATIONS .................................... IMPLEMENTED + TESTED
+├── Single-pass Product Discovery Engine ........... IMPLEMENTED + TESTED
+├── AI Design Studio producing approvable blueprint  IMPLEMENTED + TESTED
+│                                                    (incl. real approval gate)
+└── AI Build Studio implementing the blueprint ...... IMPLEMENTED + TESTED
 
-LEVEL 1b  Minimum Viable Discovery Department ....... PLANNED (next)
+LEVEL 1b  Minimum Viable Discovery Department ....... NEXT
 LEVEL 2   Verified Engineering Organization ......... PLANNED
 LEVEL 3   Full Discovery + Simulation + Testing ..... PLANNED
 LEVEL 4   Operations & Observability ................ PLANNED
@@ -35,9 +36,9 @@ LEVEL 5   Permanent Self-Healing Engineering Org .... PLANNED
 | Evidence/verification foundation | `src/verification/*` | implemented, tested |
 | Orchestration foundation | `src/orchestration/*` | implemented, tested |
 | Traceability foundation | `src/traceability/trace.ts` | implemented, tested |
-| Single-pass Product Discovery Engine | `src/engines/product-discovery-engine.ts` | scaffolded — next stage |
-| AI Design Studio → approvable blueprint | `src/engines/ai-design-studio.ts` | scaffolded |
-| AI Build Studio implements blueprint | `src/engines/ai-build-studio.ts` | scaffolded |
+| Single-pass Product Discovery Engine | `src/discovery/*` + `src/engines/product-discovery-engine.ts` | implemented, tested |
+| AI Design Studio → approvable blueprint | `src/design/*` + `src/engines/ai-design-studio.ts` | implemented, tested (incl. approval gate) |
+| AI Build Studio implements blueprint | `src/build/*` + `src/engines/ai-build-studio.ts` | implemented, tested |
 
 ### Level 1b — Minimum Viable Discovery Department (planned next)
 Discovery Worker Corps restricted to Understanding + Structural clusters,

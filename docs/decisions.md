@@ -57,3 +57,48 @@ Lineage gaps are first-class results located by exact ID (spec §T.3);
 certification returns explicit refusal reasons; scaffolded engines throw
 typed errors naming their roadmap level. The demo prints its own gaps and
 non-certifiability rather than a green-washed summary.
+
+## D-009 — Engines derive structure deterministically; AI contributes labeled commentary only
+**Context:** Level 1a needed Discovery→Design→Build engines that can never
+silently contradict a certified baseline, while still exercising the AI seam.
+**Decision:** Each engine derives its output structure deterministically from
+stored artifacts (discovery attributes → design docs → implementation docs +
+unit plan). AI model responses travel through the router per task type
+(DISCOVERY/DESIGN/BUILD) but are recorded as sha256-anchored evidence and,
+for DESIGN/BUILD, stored verbatim as clearly-labeled `aiRationale`/`aiNote`
+commentary that never feeds structure.
+**Consequence:** Same input + same history ⇒ byte-identical artifacts (tested);
+live providers can be swapped in behind the router without touching engine
+logic; deep semantic quality remains honestly inconclusive until later-level
+verification engines exist.
+
+## D-010 — The approval gate is a real gate over stored state
+Blueprint approval re-derives its verdict from the store/graph at call time:
+blueprint VERIFIED, every listed design VERIFIED, every design tracing via a
+DERIVED_FROM edge to a VERIFIED discovery base, coverage matching the certified
+baseline exactly in both directions (no missing pages/features, no invented
+ones), and approver origin ≠ producing worker (identity rule: same id = same
+origin regardless of declared kind). Only then is APPROVED promoted with an
+evidence record; otherwise reasons are returned and nothing changes.
+**Consequence:** Approval cannot be forged by status tampering upstream without
+detection; rejection records follow legal state-machine paths
+(VERIFIED → IN_REVIEW → CHANGES_REQUESTED).
+
+## D-011 — Phase artifacts keep their base type; builds aggregate via a COMPONENT manifest
+`PAGE-n-DESIGN`/`PAGE-n-IMPL` carry type `PAGE` (phase lives in the ID, not a
+new type), keeping the artifact-type set closed. The Build Studio's aggregation
+record is one `COMPONENT` implementation-manifest artifact whose dependencies
+and CONTAINS edges cover the blueprint and every -IMPL artifact, and whose
+attributes persist the deterministic unit plan (page/feature components;
+api/entity/integration units from certified inventory).
+**Consequence:** No schema churn for lineage phases; a single graph node roots
+all build output for traceability queries.
+
+## D-012 — One shared service bundle across all stages
+Every engine receives the same `CoreServices` (store, allocator, graph,
+evidence log, router, logger). IDs stay continuous across stages (the allocator
+never resets mid-chain), provenance is uniform, and traceability queries span
+discovery→design→build without stitching.
+**Consequence:** Stage isolation bugs (private allocators, divergent graphs)
+are structurally impossible; a durable multi-project deployment later swaps
+adapters behind the same bundle.

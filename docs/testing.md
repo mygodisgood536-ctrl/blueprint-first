@@ -8,10 +8,10 @@ native type-stripping — zero test dependencies, no build step required.
 ## Commands
 
 ```bash
-npm test          # full suite (88 tests / 25 suites)
+npm test          # full suite (121 tests / 35 suites)
 npm run typecheck # strict TypeScript gate over src/ + test/
 npm run build     # emits dist/ (compile gate)
-npm run demo      # deterministic end-to-end foundation demo
+npm run demo      # deterministic Level-1a end-to-end demo
 ```
 
 ## What is covered (behavior, not existence)
@@ -32,7 +32,10 @@ npm run demo      # deterministic end-to-end foundation demo
 | worker-boss | step ordering; same-origin specialist/boss refused BEFORE production; rejection rationale surfacing |
 | pipeline | ordered execution, state hand-off, failure stops-or-continues honestly, service sharing |
 | trace | lineage link/gap reporting located by ID; orphan detection; coverage summaries with untraced lists |
-| engines | scaffolded engines loudly refuse to fake work |
+| discovery | brief validation; structural parse collecting all problems; markdown-fence tolerance; duplicate keys / dangling references rejected; deterministic sorting; engine end-to-end with deterministic IDs, graph edges, evidence anchoring, eleven-dimension report; garbage-response failure cleanliness; determinism across runs |
+| design-studio | end-to-end baseline→blueprint with exact -DESIGN lineage IDs and statuses; derivation correctness from certified attributes (layout, interactions+validations, states, security notes, feature→page wiring); evidence-anchored rationales on page designs only; router/provenance records; report honesty (inconclusive dimensions); determinism; refusal on non-VERIFIED baselines; approval gate happy path + self-approval forbidden regardless of declared kind + non-VERIFIED designs rejected + missing-coverage rejection without promotion + explicit CHANGES_REQUESTED rejections; mechanical COUNT/COVERAGE/IDENTITY/EVIDENCE_OF_WORK checks incl. fail paths |
+| build-studio | end-to-end approved-blueprint→implementations with exact -IMPL lineage IDs, COMPONENT manifest aggregation, persisted unit plan (page/feature components; api/entity/integration units); evidence-backed AI notes on page impls only; report honesty; determinism; gate refusals (not APPROVED, unknown blueprint, demoted design) producing nothing; mechanical COUNT/COVERAGE/IDENTITY/EVIDENCE_OF_WORK checks incl. fail paths |
+| engines | every Level-1a engine contract reports implemented status with name/target level |
 
 ## Testing principles
 

@@ -48,6 +48,11 @@ export interface CertificationDecision {
  *   2. The verifier's declared kind is 'verifier' or 'system'.
  *   3. The report covers all eleven verification dimensions.
  *   4. No dimension carries a 'fail' verdict.
+ *   5. No dimension carries an 'inconclusive' verdict - an inconclusive is
+ *      explicitly NOT evidence ("nothing advances without evidence"), so
+ *      certification demands conclusive evidence on every dimension. Work
+ *      with deferred inconclusives can still be ACCEPTED by its boss; it
+ *      just cannot be CERTIFIED yet.
  *
  * NOTE: this is the Level-1a gate. Full Blueprint Completeness Certification
  * (Level 2) will extend this with blueprint-specific completeness rules on
@@ -74,6 +79,14 @@ export function certificationDecision(
   }
   if (summary.hasBlockingFailure) {
     reasons.push(`Report contains ${summary.failed} failing finding(s).`);
+  }
+  if (summary.inconclusive > 0) {
+    const inconclusiveDims = report.findings
+      .filter((f) => f.verdict === 'inconclusive')
+      .map((f) => f.dimension);
+    reasons.push(
+      `Report contains ${summary.inconclusive} inconclusive finding(s) (${inconclusiveDims.join(', ')}); certification requires conclusive evidence across all eleven dimensions.`,
+    );
   }
   return { certifiable: reasons.length === 0, reasons };
 }

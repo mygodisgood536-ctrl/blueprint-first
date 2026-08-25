@@ -2,7 +2,7 @@
 
 Per-stage record of objective, work, evidence, problems, and completion state.
 No stage is marked complete without the evidence shown here.
-Last updated: 2026-08-24.
+Last updated: 2026-08-25.
 
 ---
 
@@ -87,5 +87,107 @@ Product Discovery Engine on the Understanding + Structural worker clusters,
 using ScriptedProvider-backed workers through the real verification chain,
 producing PAGE/FEATURE artifacts with full provenance into the Knowledge
 Graph; then AI Design Studio blueprint generation + approval flow.
+
+---
+
+## Level 1a Phases 1–3 — Engines: Discovery, Design, Build
+
+**Objective:** Implement the complete Level-1a product chain on the verified
+foundations: single-pass Product Discovery Engine, AI Design Studio producing
+an approvable blueprint (with a real approval gate), and AI Build Studio
+implementing the approved blueprint — all through the real verification
+machinery with no self-certification and honest inconclusives.
+
+**Work performed**
+- Phase 1 (previous batch, commit 2894d04): single-pass discovery engine —
+  brief validation, AI-routed single pass, structural parsing collecting ALL
+  problems, semantic normalization rejecting duplicate keys/dangling refs,
+  deterministic materialization into 14 artifact types, sha256-anchored
+  evidence, independent specialist verification across all eleven dimensions,
+  boss accept/reject with status promotion.
+- Continuation repair (commit f63623f): the Phase-1 batch had been committed
+  WITHOUT passing `npm run typecheck` (strict-mode regressions in
+  discovery/parse.ts closure narrowing, materialize-plan.ts readonly
+  extraDeps typing, materialize.ts undefined-indexed baseline buckets, plus
+  unsafe indexed access in two committed test files). All fixed; typecheck
+  restored to clean; behavior unchanged.
+- Phase 2 (commit 713813d): AI Design Studio — VERIFIED-baseline-only entry;
+  deterministic derivation of page/feature design docs from certified
+  attributes (layout hints, interactions+validations joins, state handling,
+  security notes incl. a derived destructive-action guard, feature→page
+  wiring); evidence-anchored AI rationales via the router on page designs
+  only; BLUEPRINT-n aggregation with DERIVED_FROM+CONTAINS lineage; independent
+  specialist verification; boss decision; approval gate enforcing exact
+  two-directional coverage and approver-origin independence (identity rule
+  regardless of declared kind); legal-path rejection records. Also fixed four
+  strict-mode compile errors in the in-progress design module (readonly doc
+  mutation → immutable enrichment; readonly feature wiring rebuilt) and
+  hardened the gate's self-approval check to the origin-identity rule.
+
+- Phase 3 (commit bc6e834): AI Build Studio — APPROVED-blueprint-only gate
+  re-checking blueprint status, listed-design statuses and their VERIFIED
+  discovery origins; deterministic implementation docs plus a unit plan
+  persisted on a COMPONENT implementation manifest; -IMPL artifacts with
+  DERIVED_FROM edges; evidence-backed AI notes per page; independent
+  specialist verification; boss decision; scaffold contract replaced by the
+  implemented one.
+- Demo rewritten (`src/demo/main.ts`) to drive the full chain end-to-end —
+  discovery → design → approval → build over the durable JSON store with the
+  labeled deterministic ScriptedProvider — then honest reporting: lineage
+  complete through `-IMPL`, remaining gaps printed by exact ID, certification
+  refused with explicit reasons.
+- Documentation refreshed: README, roadmap current-position (Level 1a marked
+  COMPLETE), architecture §11 for the engines, testing matrix, decisions
+  D-009…D-012, this record.
+
+**Files/components** — `src/discovery/*` (repaired), `src/design/*` (9 files),
+`src/build/*` (5 files), `src/engines/{product-discovery-engine,
+ai-design-studio,ai-build-studio}.ts` contracts, `src/demo/main.ts` (rewritten),
+`test/helpers/test-services.ts` (DISCOVERY/DESIGN/BUILD scripted rules +
+fixtures), tests `discovery.test.ts` / `discovery-engine.test.ts` (repaired),
+`design-studio.test.ts`, `build-studio.test.ts`, `engines.test.ts`.
+
+**Tests performed (final runs)**
+- `npm test` → **121/121 pass, 0 fail (35 suites)** including the engine tests
+  added across the three phases.
+- `npm run typecheck` → clean exit (strict mode, noUncheckedIndexedAccess).
+- `npm run build` → clean emit to `dist/` (verified after the demo rewrite).
+- `npm run demo` → full chain accepted/approved/accepted deterministically;
+  lineage gaps honestly reported as `PAGE-n-TEST/-DEPLOY/-OPS`; certification
+  refused with explicit reasons.
+
+**Problems discovered during continuation (all fixed)**
+1. Committed Phase-1 code failed strict typecheck (see above) — repaired in
+   f63623f without weakening any check or test.
+2. Design module mutated readonly doc fields/arrays — restructured to
+   immutable enrichment (behavior preserved and covered by tests).
+3. Approval gate allowed same-origin approval when the worker id was relabeled
+   as 'human' — tightened to the origin-identity rule with a regression test
+   looping over all actor kinds.
+4. Build studio initially computed but did not persist its unit plan — units
+   are now stored on the manifest attributes and asserted by tests.
+5. A transient build-module defect (stale identifier reference breaking module
+   load in two suites) was caught by the test run and removed.
+
+**Remaining limitations / not done (explicit)**
+- CORRECTNESS/QUALITY/CONFLICTS remain honestly inconclusive everywhere;
+  boss-rejection paths are exercised mechanically (synthetic drafts), not via
+  forced live failures inside the engines.
+- OpenAI-compatible HTTP client still never exercised against a live endpoint
+  (no credentials); ScriptedProvider carries demos/tests and is labeled so.
+- Evidence log persistence remains memory-only; artifact metadata `confidence`
+  is deferred to Level 1b scoring; sections/actions/states/validations stay
+  DRAFT after discovery promotion (only baseline anchors are promoted) —
+  deliberate at this level, revisited with Level 1b promotion semantics.
+
+**Current completion state:** Level 1a (Blueprint-First MVP) COMPLETE and
+verified end-to-end.
+
+**Next authorized stage:** Level 1b — Minimum Viable Discovery Department:
+Discovery Worker Corps restricted to Understanding + Structural clusters,
+self-verification, specialist verification, lightweight independent-
+reconstruction Discovery Boss, core artifact reconstruction, confidence
+scoring on artifact metadata — extending the existing worker-boss flow,
+evidence log, verifier port and allocator rather than replacing anything.
 
 ---

@@ -126,6 +126,20 @@ describe('independence enforcement', () => {
     );
     assert.equal(certificationDecision(goodFull, producer).certifiable, true);
 
+    // An 'inconclusive' dimension is NOT evidence: certification is refused
+    // even when coverage is complete and nothing fails (bosses may still
+    // ACCEPT such work; certification demands conclusive evidence).
+    const inconclusiveFull = reportWith(
+      VERIFICATION_DIMENSIONS.map((dimension) => ({
+        dimension,
+        verdict: (dimension === 'CORRECTNESS' ? 'inconclusive' : 'pass') as 'inconclusive' | 'pass',
+        detail: 'x',
+      })),
+    );
+    const inconclusiveDecision = certificationDecision(inconclusiveFull, producer);
+    assert.equal(inconclusiveDecision.certifiable, false);
+    assert.ok(inconclusiveDecision.reasons.some((r) => /inconclusive finding\(s\) \(CORRECTNESS\)/.test(r)));
+
     // Self-certification is refused even with a perfect report.
     const selfReport: VerificationReport = { ...goodFull, verifier: producer };
     const selfDecision = certificationDecision(selfReport, producer);
