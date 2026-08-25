@@ -14,8 +14,14 @@ LEVEL 1a  Blueprint-First MVP ...................... COMPLETE (verified)
 │                                                    (incl. real approval gate)
 └── AI Build Studio implementing the blueprint ...... IMPLEMENTED + TESTED
 
-LEVEL 1b  Minimum Viable Discovery Department ....... NEXT
-LEVEL 2   Verified Engineering Organization ......... PLANNED
+LEVEL 1b  Minimum Viable Discovery Department ...... COMPLETE (verified)
+├── Worker Corps Clusters A+B (Understanding+Structural)  IMPLEMENTED + TESTED
+├── Self-verification + one Specialist per cluster .. IMPLEMENTED + TESTED
+├── Lightweight Boss: independent reconstruction of   IMPLEMENTED + TESTED
+│   pages/features/workflows into FINDING deltas
+└── Artifact metadata confidence scoring ............ IMPLEMENTED + TESTED
+
+LEVEL 2   Verified Engineering Organization ......... NEXT
 LEVEL 3   Full Discovery + Simulation + Testing ..... PLANNED
 LEVEL 4   Operations & Observability ................ PLANNED
 LEVEL 5   Permanent Self-Healing Engineering Org .... PLANNED
@@ -40,12 +46,18 @@ LEVEL 5   Permanent Self-Healing Engineering Org .... PLANNED
 | AI Design Studio → approvable blueprint | `src/design/*` + `src/engines/ai-design-studio.ts` | implemented, tested (incl. approval gate) |
 | AI Build Studio implements blueprint | `src/build/*` + `src/engines/ai-build-studio.ts` | implemented, tested |
 
-### Level 1b — Minimum Viable Discovery Department (planned next)
-Discovery Worker Corps restricted to Understanding + Structural clusters,
-self-verification, specialist verification, lightweight Discovery Boss
-(independent reconstruction), core artifact reconstruction, stable artifact
-IDs (done), artifact metadata (mostly done — add confidence scoring).
-Builds directly on: worker-boss flow, evidence log, verifier port, allocator.
+### Level 1b — Minimum Viable Discovery Department (COMPLETE)
+Worker Corps restricted to Clusters A (Understanding) and B (Structural),
+§0.14 self-verification surfacing uncertainties as evidence, one independent
+Specialist Verifier per cluster running mechanical eleven-dimension checks,
+a lightweight Discovery Boss performing §0.15 independent reconstruction of
+the core artifact types (pages, features, workflows) from the raw brief plus
+platform knowledge only — diffed at artifact level into addressable `FINDING-n`
+artifacts — and artifact-metadata confidence scoring (§0.13) with
+`discovered_by` pass labels across the full inventory including trivial leaves.
+Builds directly on: worker-boss independence guards, evidence log, verifier
+port, allocator, and the entire Level-1a parse/normalize pipeline (reused via
+cluster combination — zero duplicated validators).
 
 ### Level 2 — Verified Engineering Organization (planned)
 Multi-Perspective Reasoning Council; Live + Master Verification Engines;

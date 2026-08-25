@@ -27,6 +27,7 @@ record and [`docs/roadmap.md`](docs/roadmap.md) for what comes next.
 | Worker → Self → Specialist → Boss flow (fail-fast independence enforcement) | implemented + tested | `src/orchestration/worker-boss.ts` |
 | Staged pipeline runner with honest failure reporting | implemented + tested | `src/orchestration/pipeline.ts` |
 | Traceability queries (lineage gaps located by ID, coverage summary) | implemented + tested | `src/traceability/trace.ts` |
+| Discovery Department (Level 1b) | **implemented + tested** — Worker Corps Clusters A+B with self-verification, one independent specialist per cluster, lightweight boss reconstructing pages/features/workflows from the brief only, artifact-level FINDING deltas, confidence scoring | `src/discovery/department/*`, `src/engines/discovery-department.ts` |
 | Single-pass Product Discovery Engine | **implemented + tested** — brief validation, AI-routed single pass, structural parse + semantic normalization, deterministic materialization, independent verification, boss decision | `src/discovery/*`, `src/engines/product-discovery-engine.ts` |
 | AI Design Studio → approvable blueprint | **implemented + tested** — deterministic derivation from VERIFIED baselines, evidence-anchored AI rationales, BLUEPRINT aggregation, eleven-dimension verification, real approval gate | `src/design/*`, `src/engines/ai-design-studio.ts` |
 | AI Build Studio implements blueprint | **implemented + tested** — APPROVED-blueprint gate, -IMPL lineage artifacts, COMPONENT implementation manifest with persisted unit plan, evidence-backed AI notes, independent verification | `src/build/*`, `src/engines/ai-build-studio.ts` |
@@ -37,10 +38,10 @@ record and [`docs/roadmap.md`](docs/roadmap.md) for what comes next.
 
 ```bash
 npm install        # dev tooling only (TypeScript); runtime has zero dependencies
-npm test           # 121 behavior tests / 35 suites via Node's built-in runner
+npm test           # 131 behavior tests / 39 suites via Node's built-in runner
 npm run typecheck  # strict TypeScript gate
 npm run build      # emits dist/
-npm run demo       # Level-1a end-to-end demo: discovery -> design -> approval -> build
+npm run demo       # Level-1b end-to-end demo: discovery dept -> design -> approval -> build
 ```
 
 Requires Node.js >= 24 (native TypeScript execution). No API keys are needed;
@@ -77,11 +78,13 @@ src/verification/  dimensions, evidence, verifier port, independence guards
 src/orchestration/ pipeline runner, worker-boss flow
 src/traceability/  lineage status/gaps, traversal, coverage
 src/discovery/     single-pass Product Discovery Engine (brief -> verified baseline)
+src/discovery/department/  Level-1b Discovery Department (Clusters A+B, specialists,
+                   independent-reconstruction boss, confidence scoring)
 src/design/        AI Design Studio (verified baseline -> approvable blueprint)
 src/build/         AI Build Studio (approved blueprint -> -IMPL artifacts + manifest)
-src/engines/       engine contracts + descriptors for the Level-1a engines
-src/demo/          deterministic Level-1a end-to-end demo
-test/              Node built-in runner suites (121 tests / 35 suites)
+src/engines/       engine contracts + descriptors for the Level-1a/1b engines
+src/demo/          deterministic Level-1b end-to-end demo
+test/              Node built-in runner suites (131 tests / 39 suites)
 tools/             spec extraction utility
 docs/              architecture, roadmap, status, decisions, testing, config, spec
 ```

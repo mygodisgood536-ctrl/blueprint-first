@@ -8,10 +8,10 @@ native type-stripping — zero test dependencies, no build step required.
 ## Commands
 
 ```bash
-npm test          # full suite (121 tests / 35 suites)
+npm test          # full suite (131 tests / 39 suites)
 npm run typecheck # strict TypeScript gate over src/ + test/
 npm run build     # emits dist/ (compile gate)
-npm run demo      # deterministic Level-1a end-to-end demo
+npm run demo      # deterministic Level-1b end-to-end demo
 ```
 
 ## What is covered (behavior, not existence)
@@ -35,7 +35,8 @@ npm run demo      # deterministic Level-1a end-to-end demo
 | discovery | brief validation; structural parse collecting all problems; markdown-fence tolerance; duplicate keys / dangling references rejected; deterministic sorting; engine end-to-end with deterministic IDs, graph edges, evidence anchoring, eleven-dimension report; garbage-response failure cleanliness; determinism across runs |
 | design-studio | end-to-end baseline→blueprint with exact -DESIGN lineage IDs and statuses; derivation correctness from certified attributes (layout, interactions+validations, states, security notes, feature→page wiring); evidence-anchored rationales on page designs only; router/provenance records; report honesty (inconclusive dimensions); determinism; refusal on non-VERIFIED baselines; approval gate happy path + self-approval forbidden regardless of declared kind + non-VERIFIED designs rejected + missing-coverage rejection without promotion + explicit CHANGES_REQUESTED rejections; mechanical COUNT/COVERAGE/IDENTITY/EVIDENCE_OF_WORK checks incl. fail paths |
 | build-studio | end-to-end approved-blueprint→implementations with exact -IMPL lineage IDs, COMPONENT manifest aggregation, persisted unit plan (page/feature components; api/entity/integration units); evidence-backed AI notes on page impls only; report honesty; determinism; gate refusals (not APPROVED, unknown blueprint, demoted design) producing nothing; mechanical COUNT/COVERAGE/IDENTITY/EVIDENCE_OF_WORK checks incl. fail paths |
-| engines | every Level-1a engine contract reports implemented status with name/target level |
+| engines | every Level-1a/1b engine contract reports implemented status with name/target level |
+| discovery-department | end-to-end accepted run: full inventory (incl. trivial leaves) VERIFIED by the boss, §0.13 confidence stamped everywhere with parent-inheritance for leaves, discovered_by labels per pass, 6 evidence records incl. self-check + diff inspections, uncertainties surfaced, eleven-dimension specialist reports without fails, router selections routed by markers; determinism of ids+confidence; boss missing-delta AND extra-delta rejections with addressable FINDING artifacts and CHANGES_REQUESTED retention; title-correlation acceptance; fail-closed on boss/brief name contradiction; failure attribution to Cluster A identity drift / Cluster B garbage / duplicate keys with empty store; descriptor contract |
 
 ## Testing principles
 

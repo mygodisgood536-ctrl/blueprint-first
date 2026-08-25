@@ -1,12 +1,15 @@
 /**
- * Level-1a end-to-end demo - what EXISTS vs what does not.
+ * Level-1b end-to-end demo - what EXISTS vs what does not.
  *
  * One deterministic, fully offline run drives the complete implemented chain
  * through the real verification machinery:
  *
  *   Product Understanding Brief
- *     -> Single-pass Product Discovery Engine    VERIFIED baseline into
- *        (AI call via router, scripted)           store + Knowledge Graph
+ *     -> Discovery Department (Level 1b)         VERIFIED baseline into
+ *        Clusters A+B -> self-checks ->            store + Knowledge Graph,
+ *        specialists -> independent boss           confidence scored (§0.13)
+ *        reconstruction on pages/features/
+ *        workflows
  *     -> AI Design Studio                        BLUEPRINT-n + PAGE/FEATURE-n-
  *        (deterministic derivation)               DESIGN with evidence anchors
  *     -> Blueprint approval gate                 real gate over stored state;
@@ -30,7 +33,12 @@ import { MemoryEvidenceLog } from '../verification/evidence.ts';
 import { AiRouter } from '../ai/router.ts';
 import { ScriptedProvider } from '../ai/scripted-provider.ts';
 import type { CoreServices } from '../core/services.ts';
-import { SinglePassDiscoveryEngine } from '../discovery/engine.ts';
+import {
+  DiscoveryDepartment,
+  UNDERSTANDING_MARKER,
+  STRUCTURAL_MARKER,
+} from '../discovery/department/engine.ts';
+import { BOSS_MARKER } from '../discovery/department/boss.ts';
 import { AiDesignStudio } from '../design/studio.ts';
 import { approveBlueprint } from '../design/approval.ts';
 import { AiBuildStudio } from '../build/studio.ts';
@@ -121,9 +129,30 @@ async function main(): Promise<number> {
   const evidence = new MemoryEvidenceLog();
   const scripted = new ScriptedProvider({
     rules: [
+      // Level-1b department calls are routed by prompt markers and MUST
+      // precede the generic DISCOVERY rule (they also carry taskType DISCOVERY).
       {
-        match: (req) => req.taskType === 'DISCOVERY',
+        match: (req) => req.messages.some((m) => m.content.includes(UNDERSTANDING_MARKER)),
+        respond: () =>
+          JSON.stringify({
+            product: DISCOVERY_JSON.product,
+            domainProfile: 'Lightweight team-productivity domain; small collaborative teams.',
+            selfCheck: { uncertainties: ['Whether recurring tasks are in scope.'] },
+          }),
+      },
+      {
+        match: (req) => req.messages.some((m) => m.content.includes(STRUCTURAL_MARKER)),
         respond: () => JSON.stringify(DISCOVERY_JSON),
+      },
+      {
+        match: (req) => req.messages.some((m) => m.content.includes(BOSS_MARKER)),
+        respond: () =>
+          JSON.stringify({
+            productName: DISCOVERY_JSON.product.name,
+            features: DISCOVERY_JSON.features.map((f) => ({ key: f.key, title: f.title })),
+            workflows: DISCOVERY_JSON.workflows.map((w) => ({ key: w.key, title: w.title })),
+            pages: DISCOVERY_JSON.pages.map((p) => ({ key: p.key, title: p.title })),
+          }),
       },
       {
         match: (req) => req.taskType === 'DESIGN',
@@ -150,9 +179,9 @@ async function main(): Promise<number> {
     logger,
   };
 
-  // --- Stage 1: discovery ----------------------------------------------------
-  console.log('Stage 1/4 - Product Discovery Engine');
-  const discovery = await new SinglePassDiscoveryEngine(services).discover({
+  // --- Stage 1: discovery department -----------------------------------------
+  console.log('Stage 1/4 - Discovery Department (Clusters A+B + independent boss)');
+  const discovery = await new DiscoveryDepartment(services).discover({
     name: DISCOVERY_JSON.product.name,
     vision: 'A lightweight task tracker that small teams can adopt in minutes.',
     targetUsers: ['small teams'],
@@ -162,7 +191,10 @@ async function main(): Promise<number> {
     return 1;
   }
   const baseline = discovery.baseline;
-  console.log(`  accepted: ${baseline.totalArtifacts} artifacts, project ${baseline.projectId}`);
+  console.log(
+    `  accepted: ${baseline.totalArtifacts} artifacts, project ${baseline.projectId}, ` +
+      `${discovery.diff?.deltas.length ?? 0} reconstruction deltas`,
+  );
 
   // --- Stage 2: design ---------------------------------------------------------
   console.log('Stage 2/4 - AI Design Studio');
@@ -223,7 +255,7 @@ async function main(): Promise<number> {
   console.log(
     `Certifiable now? ${cert?.certifiable === true ? 'yes' : `no (${cert?.reasons.join('; ')})`}`,
   );
-  console.log('Level-1a demo finished.');
+  console.log('Level-1b demo finished.');
   return 0;
 }
 

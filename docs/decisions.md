@@ -102,3 +102,33 @@ discovery→design→build without stitching.
 **Consequence:** Stage isolation bugs (private allocators, divergent graphs)
 are structurally impossible; a durable multi-project deployment later swaps
 adapters behind the same bundle.
+
+## D-013 — The department wraps the single-pass pipeline; validators are never duplicated
+Cluster B's inventory is validated by COMBINING both cluster responses into
+the exact Level-1a `RawDiscoveryResult` shape and running the existing
+structural parser + semantic normalizer. The Level-1a engine stays unchanged
+alongside the department; both produce the same baseline contract.
+**Consequence:** Every future referential rule added to normalization applies
+to the department automatically; the org chart evolves without forking
+validation logic.
+
+## D-014 — Boss independence is structural, not conventional
+The Discovery Boss's reconstruction call receives the raw brief plus a fixed
+foundational-knowledge preamble and NOTHING else — worker output cannot reach
+it because the engine never passes it (§0.15 strengthened). Its diff is
+artifact-level: each delta becomes an addressable `FINDING-n` artifact;
+matching tolerates key/title/token correlation deterministically so naming
+differences do not fabricate deltas, while any true gap or invention rejects.
+A boss expectation contradicting the brief itself fails closed.
+**Consequence:** Confident-but-wrong work is rejectable by construction;
+rejections persist their findings for the correction cycle.
+
+## D-015 — Confidence is mechanical corroboration, never narrative
+Spec §0.13 confidence is computed by a deterministic formula over defined
+signals (descriptive completeness, downstream references, resolved cross-
+refs, specialist pass), clamped below certainty; trivial leaves inherit the
+parent score per §0.13's inheritance allowance; every artifact also carries a
+`discovered_by` pass label. Certification still refuses on inconclusive
+dimensions — confidence informs later-level engines, it is not evidence.
+**Consequence:** Scores are reproducible and auditable; live models cannot
+inflate them by asserting confidence in prose.

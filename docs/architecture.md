@@ -179,14 +179,54 @@ All three share the same verification shape: mechanical dimensions run real
 checks against store/graph; CORRECTNESS/QUALITY/CONFLICTS are honestly
 inconclusive at this level; no origin ever certifies its own work.
 
+## 12. Discovery Department (Level 1b)
+
+The single-pass engine remains valid; Level 1b adds the spec's organization
+around it (`src/discovery/department/`):
+
+- **Cluster A — Understanding Worker (DW-A1)**: one AI call from the brief
+  alone producing the product statement + optional domain profile. The parser
+  structurally forbids structural inventories here — understanding and
+  enumeration are different jobs.
+- **Cluster B — Structural Worker**: one AI call taking the brief PLUS
+  Cluster A's specialist-cleared understanding (a certified upstream baseline,
+  legitimate authoritative input under §0.15's general principle) and emitting
+  every enumerated collection. Validation reuses the ENTIRE Level-1a
+  parse+normalize pipeline via combination — zero duplicated validators.
+- **Self-verification (§0.14)**: each worker response carries a selfCheck
+  block; surfaced uncertainties are recorded as inspection evidence and in the
+  run result — never silently dropped.
+- **Specialist Verifiers** (understanding-specialist-01 / structural-specialist-
+  01): mechanical eleven-dimension checks over their cluster draft — identity
+  fidelity to the brief, vision-token traceability, actionability floor,
+  orphan-module coverage, empty-workflow consistency, sha256 evidence anchors.
+  CORRECTNESS/QUALITY/CONFLICTS stay honestly inconclusive.
+- **Discovery Boss**: reconstructs its expectation of pages/features/workflows
+  from the raw brief plus the platform's foundational-knowledge preamble ONLY
+  (structurally guaranteed: the reconstruction call receives nothing else),
+  then diffs at artifact level. Every delta becomes an addressable `FINDING-n`
+  artifact (missing = expected-but-absent, extra = worker-invented); matching
+  tolerates key/title/token correlation deterministically. Zero deltas accepts;
+  anything else rejects with the inventory retained CHANGES_REQUESTED and the
+  findings persisting for the correction cycle. Boss-vs-brief name mismatch
+  fails closed.
+- **Promotion + metadata**: after the gate, confidence scores (§0.13) are
+  computed by a deterministic completeness/corroboration formula — leaves
+  inherit their parent page's score — and stamped together with `discovered_by`
+  pass labels across the FULL inventory, now including states/validations that
+  previously stayed DRAFT.
+
 ## Deliberately NOT here yet
 
-Multi-worker Discovery Worker Corps, independent-reconstruction bosses, red
-teams, Multi-Perspective Reasoning Council, Live/Master Verification Engines,
+Multi-worker Discovery Worker Corps beyond Clusters A+B (Behavioral, Non-
+Functional, Red Team clusters), the Discovery Auditor, Domain/Category/Genome
+understanding workers beyond the Level-1b DW-A1 stand-in, Multi-Perspective
+Reasoning Council, Live/Master Verification Engines,
 Digital Twin, Living Blueprint, Operations, self-healing, Engineering Memory,
-Safe Change Intelligence, Continuous Learning Engine, Blueprint Certification/
-Confidence engines — see `docs/roadmap.md`. Their seams exist: engine
-descriptors report their level/status, later-level orgs extend the same
-ports/flows under test, and the certification gate already refuses honestly.
+Safe Change Intelligence, Continuous Learning Engine, Blueprint Completeness
+Certification/Confidence engines — see `docs/roadmap.md`. Their seams exist:
+the department's cluster/boss structure extends role-by-role, later-level
+orgs reuse the same ports/flows under test, and the certification gate
+already refuses honestly.
 
 

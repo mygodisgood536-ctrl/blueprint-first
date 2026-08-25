@@ -191,3 +191,73 @@ scoring on artifact metadata — extending the existing worker-boss flow,
 evidence log, verifier port and allocator rather than replacing anything.
 
 ---
+
+## Level 1b — Minimum Viable Discovery Department
+
+**Objective:** Replace discovery's single reasoning path with the spec's
+organization — Worker Corps Clusters A+B, §0.14 self-verification, one
+independent Specialist Verifier per cluster, and a lightweight Discovery Boss
+performing §0.15 independent reconstruction on core artifact types
+(pages/features/workflows) only — plus §0.13 confidence scoring, extending the
+existing seams without duplicating anything.
+
+**Work performed**
+- Cluster A Understanding Worker (DW-A1): brief-only call producing the product
+  statement + optional domain profile; parser forbids structural inventories in
+  A's response (understanding vs enumeration are different jobs).
+- Cluster B Structural Worker: brief + certified understanding → full
+  inventory; validated by combining both responses into the Level-1a schema and
+  reusing the entire parse+normalize pipeline (D-013).
+- §0.14 self-verification blocks on both clusters; uncertainties recorded as
+  inspection evidence and returned in the run result.
+- Per-cluster Specialist Verifiers: mechanical eleven-dimension reports —
+  identity fidelity to the brief, vision-token traceability, actionability
+  floor, orphan-module coverage, empty-workflow consistency, sha256 evidence.
+- Discovery Boss: reconstruction from brief + foundational-knowledge preamble
+  ONLY; deterministic key/title/token correlation; every delta materialized as
+  an addressable FINDING-n artifact; zero-delta accept else reject with
+  inventory retained CHANGES_REQUESTED; boss-vs-brief mismatch fails closed.
+- §0.13 confidence: deterministic formula clamped below certainty; leaves
+  inherit parent page score; stamped with discovered_by pass labels across the
+  FULL inventory including states/validations (previously left DRAFT).
+- Demo Stage 1 switched to the department; docs refreshed (README, roadmap,
+  architecture §12, testing matrix, decisions D-013…D-015).
+
+**Files/components** — `src/discovery/department/{types,confidence,parse,
+specialists,boss,engine}.ts` (new), `src/engines/discovery-department.ts`
+(new contract), `src/core/artifact.ts` (+confidence), demo + test harness +
+`test/discovery-department.test.ts`, doc set.
+
+**Tests performed (final runs)**
+- `npm test` → **131/131 pass, 0 fail (39 suites)** — 10 new department tests.
+- `npm run typecheck` → clean; `npm run build` → clean; `npm run demo` →
+  department chain accepted with 0 deltas, design/approval/build accepted,
+  honest certification refusal intact.
+
+**Problems found during the phase (all fixed)**
+1. planDiscoveryMaterialization initially fed `.sorted` instead of the
+   NormalizedInventory (type error caught by typecheck).
+2. Understanding specialist omitted a dimension (10/11) — CONSISTENCY added.
+3. extractJson for Cluster B threw outside the attribution boundary — moved
+   inside so garbage is attributed to Cluster B.
+4. Tests corrected to expect the SYMMETRIC diff (missing boss item ⇒ also an
+   extra worker item when inventories differ) and content-based finding lookup.
+
+**Remaining limitations / not done (explicit)**
+- Clusters C/D/E (Behavioral/Non-Functional/Red Team), the Discovery Auditor,
+  and true Domain/Category/Genome workers are later-level work; DW-A1 stands in
+  for the wider Understanding cluster.
+- Confidence signals are structural only at this level; genome/DNA-based
+  corroboration arrives with later-level foundational engines.
+- OpenAI-compatible client remains offline-unverified (no credentials).
+
+**Current completion state:** Level 1b COMPLETE and verified.
+
+**Next authorized stage:** Level 2 — Verified Engineering Organization:
+Multi-Perspective Reasoning Council, Live/Master Verification Engines,
+product-grade Requirements Traceability Engine, Blueprint Completeness
+Certification + Blueprint Confidence extending `certificationDecision()`,
+full eleven-dimension coverage per artifact class, Definition-of-Complete
+state machine extending `status.ts`.
+
+---
