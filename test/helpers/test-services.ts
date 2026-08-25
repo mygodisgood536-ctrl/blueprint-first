@@ -86,8 +86,28 @@ export function discoveryResponse(): string {
   return JSON.stringify(SAMPLE_DISCOVERY_JSON);
 }
 
+/** Deterministic DESIGN-task response: labeled commentary, never structure. */
+export function designRationale(): string {
+  return (
+    'Scripted design rationale (deterministic): layout preserves the certified ' +
+    'section order; every interaction maps one-to-one to a discovered action and ' +
+    'carries its validations; states are honored verbatim from the baseline.'
+  );
+}
+
+/** Deterministic BUILD-task response: implementation notes, never structure. */
+export function buildImplementationNote(): string {
+  return (
+    'Scripted implementation note (deterministic): component skeleton derives ' +
+    'from the approved design doc; actions bind to discovered outcomes; ' +
+    'validation messages surface inline next to their triggers.'
+  );
+}
+
 export interface ServicesOptions {
   discoveryResponse?: () => string;
+  designResponse?: () => string;
+  buildResponse?: () => string;
 }
 
 export function makeServices(options: ServicesOptions = {}): CoreServices & {
@@ -99,6 +119,14 @@ export function makeServices(options: ServicesOptions = {}): CoreServices & {
       {
         match: (req) => req.taskType === 'DISCOVERY',
         respond: options.discoveryResponse ?? discoveryResponse,
+      },
+      {
+        match: (req) => req.taskType === 'DESIGN',
+        respond: options.designResponse ?? designRationale,
+      },
+      {
+        match: (req) => req.taskType === 'BUILD',
+        respond: options.buildResponse ?? buildImplementationNote,
       },
     ],
   });
@@ -112,4 +140,21 @@ export function makeServices(options: ServicesOptions = {}): CoreServices & {
     router,
     scripted,
   };
+}
+
+/**
+ * Runs single-pass discovery against the sample inventory and asserts the
+ * baseline was accepted, returning the wired services for follow-on stages.
+ */
+export async function discoverSample(
+  brief: { name: string; vision: string; targetUsers: string[] },
+  options: ServicesOptions = {},
+): Promise<{ services: ReturnType<typeof makeServices>; baseline: import('../../src/discovery/materialize.ts').DiscoveryBaseline }> {
+  const { SinglePassDiscoveryEngine } = await import('../../src/discovery/engine.ts');
+  const services = makeServices(options);
+  const result = await new SinglePassDiscoveryEngine(services).discover(brief);
+  if (result.status !== 'accepted' || result.baseline === undefined) {
+    throw new Error(`Fixture discovery run did not succeed: ${result.status}`);
+  }
+  return { services, baseline: result.baseline };
 }

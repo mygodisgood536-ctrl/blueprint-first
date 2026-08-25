@@ -1,46 +1,19 @@
 /**
- * AI Design Studio contract (roadmap Level 1a).
+ * AI Design Studio - Level 1a contract.
  *
- * Input: discovery output. Output: an approvable blueprint - page designs
- * decomposed into sections/content/actions/states with validation and rules,
- * each as traceable artifacts feeding the Knowledge Graph.
- *
- * STATUS: scaffolded (next implementation stage after the foundation batch).
+ * IMPLEMENTED by src/design/studio.ts (AiDesignStudio): consumes a VERIFIED
+ * discovery baseline, derives an approvable blueprint deterministically from
+ * stored artifacts, enriches with evidence-anchored AI rationales, verifies
+ * independently, and exposes the approval gate (src/design/approval.ts).
  */
 
-import { ScaffoldedEngine } from './scaffold.ts';
 import type { EngineDescriptor } from './scaffold.ts';
-import type { DiscoveryOutput } from './product-discovery-engine.ts';
-
-export interface BlueprintSection {
-  title: string;
-  contentType: string;
-  actions: readonly string[];
-}
-
-export interface BlueprintPage {
-  title: string;
-  purpose: string;
-  sections: readonly BlueprintSection[];
-}
-
-export interface BlueprintOutput {
-  productName: string;
-  pages: readonly BlueprintPage[];
-  assumptionsCarriedForward: readonly string[];
-}
+import type { DiscoveryBaseline } from '../discovery/materialize.ts';
+import type { DesignRunResult } from '../design/studio.ts';
 
 export interface AiDesignStudio {
   readonly descriptor: EngineDescriptor;
-  designBlueprint(discovery: DiscoveryOutput): Promise<BlueprintOutput>;
+  designFromBaseline(baseline: DiscoveryBaseline): Promise<DesignRunResult>;
 }
 
-export class ScaffoldedAiDesignStudio extends ScaffoldedEngine implements AiDesignStudio {
-  constructor() {
-    super({ name: 'AiDesignStudio', targetLevel: '1a', status: 'scaffolded' });
-  }
-
-  async designBlueprint(_discovery: DiscoveryOutput): Promise<BlueprintOutput> {
-    this.refuse('designBlueprint');
-  }
-}
+export type { DesignRunResult } from '../design/studio.ts';
