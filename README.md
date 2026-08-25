@@ -4,12 +4,14 @@ A foundational implementation of the **Blueprint-First AI Software Engineering
 Architecture 2.0** ("nothing advances without evidence"), built incrementally
 along the architecture's additive roadmap.
 
-**Current state: roadmap Level 1a (Blueprint-First MVP) is implemented and
-tested end-to-end — foundations plus all three engines (Discovery, Design,
-Build) driving one verified chain from a product brief to an implementation
-manifest. No engine pretends to exist before it exists.**
-See [`docs/status.md`](docs/status.md) for the exact, evidence-backed completion
-record and [`docs/roadmap.md`](docs/roadmap.md) for what comes next.
+**Current state: roadmap Levels 1a + 1b + 2 are implemented and tested — the
+platform now runs brief → Discovery Department → Design → Approval → Build →
+Council → Master Verification → Blueprint Completeness Certification with
+per-dimension Confidence, product-grade Traceability, and a governed
+Definition-of-Complete machine over every artifact. No engine pretends to
+exist before it exists.** See [`docs/status.md`](docs/status.md) for the exact,
+evidence-backed completion record and
+[`docs/roadmap.md`](docs/roadmap.md) for what comes next.
 
 ## What is actually implemented today
 
@@ -28,6 +30,11 @@ record and [`docs/roadmap.md`](docs/roadmap.md) for what comes next.
 | Staged pipeline runner with honest failure reporting | implemented + tested | `src/orchestration/pipeline.ts` |
 | Traceability queries (lineage gaps located by ID, coverage summary) | implemented + tested | `src/traceability/trace.ts` |
 | Discovery Department (Level 1b) | **implemented + tested** — Worker Corps Clusters A+B with self-verification, one independent specialist per cluster, lightweight boss reconstructing pages/features/workflows from the brief only, artifact-level FINDING deltas, confidence scoring | `src/discovery/department/*`, `src/engines/discovery-department.ts` |
+| Multi-Perspective Reasoning Council (Level 2) | **implemented + tested** — five independent persona seats through separate router calls, sha256-anchored per-seat evidence, deterministic reconcile-not-average verdicts | `src/council/council.ts` |
+| Master / Live Verification Engines (Level 2) | **implemented + tested** — set-wide independent audit over the existing verifier port with per-dimension rollup, class-coverage audit, council-resolved judgment dimensions; Live re-engagement with REGRESSED/RESOLVED/DEGRADED drift detection | `src/verification/master-engine.ts`, `live-engine.ts`, `class-coverage.ts`, `closure-verifier.ts` |
+| Requirements Traceability Engine (Level 2) | **implemented + tested** — product-grade matrix over FEATURE/PAGE lineage: missing links by ID, orphaned phase artifacts, unsupported transitions, evidence-counted rows | `src/traceability/trace.ts` |
+| Blueprint Completeness Certification + Confidence (Level 2) | **implemented + tested** — formal mechanical event (approval re-derived, master passed, council endorsed, trace complete, closure ≥ BOSS-VERIFIED) stamping CERTIFIED DoC gates; explainable per-dimension confidence with unproduced dimensions reported null | `src/design/certification.ts` |
+| Definition-of-Complete state machine (§0.17, Level 2) | **implemented + tested** — 13-state linear gated machine with governor entitlement checks, provenance-recorded gates, inference from Levels 1a/1b history, downgrade-aware derivation | `src/core/doc.ts` |
 | Single-pass Product Discovery Engine | **implemented + tested** — brief validation, AI-routed single pass, structural parse + semantic normalization, deterministic materialization, independent verification, boss decision | `src/discovery/*`, `src/engines/product-discovery-engine.ts` |
 | AI Design Studio → approvable blueprint | **implemented + tested** — deterministic derivation from VERIFIED baselines, evidence-anchored AI rationales, BLUEPRINT aggregation, eleven-dimension verification, real approval gate | `src/design/*`, `src/engines/ai-design-studio.ts` |
 | AI Build Studio implements blueprint | **implemented + tested** — APPROVED-blueprint gate, -IMPL lineage artifacts, COMPONENT implementation manifest with persisted unit plan, evidence-backed AI notes, independent verification | `src/build/*`, `src/engines/ai-build-studio.ts` |
@@ -38,10 +45,11 @@ record and [`docs/roadmap.md`](docs/roadmap.md) for what comes next.
 
 ```bash
 npm install        # dev tooling only (TypeScript); runtime has zero dependencies
-npm test           # 131 behavior tests / 39 suites via Node's built-in runner
+npm test           # 155 behavior tests / 44 suites via Node's built-in runner
 npm run typecheck  # strict TypeScript gate
 npm run build      # emits dist/
-npm run demo       # Level-1b end-to-end demo: discovery dept -> design -> approval -> build
+npm run demo       # Level-2 end-to-end demo: discovery dept -> design -> approval
+                   # -> build -> council -> master verification -> CERTIFICATION
 ```
 
 Requires Node.js >= 24 (native TypeScript execution). No API keys are needed;
@@ -80,11 +88,13 @@ src/traceability/  lineage status/gaps, traversal, coverage
 src/discovery/     single-pass Product Discovery Engine (brief -> verified baseline)
 src/discovery/department/  Level-1b Discovery Department (Clusters A+B, specialists,
                    independent-reconstruction boss, confidence scoring)
-src/design/        AI Design Studio (verified baseline -> approvable blueprint)
+src/council/       Level-2 Multi-Perspective Reasoning Council
+src/design/        AI Design Studio + Level-2 Blueprint Completeness Certification
+                   & Confidence
 src/build/         AI Build Studio (approved blueprint -> -IMPL artifacts + manifest)
 src/engines/       engine contracts + descriptors for the Level-1a/1b engines
-src/demo/          deterministic Level-1b end-to-end demo
-test/              Node built-in runner suites (131 tests / 39 suites)
+src/demo/          deterministic Level-2 end-to-end demo
+test/              Node built-in runner suites (155 tests / 44 suites)
 tools/             spec extraction utility
 docs/              architecture, roadmap, status, decisions, testing, config, spec
 ```

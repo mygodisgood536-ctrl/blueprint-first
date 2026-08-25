@@ -261,3 +261,90 @@ full eleven-dimension coverage per artifact class, Definition-of-Complete
 state machine extending `status.ts`.
 
 ---
+## Level 2 — Verified Engineering Organization
+
+**Objective:** Stand up the organization's independent judgment layer on top
+of the Level-1a/1b seams: Multi-Perspective Reasoning Council, Master + Live
+Verification Engines, product-grade Requirements Traceability, Blueprint
+Completeness Certification, per-dimension Blueprint Confidence, class-level
+eleven-dimension coverage enforcement, and the §0.17 Definition-of-Complete
+machine.
+
+**Work performed**
+- Council (src/council/council.ts): five seats (PM / Architect / UX / Security /
+  QA), each an independent router call with persona+lens and a structured
+  verdict; per-seat sha256 evidence; deterministic reconcile-not-average.
+- Master Verification Engine: set-wide Independent Audit composing any roster
+  of Verifier implementations; per-dimension rollup; class-coverage audit;
+  council resolution SUPERSEDES placeholder inconclusives with cited seat
+  evidence (endorsed) or turns objections into blocking fails. Independence is
+  asserted against every producer before work runs.
+- Live Verification Engine: re-engages the roster against current stored state
+  and diffs per dimension vs the prior master run (REGRESSED/RESOLVED/DEGRADED).
+- Requirements Traceability (trace.ts extension): FEATURE/PAGE lineage matrix
+  with missing links by ID, orphaned phase artifacts, unsupported transitions
+  (phase without DERIVED_FROM edge), and per-phase evidence counts.
+- Blueprint Completeness Certification (design/certification.ts): formal event
+  re-derived from stored state - approval holds, master passed w/ coverage,
+  council endorsed for this id, trace complete, closure ≥ BOSS-VERIFIED, no
+  contradictions - stamping CERTIFIED DoC gates + review evidence on success.
+- Blueprint Confidence (§0.23): per-dimension scores citing mechanical or
+  seat-evidence bases; unproduced dimensions are null and excluded from the
+  aggregate; stored on the blueprint, separate from certification.
+- Definition of Complete (core/doc.ts): 13-state linear machine with governor
+  entitlement checks, provenance-recorded gates ('doc-gate' action), inference
+  from Levels 1a/1b history, downgrade-aware derivation; terminal protected.
+- Evidence completeness: feature designs/impls now anchor their deterministic
+  derivation content so every -DESIGN/-IMPL carries inspectable evidence.
+- Demo Stage 5 added (council → master → certification + confidence output);
+  docs refreshed across README/roadmap/architecture/testing/decisions/status.
+
+**Files/components** — src/core/{doc,errors,artifact}.ts,
+src/council/council.ts, src/verification/{class-coverage,master-engine,
+live-engine,closure-verifier}.ts, src/traceability/trace.ts,
+src/design/certification.ts, src/design/studio.ts + src/build/studio.ts
+(evidence additions), src/demo/main.ts, test/helpers/{test-services,
+level2-fixture}.ts, tests {doc,council,master-live,blueprint-certification}.
+test.ts.
+
+**Tests performed (final runs)**
+- `npm test` → **155/155 pass, 0 fail (44 suites)** — 24 new Level-2 tests.
+- `npm run typecheck` → clean; `npm run build` → clean emit.
+- `npm run demo` → five-stage chain ends **BLUEPRINT CERTIFIED** (13 artifacts
+  stamped CERTIFIED, council endorsed, master passed, trace complete),
+  confidence aggregate printed with excluded unproduced dimensions listed.
+
+**Problems found during the phase (all fixed)**
+1. Trace matrix base-filter mangled canonical IDs (FEATURE-0001 flagged as
+   orphan) — replaced with parseArtifactId-based phase detection.
+2. Matrix originally demanded lineage chains for classes that never flow
+   through design/build — scoped to FEATURE/PAGE lineage classes; other
+   classes audited through their designs (documented in-module).
+3. Feature designs/impls lacked evidence records — engines now anchor their
+   deterministic derivation content (sha256) for every -DESIGN/-IMPL.
+4. Approval-gate re-check could not run post-build (predates -IMPL scope);
+   certification now performs the post-build equivalent inline.
+5. Master fold-in appended conclusive findings while leaving placeholder
+   inconclusives and under-counted rollup — resolution now supersedes
+   placeholders and rollup reflects superseded verdicts exactly.
+6. inferDocState ignored post-promotion downgrades — derived positions cap at
+   DISCOVERED unless lifecycle status remains VERIFIED/APPROVED.
+
+**Remaining limitations / not done (explicit)**
+- Contradiction Engine, Red Team, Discovery Auditor, Clusters C/D/E, Digital
+  Twin remain later-level; certification treats their register as empty by
+  construction and says so.
+- Live verification covers STORED state only; deployed-runtime verification
+  is Level 4 scope of the same engine.
+- Accessibility/scalability/test/documentation confidence dimensions are null
+  until their producing departments exist - reported, never faked.
+- OpenAI-compatible client still offline-unverified (no credentials).
+
+**Current completion state:** Level 2 COMPLETE and verified.
+
+**Next authorized stage:** Level 3 — Full Discovery Department + Simulated &
+Tested Before Ship: remaining discovery clusters, Recursive Page Expansion,
+Industry Comparison/Negative-Space engines, Discovery Red Team + Auditor,
+Design-to-Code traceability product-grade, AI Acceptance Testing department.
+
+---

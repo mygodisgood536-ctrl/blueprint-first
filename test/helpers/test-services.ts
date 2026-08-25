@@ -133,6 +133,11 @@ export function departmentBossResponse(): string {
   });
 }
 
+/** Deterministic council response: clean endorsement from any seat. */
+export function councilEndorseResponse(): string {
+  return JSON.stringify({ stance: 'endorse', findings: [], uncertainties: [] });
+}
+
 export interface ServicesOptions {
   discoveryResponse?: () => string;
   designResponse?: () => string;
@@ -143,6 +148,8 @@ export interface ServicesOptions {
     structural?: () => string;
     boss?: () => string;
   };
+  /** Level-2 council override (routed by the [COUNCIL] marker). */
+  councilResponse?: () => string;
 }
 
 export function makeServices(options: ServicesOptions = {}): CoreServices & {
@@ -168,6 +175,10 @@ export function makeServices(options: ServicesOptions = {}): CoreServices & {
       {
         match: (req) => req.messages.some((m) => m.content.includes('[DISCOVERY:BOSS-RECONSTRUCTION]')),
         respond: department.boss ?? departmentBossResponse,
+      },
+      {
+        match: (req) => req.messages.some((m) => m.content.includes('[COUNCIL]')),
+        respond: options.councilResponse ?? councilEndorseResponse,
       },
       {
         match: (req) => req.taskType === 'DISCOVERY',

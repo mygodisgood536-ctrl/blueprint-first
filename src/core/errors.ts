@@ -109,6 +109,16 @@ export class SelfCertificationError extends BlueprintError {
   }
 }
 
+/**
+ * Raised when a Definition-of-Complete (§0.17) gate transition is illegal:
+ * skipping states, moving backwards, or advancing without the governing gate.
+ */
+export class DocStateError extends BlueprintError {
+  constructor(message: string) {
+    super('DOC_STATE', message);
+  }
+}
+
 /** Raised when a scaffolded engine (planned for a later roadmap level) is invoked. */
 export class EngineNotImplementedError extends BlueprintError {
   constructor(engineName: string, targetLevel: string) {

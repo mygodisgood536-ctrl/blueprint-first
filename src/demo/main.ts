@@ -42,8 +42,11 @@ import { BOSS_MARKER } from '../discovery/department/boss.ts';
 import { AiDesignStudio } from '../design/studio.ts';
 import { approveBlueprint } from '../design/approval.ts';
 import { AiBuildStudio } from '../build/studio.ts';
-import { lineageStatus, coverageSummary } from '../traceability/trace.ts';
-import { certificationDecision } from '../verification/independence.ts';
+import { ReasoningCouncil } from '../council/council.ts';
+import { MasterVerificationEngine } from '../verification/master-engine.ts';
+import { createClosureVerifier } from '../verification/closure-verifier.ts';
+import { certifyBlueprintCompleteness } from '../design/certification.ts';
+import { lineageStatus, coverageSummary, requirementsTraceability } from '../traceability/trace.ts';
 
 /** Deterministic demo inventory (exactly what the discovery engine parses). */
 const DISCOVERY_JSON = {
@@ -166,6 +169,15 @@ async function main(): Promise<number> {
           'Scripted implementation note (deterministic): component skeleton derives ' +
           'from the approved design doc; validations surface next to their triggers.',
       },
+      {
+        match: (req) => req.messages.some((m) => m.content.includes('[COUNCIL]')),
+        respond: () =>
+          JSON.stringify({
+            stance: 'endorse',
+            findings: [],
+            uncertainties: [],
+          }),
+      },
     ],
   });
   const router = new AiRouter({ logger });
@@ -180,7 +192,7 @@ async function main(): Promise<number> {
   };
 
   // --- Stage 1: discovery department -----------------------------------------
-  console.log('Stage 1/4 - Discovery Department (Clusters A+B + independent boss)');
+  console.log('Stage 1/5 - Discovery Department (Clusters A+B + independent boss)');
   const discovery = await new DiscoveryDepartment(services).discover({
     name: DISCOVERY_JSON.product.name,
     vision: 'A lightweight task tracker that small teams can adopt in minutes.',
@@ -197,7 +209,7 @@ async function main(): Promise<number> {
   );
 
   // --- Stage 2: design ---------------------------------------------------------
-  console.log('Stage 2/4 - AI Design Studio');
+  console.log('Stage 2/5 - AI Design Studio');
   const design = await new AiDesignStudio(services).designFromBaseline(baseline);
   if (design.status !== 'accepted' || design.blueprintId === undefined) {
     logger.warn('demo.design.failed', { status: design.status, code: design.error?.code });
@@ -206,7 +218,7 @@ async function main(): Promise<number> {
   console.log(`  accepted: blueprint ${design.blueprintId} with ${design.artifactIds.length - 1} designs`);
 
   // --- Stage 3: approval gate ----------------------------------------------------
-  console.log('Stage 3/4 - Blueprint approval gate');
+  console.log('Stage 3/5 - Blueprint approval gate');
   const approval = await approveBlueprint(services, design.blueprintId);
   if (!approval.approved) {
     logger.warn('demo.approval.rejected', { reasons: approval.reasons });
@@ -215,7 +227,7 @@ async function main(): Promise<number> {
   console.log(`  approved by product-owner-01, evidence ${approval.evidenceId ?? '?'}`);
 
   // --- Stage 4: build ------------------------------------------------------------
-  console.log('Stage 4/4 - AI Build Studio');
+  console.log('Stage 4/5 - AI Build Studio');
   const build = await new AiBuildStudio(services).buildFromBlueprint(design.blueprintId);
   if (build.status !== 'accepted') {
     logger.warn('demo.build.failed', { status: build.status, code: build.error?.code });
@@ -223,15 +235,62 @@ async function main(): Promise<number> {
   }
   console.log(`  accepted: manifest ${build.manifestId} aggregating ${build.artifactIds.length - 1} implementations`);
 
-  // --- Honest reporting: lineage gaps stay visible, certification stays refused.
+  // --- Stage 5: verified engineering organization ------------------------------
+  console.log('Stage 5/5 - Verified Engineering Organization');
+  const closureIds = [
+    ...new Set<string>([
+      design.blueprintId,
+      ...design.artifactIds,
+      ...build.artifactIds,
+      ...discovery.artifactIds,
+    ]),
+  ];
+  const council = await new ReasoningCouncil(services).deliberate({
+    subject: design.blueprintId,
+    question: 'Is this blueprint complete, coherent and safe to certify?',
+    contextSummary:
+      `Certified inventory of ${baseline.totalArtifacts} artifacts; ` +
+      `${design.artifactIds.length - 1} designs; ` +
+      `${build.artifactIds.length - 1} implementations; all VERIFIED.`,
+    artifactIds: [design.blueprintId],
+  });
+  const master = await new MasterVerificationEngine(services).verifyArtifactSet({
+    artifactIds: closureIds,
+    artifactClass: 'blueprint',
+    verifiers: [{ name: 'closure-verifier', verifier: createClosureVerifier() }],
+    producerActors: [
+      { kind: 'ai', id: 'understanding-worker-01' },
+      { kind: 'ai', id: 'structural-worker-01' },
+      { kind: 'ai', id: 'design-worker-01' },
+      { kind: 'ai', id: 'build-worker-01' },
+    ],
+    deliberation: council,
+  });
+  const trace = await requirementsTraceability(
+    services.store,
+    services.graph,
+    services.evidence,
+    baseline.projectId,
+  );
+  console.log(
+    `  council=${council.verdict}, masterPassed=${master.masterPassed}, traceComplete=${trace.complete}`,
+  );
+
+  const certification = await certifyBlueprintCompleteness(services, {
+    blueprintId: design.blueprintId,
+    master,
+    council,
+    trace,
+  });
+  if (!certification.certified) {
+    logger.warn('demo.certification.refused', { reasons: certification.reasons });
+  }
+
+  // --- Honest reporting: lineage, certification and confidence as facts ------
   const firstPageId = baseline.pages[0]?.artifactId ?? 'PAGE-0001';
   const lineage = await lineageStatus(store, firstPageId);
   const coverage = coverageSummary(graph, [baseline.projectId]);
   const stats = graph.stats();
-  const cert =
-    build.report !== undefined
-      ? certificationDecision(build.report, { kind: 'ai', id: 'build-worker-01' })
-      : null;
 
   logger.info('demo.result', {
     discoveryArtifacts: baseline.totalArtifacts,
@@ -245,18 +304,33 @@ async function main(): Promise<number> {
     providerCalls: scripted.calls.length,
     evidenceCount: (await evidence.all()).length,
     storeKind: store.kind,
-    certificationDecision: cert,
+    councilVerdict: council.verdict,
+    certification: {
+      certified: certification.certified,
+      stamped: certification.stampedArtifactIds.length,
+      confidenceAggregate: certification.confidence?.aggregateScore ?? null,
+    },
   });
 
   console.log('');
   console.log(`IDs: ${discovery.artifactIds.length} discovered -> ${design.artifactIds.join(' ')} -> ${build.artifactIds.join(' ')}`);
   console.log(`Lineage of ${firstPageId}: complete through ${lineage.completeThrough}`);
-  console.log(`Lineage gaps (expected at Level 1a): ${lineage.gaps.map((g) => g.id).join(', ') || 'none'}`);
+  console.log(`Lineage gaps (beyond implemented levels): ${lineage.gaps.map((g) => g.id).join(', ') || 'none'}`);
+  if (certification.certified) {
+    console.log(
+      `BLUEPRINT CERTIFIED: ${certification.stampedArtifactIds.length} artifact(s) at DoC CERTIFIED; evidence ${certification.evidenceId ?? '?'}`,
+    );
+  } else {
+    console.log(`CERTIFICATION REFUSED: ${certification.reasons.join('; ')}`);
+  }
+  const unproduced =
+    certification.confidence?.dimensions.filter((d) => d.score === null).map((d) => d.id) ?? [];
   console.log(
-    `Certifiable now? ${cert?.certifiable === true ? 'yes' : `no (${cert?.reasons.join('; ')})`}`,
+    `Blueprint confidence: ${certification.confidence?.aggregateScore ?? 'n/a'} ` +
+      `(unproduced dimensions excluded: ${unproduced.join(', ') || 'none'})`,
   );
-  console.log('Level-1b demo finished.');
-  return 0;
+  console.log('Level-2 demo finished.');
+  return certification.certified ? 0 : 1;
 }
 
 main()

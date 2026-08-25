@@ -31,6 +31,7 @@ export type ProvenanceAction =
   | 'created'
   | 'updated'
   | 'status-changed'
+  | 'doc-gate'
   | 'verified'
   | 'approved'
   | 'rejected';

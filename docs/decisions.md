@@ -132,3 +132,19 @@ parent score per §0.13's inheritance allowance; every artifact also carries a
 dimensions — confidence informs later-level engines, it is not evidence.
 **Consequence:** Scores are reproducible and auditable; live models cannot
 inflate them by asserting confidence in prose.
+
+## D-016 — Council independence lives in the execution path
+Each seat is a separate router call with its own persona/lens/output contract and receives only the subject - never another seat's reasoning. Seats are individually attributable (provider/model/sha256 evidence). The orchestrator reconciles deterministically (objection→objected, concern→endorsed-with-concerns, else endorsed) instead of averaging; objections block certification.
+**Consequence:** perspective diversity cannot be faked by relabeling one prompt; live providers plug in without touching the council.
+
+## D-017 — Master resolution supersedes placeholder inconclusives
+Specialists honestly emit inconclusive CORRECTNESS/QUALITY/CONFLICTS placeholders. When a council deliberation endorses a subject, the master engine REPLACES those per-dimension placeholders with conclusive passes whose detail cites the seat evidence ids; objections become blocking fails citing findings. Without deliberation the placeholders remain.
+**Consequence:** INCONCLUSIVE ≠ PASS still holds everywhere; judgment dimensions gain real evidence only through genuinely independent multi-perspective reasoning.
+
+## D-018 — Blueprint Completeness Certification is a formal mechanical event
+Preconditions are re-derived from stored state at call time: blueprint APPROVED, listed designs VERIFIED tracing to VERIFIED bases, master run passed with full class coverage, council endorsed for THIS blueprint id, requirements traceability matrix complete (no missing links/orphans/unsupported transitions, evidence-backed rows), every closure artifact ≥ BOSS-VERIFIED on §0.17. Success stamps CERTIFIED through governed doc gates + review evidence; failure returns reasons by ID and changes nothing.
+**Consequence:** existence/count/boss-acceptance can never certify alone; the event is replayable and auditable.
+
+## D-019 — Confidence is explainable corroboration; certification is boolean governance
+Blueprint Confidence scores each §0.23 dimension from mechanical signals or cited council-seat evidence; subjects that do not exist yet at this level score null and are EXCLUDED from the aggregate rather than faked. Confidence never substitutes for verification or certification, and certification never consumes aggregate confidence as a precondition.
+**Consequence:** a high score cannot hide an uninspected dimension; the two mechanisms answer different questions and stay structurally separate.

@@ -211,6 +211,19 @@ export class AiBuildStudio {
           producer: { kind: 'ai', id: n.providerId, modelId: n.modelId },
         });
       }
+      // Feature implementations are code-derived; anchor the exact derived
+      // content so every -IMPL artifact carries inspectable evidence.
+      for (const doc of featureDesigns) {
+        const implId = `${doc.featureArtifactId}-IMPL`;
+        const digest = createHash('sha256').update(JSON.stringify(doc)).digest('hex');
+        await services.evidence.append({
+          kind: 'inspection',
+          summary: `FEATURE-IMPL deterministic derivation (${doc.featureKey}) sha256=${digest.slice(0, 16)}…`,
+          artifactIds: [implId],
+          payloadRef: `sha256:${digest}`,
+          producer: workerActor,
+        });
+      }
 
       // --- independent specialist verification + boss decision --------------
       const specialist = createBuildSpecialist(services);

@@ -127,6 +127,20 @@ export class AiDesignStudio {
           producer: { kind: 'ai', id: r.providerId, modelId: r.modelId },
         });
       }
+      // Feature designs are code-derived; their evidence anchors the exact
+      // deterministic content they were materialized from.
+      for (const fd of docs.featureDesigns) {
+        const designId = `${fd.featureArtifactId}-DESIGN`;
+        const sha = rationaleHashes[designId];
+        if (sha === undefined) continue;
+        await services.evidence.append({
+          kind: 'inspection',
+          summary: `FEATURE-DESIGN derivation (${fd.featureKey}) sha256=${sha.slice(0, 16)}…`,
+          artifactIds: [designId],
+          payloadRef: `sha256:${sha}`,
+          producer: workerActor,
+        });
+      }
 
       // --- independent specialist verification + boss decision --------------
       const specialist = createDesignSpecialist(services);
