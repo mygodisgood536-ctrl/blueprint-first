@@ -104,18 +104,71 @@ export function buildImplementationNote(): string {
   );
 }
 
+// --- Level 1b Discovery Department scripted responses -----------------------
+
+export function departmentUnderstandingResponse(): string {
+  return JSON.stringify({
+    product: {
+      name: SAMPLE_DISCOVERY_JSON.product.name,
+      summary: SAMPLE_DISCOVERY_JSON.product.summary,
+    },
+    domainProfile: 'Lightweight team-productivity domain; small collaborative teams.',
+    selfCheck: { uncertainties: ['Whether recurring tasks are in scope.'] },
+  });
+}
+
+export function departmentStructuralResponse(): string {
+  const rest = JSON.parse(JSON.stringify(SAMPLE_DISCOVERY_JSON)) as Record<string, unknown>;
+  delete rest['product'];
+  return JSON.stringify({ ...rest, selfCheck: { uncertainties: [] } });
+}
+
+/** The boss's default expectation aligns exactly with the sample inventory. */
+export function departmentBossResponse(): string {
+  return JSON.stringify({
+    productName: SAMPLE_DISCOVERY_JSON.product.name,
+    features: SAMPLE_DISCOVERY_JSON.features.map((f) => ({ key: f.key, title: f.title })),
+    workflows: SAMPLE_DISCOVERY_JSON.workflows.map((w) => ({ key: w.key, title: w.title })),
+    pages: SAMPLE_DISCOVERY_JSON.pages.map((p) => ({ key: p.key, title: p.title })),
+  });
+}
+
 export interface ServicesOptions {
   discoveryResponse?: () => string;
   designResponse?: () => string;
   buildResponse?: () => string;
+  /** Level-1b department overrides (routed by prompt markers). */
+  departmentResponses?: {
+    understanding?: () => string;
+    structural?: () => string;
+    boss?: () => string;
+  };
 }
 
 export function makeServices(options: ServicesOptions = {}): CoreServices & {
   router: AiRouter;
   scripted: ScriptedProvider;
 } {
+  const department = options.departmentResponses ?? {};
   const scripted = new ScriptedProvider({
     rules: [
+      // Department rules MUST precede the generic DISCOVERY rule: cluster and
+      // boss calls also carry taskType DISCOVERY/REVIEW but are routed by
+      // their prompt markers.
+      {
+        match: (req) =>
+          req.messages.some((m) => m.content.includes('[DISCOVERY:CLUSTER-A]')),
+        respond: department.understanding ?? departmentUnderstandingResponse,
+      },
+      {
+        match: (req) =>
+          req.messages.some((m) => m.content.includes('[DISCOVERY:CLUSTER-B]')),
+        respond: department.structural ?? departmentStructuralResponse,
+      },
+      {
+        match: (req) => req.messages.some((m) => m.content.includes('[DISCOVERY:BOSS-RECONSTRUCTION]')),
+        respond: department.boss ?? departmentBossResponse,
+      },
       {
         match: (req) => req.taskType === 'DISCOVERY',
         respond: options.discoveryResponse ?? discoveryResponse,

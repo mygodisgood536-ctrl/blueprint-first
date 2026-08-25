@@ -58,6 +58,14 @@ export interface Artifact {
   tags: readonly string[];
   attributes: Readonly<Record<string, unknown>>;
   provenance: readonly ProvenanceEntry[];
+  /**
+   * Discovery confidence score (spec §0.13): a number in [0,1] expressing how
+   * strongly the discovery organization supports this artifact. Optional -
+   * artifacts produced before Level 1b (and non-discovery stages until their
+   * departments adopt scoring) may omit it. States/validations may inherit
+   * their parent's score rather than carrying their own.
+   */
+  confidence?: number;
 }
 
 export interface CreateArtifactInput {
@@ -71,6 +79,8 @@ export interface CreateArtifactInput {
   dependencies?: readonly string[];
   tags?: readonly string[];
   attributes?: Record<string, unknown>;
+  /** Discovery confidence score in [0,1]; omitted when not yet scored. */
+  confidence?: number;
 }
 
 export function createArtifact(input: CreateArtifactInput): Artifact {
@@ -87,6 +97,14 @@ export function createArtifact(input: CreateArtifactInput): Artifact {
   const deps = input.dependencies ?? [];
   if (deps.includes(input.id)) {
     throw new InvalidArtifactIdError(`Artifact ${input.id} cannot depend on itself.`);
+  }
+  if (
+    input.confidence !== undefined &&
+    (!Number.isFinite(input.confidence) || input.confidence < 0 || input.confidence > 1)
+  ) {
+    throw new InvalidArtifactIdError(
+      `Artifact ${input.id} confidence must be a finite number in [0,1], got ${String(input.confidence)}.`,
+    );
   }
   const at = input.at ?? new Date().toISOString();
   return Object.freeze({
@@ -106,6 +124,7 @@ export function createArtifact(input: CreateArtifactInput): Artifact {
     provenance: Object.freeze([
       Object.freeze({ at, action: 'created', actor: input.actor }),
     ]),
+    ...(input.confidence !== undefined ? { confidence: input.confidence } : {}),
   });
 }
 
