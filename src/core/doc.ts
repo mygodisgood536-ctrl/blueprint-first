@@ -42,6 +42,7 @@ export const DOC_STATES = [
   'CODE-VERIFIED',
   'TESTED',
   'TEST-VERIFIED',
+  'DEPLOYED-VERIFIED',
   'CERTIFIED COMPLETE',
 ] as const;
 
@@ -61,6 +62,7 @@ export const DOC_GATE_GOVERNORS: Readonly<Record<DocState, string>> = {
   'CODE-VERIFIED': 'code-verifier',
   TESTED: 'test-worker',
   'TEST-VERIFIED': 'test-verifier',
+  'DEPLOYED-VERIFIED': 'deploy-verifier',
   'CERTIFIED COMPLETE': 'certification-engine',
 };
 
@@ -101,6 +103,7 @@ export function assertDocGovernor(to: DocState, actor: Actor): void {
   const judgmentRoles = new Set([
     'self-check', 'specialist-verifier', 'boss', 'certification-engine',
     'master-verification-engine', 'code-verifier', 'test-verifier',
+    'deploy-verifier',
   ]);
   const actorIsJudgment =
     actor.kind === 'verifier' || actor.kind === 'system';
@@ -237,6 +240,7 @@ const WALKER_ACTORS: Readonly<Record<string, Actor>> = {
   'code-verifier': { kind: 'system', id: 'code-verifier-engine' },
   'test-worker': { kind: 'ai', id: 'test-worker-01' },
   'test-verifier': { kind: 'verifier', id: 'test-specialist-01' },
+  'deploy-verifier': { kind: 'verifier', id: 'deploy-specialist-01' },
 };
 
 export interface DocWalkResult {
