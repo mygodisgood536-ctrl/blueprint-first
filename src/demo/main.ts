@@ -42,6 +42,7 @@ import { BOSS_MARKER } from '../discovery/department/boss.ts';
 import { AiDesignStudio } from '../design/studio.ts';
 import { approveBlueprint } from '../design/approval.ts';
 import { AiBuildStudio } from '../build/studio.ts';
+import { runTestDepartment } from '../testing/department.ts';
 import { ReasoningCouncil } from '../council/council.ts';
 import { MasterVerificationEngine } from '../verification/master-engine.ts';
 import { createClosureVerifier } from '../verification/closure-verifier.ts';
@@ -192,7 +193,7 @@ async function main(): Promise<number> {
   };
 
   // --- Stage 1: discovery department -----------------------------------------
-  console.log('Stage 1/5 - Discovery Department (Clusters A+B + independent boss)');
+  console.log('Stage 1/6 - Discovery Department (Clusters A+B + independent boss)');
   const discovery = await new DiscoveryDepartment(services).discover({
     name: DISCOVERY_JSON.product.name,
     vision: 'A lightweight task tracker that small teams can adopt in minutes.',
@@ -209,7 +210,7 @@ async function main(): Promise<number> {
   );
 
   // --- Stage 2: design ---------------------------------------------------------
-  console.log('Stage 2/5 - AI Design Studio');
+  console.log('Stage 2/6 - AI Design Studio');
   const design = await new AiDesignStudio(services).designFromBaseline(baseline);
   if (design.status !== 'accepted' || design.blueprintId === undefined) {
     logger.warn('demo.design.failed', { status: design.status, code: design.error?.code });
@@ -218,7 +219,7 @@ async function main(): Promise<number> {
   console.log(`  accepted: blueprint ${design.blueprintId} with ${design.artifactIds.length - 1} designs`);
 
   // --- Stage 3: approval gate ----------------------------------------------------
-  console.log('Stage 3/5 - Blueprint approval gate');
+  console.log('Stage 3/6 - Blueprint approval gate');
   const approval = await approveBlueprint(services, design.blueprintId);
   if (!approval.approved) {
     logger.warn('demo.approval.rejected', { reasons: approval.reasons });
@@ -227,7 +228,7 @@ async function main(): Promise<number> {
   console.log(`  approved by product-owner-01, evidence ${approval.evidenceId ?? '?'}`);
 
   // --- Stage 4: build ------------------------------------------------------------
-  console.log('Stage 4/5 - AI Build Studio');
+  console.log('Stage 4/6 - AI Build Studio');
   const build = await new AiBuildStudio(services).buildFromBlueprint(design.blueprintId);
   if (build.status !== 'accepted') {
     logger.warn('demo.build.failed', { status: build.status, code: build.error?.code });
@@ -236,7 +237,7 @@ async function main(): Promise<number> {
   console.log(`  accepted: manifest ${build.manifestId} aggregating ${build.artifactIds.length - 1} implementations`);
 
   // --- Stage 5: verified engineering organization ------------------------------
-  console.log('Stage 5/5 - Verified Engineering Organization');
+  console.log('Stage 5/6 - Verified Engineering Organization');
   const closureIds = [
     ...new Set<string>([
       design.blueprintId,
@@ -284,7 +285,38 @@ async function main(): Promise<number> {
   });
   if (!certification.certified) {
     logger.warn('demo.certification.refused', { reasons: certification.reasons });
+    return 1;
   }
+  console.log(
+    `  certification: CERTIFIED; ${certification.stampedArtifactIds.length} artifact(s) stamped; ` +
+      `evidence ${certification.evidenceId ?? '?'}`,
+  );
+
+  // --- Stage 6: AI Acceptance Testing Department ------------------------------
+  // Runs after certification so the governed DoC walker may legitimately advance
+  // certified designs/implementations to DESIGN-VERIFIED / TEST-VERIFIED rather
+  // than halting at an un-certified CERTIFIED boundary.
+  console.log('Stage 6/6 - AI Acceptance Testing Department');
+  const testRun = await runTestDepartment(services, baseline.projectId, { sampleSize: 2 });
+  if (testRun.status !== 'passed') {
+    logger.warn('demo.test.failed', {
+      failedChecks: testRun.failedChecks,
+      boss: testRun.boss.rationale,
+      auditor: testRun.auditor.rationale,
+    });
+    return 1;
+  }
+  console.log(
+    `  ${testRun.status}: ${testRun.executed.length} checks; boss=${testRun.boss.verdict}; ` +
+      `auditor=${testRun.auditor.verdict}; report ${testRun.reportId ?? '(none)'}; ` +
+      `evidence ${testRun.evidenceId ?? '(none)'}`,
+  );
+  console.log(
+    `  ${testRun.testIds.length} -TEST artifact(s) persisted; ` +
+      `advanced to TEST-VERIFIED: ${testRun.advancedToTestVerified.join(', ') || 'none'}; ` +
+      `DoC halts: ${testRun.docHalts.map((h) => `${h.id}@${h.haltedAt}`).join(', ') || 'none'}`,
+  );
+  console.log(`  TEST lineage: ${testRun.testIds.join(' ')}`);
 
   // --- Honest reporting: lineage, certification and confidence as facts ------
   const firstPageId = baseline.pages[0]?.artifactId ?? 'PAGE-0001';

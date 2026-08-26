@@ -217,3 +217,73 @@ export function inferDocState(artifact: {
   }
   return position;
 }
+
+// ---------------------------------------------------------------------------
+// Governed forward walking (used by later-stage engines, e.g. the Level-3
+// Acceptance Testing Department advancing implemented artifacts to
+// TEST-VERIFIED).
+// ---------------------------------------------------------------------------
+
+/**
+ * Canonical engine actors for gates whose evidence already exists in the
+ * recorded lifecycle. The walker only stamps positions that are TRUE of the
+ * stored history - it back-fills the linear machine from authoritative
+ * provenance, it never invents events.
+ */
+const WALKER_ACTORS: Readonly<Record<string, Actor>> = {
+  'design-worker': { kind: 'ai', id: 'design-worker-01' },
+  'master-verification-engine': { kind: 'system', id: 'master-verification-engine' },
+  'build-worker': { kind: 'ai', id: 'build-worker-01' },
+  'code-verifier': { kind: 'system', id: 'code-verifier-engine' },
+  'test-worker': { kind: 'ai', id: 'test-worker-01' },
+  'test-verifier': { kind: 'verifier', id: 'test-specialist-01' },
+};
+
+export interface DocWalkResult {
+  readonly reachedTarget: boolean;
+  readonly state: DocState;
+  /** Set when walking stopped because CERTIFIED has no recorded basis yet. */
+  readonly haltedAt?: DocState;
+}
+
+/**
+ * Walks an artifact forward along the §0.17 machine to `target`, one legal
+ * gate at a time, stamping each intermediate state whose fact is already
+ * recorded. HARD RULE: the walker will NOT cross into CERTIFIED unless the
+ * artifact already sits at/behind it - certification is the Level-2
+ * certification engine's judgment, not a bookkeeping step. In that case the
+ * walk halts honestly (haltedAt='CERTIFIED') leaving every earlier true
+ * state stamped.
+ */
+export async function advanceDocPath(
+  store: ArtifactStore,
+  id: string,
+  target: DocState,
+): Promise<DocWalkResult> {
+  let current = await store.require(id);
+  let state = docStateOf(current) ?? inferDocState(current);
+  if (state === undefined) {
+    throw new DocStateError(`Cannot advance ${id}: no DoC position (not even DISCOVERED).`);
+  }
+  const goal = docIndexOf(target);
+  let index = docIndexOf(state);
+  while (index < goal) {
+    const next = DOC_STATES[index + 1];
+    if (next === undefined) break;
+    if (next === 'CERTIFIED') {
+      // Only the certification engine may stamp CERTIFIED (it did so during
+      // Level-2 certification when applicable). Crossing here without that
+      // recorded judgment would fabricate certification.
+      return { reachedTarget: false, state: DOC_STATES[index] ?? state, haltedAt: 'CERTIFIED' };
+    }
+    const governor = DOC_GATE_GOVERNORS[next];
+    const actor = WALKER_ACTORS[governor];
+    if (actor === undefined) {
+      return { reachedTarget: false, state: DOC_STATES[index] ?? state, haltedAt: next };
+    }
+    current = await recordDocGate(store, id, next, actor, {});
+    state = next;
+    index += 1;
+  }
+  return { reachedTarget: index >= goal, state };
+}
