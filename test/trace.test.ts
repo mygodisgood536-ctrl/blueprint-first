@@ -53,6 +53,7 @@ describe('lineage status', () => {
         'PAGE-0001-TEST:n',
         'PAGE-0001-DEPLOY:n',
         'PAGE-0001-OPS:n',
+        'PAGE-0001-PERM:n',
       ],
     );
     assert.equal(status.completeThrough, 'PAGE-0001-IMPL');

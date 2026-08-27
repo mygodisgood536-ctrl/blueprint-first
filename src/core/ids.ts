@@ -35,7 +35,7 @@ export type ArtifactType = (typeof ARTIFACT_TYPES)[number];
 const TYPE_SET: ReadonlySet<string> = new Set(ARTIFACT_TYPES);
 
 /** Production-lineage phases appended to a base artifact ID. */
-export const ARTIFACT_PHASES = ['DESIGN', 'IMPL', 'TEST', 'DEPLOY', 'OPS'] as const;
+export const ARTIFACT_PHASES = ['DESIGN', 'IMPL', 'TEST', 'DEPLOY', 'OPS', 'PERM'] as const;
 
 export type ArtifactPhase = (typeof ARTIFACT_PHASES)[number];
 
@@ -151,7 +151,7 @@ export function baseOf(raw: string): string {
 
 /**
  * Builds the full production lineage for a base artifact:
- * [BASE, BASE-DESIGN, BASE-IMPL, BASE-TEST, BASE-DEPLOY, BASE-OPS].
+ * [BASE, BASE-DESIGN, BASE-IMPL, BASE-TEST, BASE-DEPLOY, BASE-OPS, BASE-PERM].
  *
  * Accepts only a base ID (use baseOf() first for phased IDs).
  */

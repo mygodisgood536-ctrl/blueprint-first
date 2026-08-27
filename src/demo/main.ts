@@ -44,6 +44,7 @@ import { approveBlueprint } from '../design/approval.ts';
 import { AiBuildStudio } from '../build/studio.ts';
 import { runTestDepartment } from '../testing/department.ts';
 import { runOperationsDepartment } from '../operations/department.ts';
+import { runContinuousEngineeringDepartment } from '../continuous/department.ts';
 import { ReasoningCouncil } from '../council/council.ts';
 import { MasterVerificationEngine } from '../verification/master-engine.ts';
 import { createClosureVerifier } from '../verification/closure-verifier.ts';
@@ -194,7 +195,7 @@ async function main(): Promise<number> {
   };
 
   // --- Stage 1: discovery department -----------------------------------------
-    console.log('Stage 1/7 - Discovery Department (Clusters A+B + independent boss)');
+    console.log('Stage 1/8 - Discovery Department (Clusters A+B + independent boss)');
   const discovery = await new DiscoveryDepartment(services).discover({
     name: DISCOVERY_JSON.product.name,
     vision: 'A lightweight task tracker that small teams can adopt in minutes.',
@@ -211,7 +212,7 @@ async function main(): Promise<number> {
   );
 
   // --- Stage 2: design ---------------------------------------------------------
-    console.log('Stage 2/7 - AI Design Studio');
+    console.log('Stage 2/8 - AI Design Studio');
   const design = await new AiDesignStudio(services).designFromBaseline(baseline);
   if (design.status !== 'accepted' || design.blueprintId === undefined) {
     logger.warn('demo.design.failed', { status: design.status, code: design.error?.code });
@@ -220,7 +221,7 @@ async function main(): Promise<number> {
   console.log(`  accepted: blueprint ${design.blueprintId} with ${design.artifactIds.length - 1} designs`);
 
   // --- Stage 3: approval gate ----------------------------------------------------
-    console.log('Stage 3/7 - Blueprint approval gate');
+    console.log('Stage 3/8 - Blueprint approval gate');
   const approval = await approveBlueprint(services, design.blueprintId);
   if (!approval.approved) {
     logger.warn('demo.approval.rejected', { reasons: approval.reasons });
@@ -229,7 +230,7 @@ async function main(): Promise<number> {
   console.log(`  approved by product-owner-01, evidence ${approval.evidenceId ?? '?'}`);
 
   // --- Stage 4: build ------------------------------------------------------------
-    console.log('Stage 4/7 - AI Build Studio');
+    console.log('Stage 4/8 - AI Build Studio');
   const build = await new AiBuildStudio(services).buildFromBlueprint(design.blueprintId);
   if (build.status !== 'accepted') {
     logger.warn('demo.build.failed', { status: build.status, code: build.error?.code });
@@ -238,7 +239,7 @@ async function main(): Promise<number> {
   console.log(`  accepted: manifest ${build.manifestId} aggregating ${build.artifactIds.length - 1} implementations`);
 
   // --- Stage 5: verified engineering organization ------------------------------
-    console.log('Stage 5/7 - Verified Engineering Organization');
+    console.log('Stage 5/8 - Verified Engineering Organization');
   const closureIds = [
     ...new Set<string>([
       design.blueprintId,
@@ -297,7 +298,7 @@ async function main(): Promise<number> {
   // Runs after certification so the governed DoC walker may legitimately advance
   // certified designs/implementations to DESIGN-VERIFIED / TEST-VERIFIED rather
   // than halting at an un-certified CERTIFIED boundary.
-    console.log('Stage 6/7 - AI Acceptance Testing Department');
+    console.log('Stage 6/8 - AI Acceptance Testing Department');
   const testRun = await runTestDepartment(services, baseline.projectId, { sampleSize: 2 });
   if (testRun.status !== 'passed') {
     logger.warn('demo.test.failed', {
@@ -322,7 +323,7 @@ async function main(): Promise<number> {
   // --- Stage 7: AI Operations & Observability Layer ----------------------------
   // Runs after the Acceptance Testing Department certifies the -TEST closure,
   // which is the only inventory Stage 4 is permitted to deploy.
-  console.log('Stage 7/7 - AI Operations & Observability Layer (Deployment)');
+  console.log('Stage 7/8 - AI Operations & Observability Layer (Deployment)');
   const opsRun = await runOperationsDepartment(services, baseline.projectId, { sampleSize: 2 });
   if (opsRun.status !== 'passed') {
     logger.warn('demo.ops.failed', {
@@ -343,6 +344,29 @@ async function main(): Promise<number> {
       `DoC halts: ${opsRun.docHalts.map((h) => `${h.id}@${h.haltedAt}`).join(', ') || 'none'}`,
   );
   console.log(`  DEPLOY lineage: ${opsRun.deployIds.join(' ')}`);
+
+  // --- Stage 8: Continuous Engineering Department (Permanent Self-Healing Org) -
+  // The only stage whose subject is the *live* state of an already-deployed
+  // project. Drives the Worker Corps -> Boss -> Auditor -> Materialization
+  // flow against the DEPLOYED-VERIFIED closure, and (when no drift is
+  // detected) advances the Definition of Complete to CERTIFIED COMPLETE
+  // by materializing -OPS lineage and the project's PERM manifest.
+  console.log('Stage 8/8 - Continuous Engineering Department (Permanent Self-Healing Org)');
+  const contRun = await runContinuousEngineeringDepartment(services, baseline.projectId, { sampleSize: 2 });
+  if (contRun.finalVerdict !== 'CERTIFIED_COMPLETE') {
+    logger.warn('demo.continuous.failed', {
+      verdict: contRun.finalVerdict,
+      rationale: contRun.rationale,
+    });
+    return 1;
+  }
+  console.log(
+    `  ${contRun.finalVerdict}: ${contRun.workerReport.scopedCount} artifact(s) observed, ` +
+      `${contRun.workerReport.stableCount} stable; ` +
+      `boss=${contRun.bossDecision.verdict}; auditor=${contRun.auditorDecision.verdict}; ` +
+      `manifest ${contRun.materialization?.manifestId ?? '(none)'}`,
+  );
+  console.log(`  OPS lineage: ${contRun.materialization?.opsIds.join(' ') ?? '(none)'}`);
 
   // --- Honest reporting: lineage, certification and confidence as facts ------
   const firstPageId = baseline.pages[0]?.artifactId ?? 'PAGE-0001';
@@ -394,8 +418,8 @@ async function main(): Promise<number> {
     `Blueprint confidence: ${certification.confidence?.aggregateScore ?? 'n/a'} ` +
       `(unproduced dimensions excluded: ${unproduced.join(', ') || 'none'})`,
   );
-    console.log('Level-3 demo finished.');
-  return certification.certified && opsRun.status === 'passed' ? 0 : 1;
+    console.log('Level-3 + Level-4 + Level-5 demo finished.');
+  return certification.certified && opsRun.status === 'passed' && contRun.finalVerdict === 'CERTIFIED_COMPLETE' ? 0 : 1;
 }
 
 main()

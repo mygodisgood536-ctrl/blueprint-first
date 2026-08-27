@@ -79,6 +79,7 @@ describe('base detection and lineage chains', () => {
       'PAGE-0042-TEST',
       'PAGE-0042-DEPLOY',
       'PAGE-0042-OPS',
+      'PAGE-0042-PERM',
     ]);
     assert.deepEqual(lineageChain('API-0007', ['DESIGN', 'IMPL']), [
       'API-0007',

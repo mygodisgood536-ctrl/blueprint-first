@@ -9,7 +9,7 @@
  */
 
 import { formatArtifactId, parseArtifactId } from './ids.ts';
-import type { ArtifactType } from './ids.ts';
+import type { ArtifactPhase, ArtifactType } from './ids.ts';
 
 export interface AllocatorSnapshot {
   readonly counters: Readonly<Record<string, number>>;
@@ -42,6 +42,16 @@ export class ArtifactIdAllocator {
   peekNext(type: ArtifactType): string {
     const current = this.counters.get(type) ?? 0;
     return formatArtifactId(type, current + 1);
+  }
+
+  /**
+   * Allocates the next canonical ID for the given type and appends a phase
+   * suffix. The phase suffix is recorded on the type's counter so subsequent
+   * `nextId` calls do not collide.
+   */
+  nextIdWithPhase(type: ArtifactType, phase: ArtifactPhase): string {
+    const base = this.nextId(type);
+    return `${base}-${phase}`;
   }
 
   /**
