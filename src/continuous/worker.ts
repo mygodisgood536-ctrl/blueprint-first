@@ -31,9 +31,14 @@ import { createHash } from 'node:crypto';
 import type { CoreServices } from '../core/services.ts';
 import { deriveDeployScope } from '../operations/scope.ts';
 import type { DriftItem } from '../verification/live-engine.ts';
+import type { VerificationDimension } from '../verification/dimensions.ts';
 import { MasterVerificationEngine } from '../verification/master-engine.ts';
 import { ReasoningCouncil } from '../council/council.ts';
 import { createClosureVerifier } from '../verification/closure-verifier.ts';
+import {
+  type SyntheticDefect,
+  type TelemetrySource,
+} from '../telemetry/source.ts';
 
 export type DriftKind = 'REGRESSED' | 'DEGRADED' | 'RESOLVED' | 'CHANGED' | 'STABLE';
 
@@ -50,6 +55,34 @@ export interface ContinuousObservation {
 export interface ContinuousWorkerDefects {
   readonly simulateRegressed?: readonly string[];
   readonly simulateDegraded?: readonly string[];
+  /**
+   * Optional telemetry source. When present, the worker will call
+   * `source.observe(baseId, ...)` for each artifact in scope and convert
+   * any breach into a `DriftItem` with `source: 'telemetry'`. The set of
+   * breaches is independent of (and additive to) the verification path.
+   */
+  readonly telemetrySource?: TelemetrySource;
+  /** Per-baseId synthetic defect hints; forwarded to `observe`. */
+  readonly telemetryDefects?: Readonly<Record<string, SyntheticDefect>>;
+}
+
+/** L4: deterministic metric -> dimension mapping for telemetry breaches.
+ *  The mapping is fixed (CORRECTNESS/QUALITY/CONSISTENCY) because the
+ *  canonical 11 dimensions don't include INTEGRITY or PERFORMANCE; the
+ *  breach semantics are recorded on the drift item via the value. */
+function telemetryDimension(metric: string): VerificationDimension {
+  switch (metric) {
+    case 'error_rate':
+    case 'response_correctness':
+    case 'runtime_exception':
+    case 'availability':
+    case 'latency':
+      return 'CORRECTNESS';
+    case 'config_drift':
+      return 'CONSISTENCY';
+    default:
+      return 'CORRECTNESS';
+  }
 }
 
 export interface ContinuousWorkerReport {
@@ -143,9 +176,9 @@ export async function runContinuousWorker(
   // authoritative source already uses it for the same reason).
   const liveDrift = (masterNow as { drift?: readonly DriftItem[] }).drift ?? [];
   const driftFindings: DriftItem[] = liveDrift.map((d) => {
-    if (simReg.has(d.artifactId)) return { ...d, was: 'pass', now: 'fail', kind: 'REGRESSED' as const };
-    if (simDeg.has(d.artifactId)) return { ...d, was: 'pass', now: 'inconclusive', kind: 'DEGRADED' as const };
-    return d;
+    if (simReg.has(d.artifactId)) return { ...d, was: 'pass', now: 'fail', kind: 'REGRESSED' as const, source: 'verification' as const };
+    if (simDeg.has(d.artifactId)) return { ...d, was: 'pass', now: 'inconclusive', kind: 'DEGRADED' as const, source: 'verification' as const };
+    return d.source === undefined ? { ...d, source: 'verification' as const } : d;
   });
   for (const baseId of simReg) {
     if (!driftFindings.some((d) => d.artifactId === baseId)) {
@@ -155,6 +188,7 @@ export async function runContinuousWorker(
         was: 'pass',
         now: 'fail',
         kind: 'REGRESSED',
+        source: 'verification',
       });
     }
   }
@@ -166,7 +200,28 @@ export async function runContinuousWorker(
         was: 'pass',
         now: 'inconclusive',
         kind: 'DEGRADED',
+        source: 'verification',
       });
+    }
+  }
+  // L4: Telemetry ingestion. Each observation that is a breach is converted
+  // into a DriftItem with source='telemetry'. The observation id is recorded
+  // as evidenceRef so the auditor can re-derive the same content.
+  if (defects.telemetrySource !== undefined) {
+    for (const exp of scope) {
+      const obs = defects.telemetrySource.observe(exp.baseId, defects.telemetryDefects?.[exp.baseId]);
+      if (obs.breach) {
+        const dim = telemetryDimension(obs.metric);
+        driftFindings.push({
+          artifactId: exp.baseId,
+          dimension: dim,
+          was: 'pass',
+          now: 'fail',
+          kind: 'REGRESSED',
+          source: 'telemetry',
+          evidenceRef: obs.id,
+        });
+      }
     }
   }
 

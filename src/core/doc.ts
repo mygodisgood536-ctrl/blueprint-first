@@ -1,5 +1,6 @@
 /**
- * Definition of Complete - the artifact state machine (spec §0.17).
+ * Definition of Complete - the artifact state machine (spec §0.17 + Level-4
+ * drift-loop extension).
  *
  * "Done" is never a worker's declaration; it is a position in this fixed
  * linear state machine that every artifact occupies from first discovery
@@ -8,11 +9,19 @@
  *   DISCOVERED -> EXPANDED -> SELF-VERIFIED -> SPECIALIST-VERIFIED ->
  *   BOSS-VERIFIED -> CERTIFIED -> DESIGNED -> DESIGN-VERIFIED ->
  *   IMPLEMENTED -> CODE-VERIFIED -> TESTED -> TEST-VERIFIED ->
- *   CERTIFIED COMPLETE
+ *   DEPLOYED-VERIFIED -> CERTIFIED COMPLETE
+ *
+ *   ...then, on a legitimate regression at runtime, the Level-4 drift loop:
+ *   CERTIFIED COMPLETE -> REGRESSION_DETECTED -> RE-MEDIATED ->
+ *   RE-MEDIATION-VERIFIED -> CERTIFIED COMPLETE
  *
  * Rules implemented here:
- *  - Movement is strictly forward, one gate at a time; skipping or going
- *    backwards throws DocStateError.
+ *  - Forward movement is strictly forward, one gate at a time; skipping or
+ *    going backwards on the happy path throws DocStateError.
+ *  - The only legal BACKWARD transition is `CERTIFIED COMPLETE` ->
+ *    `REGRESSION_DETECTED`, and only by the runtime-regression gate
+ *    (operations / continuous / safe-change boss). Every other backward
+ *    transition is illegal.
  *  - Every advance requires the GOVERNOR of that transition (self-check,
  *    specialist, boss, audit/certification engine) - a producer's own claim
  *    is rejected as a governor for any state beyond its own production step.
@@ -44,6 +53,9 @@ export const DOC_STATES = [
   'TEST-VERIFIED',
   'DEPLOYED-VERIFIED',
   'CERTIFIED COMPLETE',
+  'REGRESSION_DETECTED',
+  'RE-MEDIATED',
+  'RE-MEDIATION-VERIFIED',
 ] as const;
 
 export type DocState = (typeof DOC_STATES)[number];
@@ -64,6 +76,9 @@ export const DOC_GATE_GOVERNORS: Readonly<Record<DocState, string>> = {
   'TEST-VERIFIED': 'test-verifier',
   'DEPLOYED-VERIFIED': 'deploy-verifier',
   'CERTIFIED COMPLETE': 'certification-engine',
+  REGRESSION_DETECTED: 'runtime-regression-detector',
+  'RE-MEDIATED': 'safe-change-boss',
+  'RE-MEDIATION-VERIFIED': 'safe-change-auditor',
 };
 
 export function docIndexOf(state: DocState): number {
@@ -72,14 +87,35 @@ export function docIndexOf(state: DocState): number {
 
 export function docSuccessor(state: DocState): DocState | null {
   const index = docIndexOf(state);
-  if (index < 0 || index >= DOC_STATES.length - 1) return null;
+  if (index < 0) return null;
+  // The L4 drift loop closes back to CERTIFIED COMPLETE after the auditor
+  // verifies the remediation; that is the ONLY legal successor from the
+  // drift-loop terminal state.
+  if (state === 'RE-MEDIATION-VERIFIED') return 'CERTIFIED COMPLETE';
+  if (index >= DOC_STATES.length - 1) return null;
   return DOC_STATES[index + 1] ?? null;
 }
 
-/** Pure check: may `to` legally follow `from`? Only the immediate successor. */
+/**
+ * The only legal BACKWARD transition on the happy path is
+ *   CERTIFIED COMPLETE -> REGRESSION_DETECTED
+ * invoked by the runtime-regression-detector. Every other backward move
+ * is illegal.
+ */
+export function docPredecessor(state: DocState): DocState | null {
+  if (state === 'REGRESSION_DETECTED') return 'CERTIFIED COMPLETE';
+  return null;
+}
+
+/** Pure check: may `to` legally follow `from`? Forward only, plus the
+ *  single legal backward regression transition. */
 export function canAdvanceDoc(from: DocState | undefined, to: DocState): boolean {
   if (from === undefined) return to === 'DISCOVERED';
-  return docSuccessor(from) === to;
+  if (docSuccessor(from) === to) return true;
+  // The single legal backward move: a regression at runtime downgrades
+  // CERTIFIED COMPLETE to REGRESSION_DETECTED.
+  if (docPredecessor(to) === from) return true;
+  return false;
 }
 
 export function assertDocTransition(from: DocState | undefined, to: DocState): void {
@@ -103,7 +139,8 @@ export function assertDocGovernor(to: DocState, actor: Actor): void {
   const judgmentRoles = new Set([
     'self-check', 'specialist-verifier', 'boss', 'certification-engine',
     'master-verification-engine', 'code-verifier', 'test-verifier',
-    'deploy-verifier',
+    'deploy-verifier', 'runtime-regression-detector', 'safe-change-boss',
+    'safe-change-auditor',
   ]);
   const actorIsJudgment =
     actor.kind === 'verifier' || actor.kind === 'system';

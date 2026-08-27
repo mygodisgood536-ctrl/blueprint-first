@@ -45,11 +45,22 @@ import { AiBuildStudio } from '../build/studio.ts';
 import { runTestDepartment } from '../testing/department.ts';
 import { runOperationsDepartment } from '../operations/department.ts';
 import { runContinuousEngineeringDepartment } from '../continuous/department.ts';
+import { runSafeChangeDepartment } from '../change/department.ts';
+import { runRecursionDepartment } from '../recursion/department.ts';
+import { SyntheticTelemetrySource } from '../telemetry/source.ts';
+import {
+  createDeploymentEnvironment,
+  deployRelease,
+  verifyDeployedUnit,
+} from '../operations/deploy.ts';
+import { recordDocGate, docStateOf } from '../core/doc.ts';
 import { ReasoningCouncil } from '../council/council.ts';
 import { MasterVerificationEngine } from '../verification/master-engine.ts';
 import { createClosureVerifier } from '../verification/closure-verifier.ts';
 import { certifyBlueprintCompleteness } from '../design/certification.ts';
 import { lineageStatus, coverageSummary, requirementsTraceability } from '../traceability/trace.ts';
+import type { DriftItem } from '../verification/live-engine.ts';
+import type { TelemetryObservation } from '../telemetry/source.ts';
 
 /** Deterministic demo inventory (exactly what the discovery engine parses). */
 const DISCOVERY_JSON = {
@@ -195,7 +206,7 @@ async function main(): Promise<number> {
   };
 
   // --- Stage 1: discovery department -----------------------------------------
-    console.log('Stage 1/8 - Discovery Department (Clusters A+B + independent boss)');
+    console.log('Stage 1/11 - Discovery Department (Clusters A+B + independent boss)');
   const discovery = await new DiscoveryDepartment(services).discover({
     name: DISCOVERY_JSON.product.name,
     vision: 'A lightweight task tracker that small teams can adopt in minutes.',
@@ -212,7 +223,7 @@ async function main(): Promise<number> {
   );
 
   // --- Stage 2: design ---------------------------------------------------------
-    console.log('Stage 2/8 - AI Design Studio');
+    console.log('Stage 2/11 - AI Design Studio');
   const design = await new AiDesignStudio(services).designFromBaseline(baseline);
   if (design.status !== 'accepted' || design.blueprintId === undefined) {
     logger.warn('demo.design.failed', { status: design.status, code: design.error?.code });
@@ -221,7 +232,7 @@ async function main(): Promise<number> {
   console.log(`  accepted: blueprint ${design.blueprintId} with ${design.artifactIds.length - 1} designs`);
 
   // --- Stage 3: approval gate ----------------------------------------------------
-    console.log('Stage 3/8 - Blueprint approval gate');
+    console.log('Stage 3/11 - Blueprint approval gate');
   const approval = await approveBlueprint(services, design.blueprintId);
   if (!approval.approved) {
     logger.warn('demo.approval.rejected', { reasons: approval.reasons });
@@ -230,7 +241,7 @@ async function main(): Promise<number> {
   console.log(`  approved by product-owner-01, evidence ${approval.evidenceId ?? '?'}`);
 
   // --- Stage 4: build ------------------------------------------------------------
-    console.log('Stage 4/8 - AI Build Studio');
+    console.log('Stage 4/11 - AI Build Studio');
   const build = await new AiBuildStudio(services).buildFromBlueprint(design.blueprintId);
   if (build.status !== 'accepted') {
     logger.warn('demo.build.failed', { status: build.status, code: build.error?.code });
@@ -239,7 +250,7 @@ async function main(): Promise<number> {
   console.log(`  accepted: manifest ${build.manifestId} aggregating ${build.artifactIds.length - 1} implementations`);
 
   // --- Stage 5: verified engineering organization ------------------------------
-    console.log('Stage 5/8 - Verified Engineering Organization');
+    console.log('Stage 5/11 - Verified Engineering Organization');
   const closureIds = [
     ...new Set<string>([
       design.blueprintId,
@@ -298,7 +309,7 @@ async function main(): Promise<number> {
   // Runs after certification so the governed DoC walker may legitimately advance
   // certified designs/implementations to DESIGN-VERIFIED / TEST-VERIFIED rather
   // than halting at an un-certified CERTIFIED boundary.
-    console.log('Stage 6/8 - AI Acceptance Testing Department');
+    console.log('Stage 6/11 - AI Acceptance Testing Department');
   const testRun = await runTestDepartment(services, baseline.projectId, { sampleSize: 2 });
   if (testRun.status !== 'passed') {
     logger.warn('demo.test.failed', {
@@ -323,7 +334,7 @@ async function main(): Promise<number> {
   // --- Stage 7: AI Operations & Observability Layer ----------------------------
   // Runs after the Acceptance Testing Department certifies the -TEST closure,
   // which is the only inventory Stage 4 is permitted to deploy.
-  console.log('Stage 7/8 - AI Operations & Observability Layer (Deployment)');
+  console.log('Stage 7/11 - AI Operations & Observability Layer (Deployment)');
   const opsRun = await runOperationsDepartment(services, baseline.projectId, { sampleSize: 2 });
   if (opsRun.status !== 'passed') {
     logger.warn('demo.ops.failed', {
@@ -351,7 +362,7 @@ async function main(): Promise<number> {
   // flow against the DEPLOYED-VERIFIED closure, and (when no drift is
   // detected) advances the Definition of Complete to CERTIFIED COMPLETE
   // by materializing -OPS lineage and the project's PERM manifest.
-  console.log('Stage 8/8 - Continuous Engineering Department (Permanent Self-Healing Org)');
+  console.log('Stage 8/11 - Continuous Engineering Department (Permanent Self-Healing Org)');
   const contRun = await runContinuousEngineeringDepartment(services, baseline.projectId, { sampleSize: 2 });
   if (contRun.finalVerdict !== 'CERTIFIED_COMPLETE') {
     logger.warn('demo.continuous.failed', {
@@ -368,7 +379,152 @@ async function main(): Promise<number> {
   );
   console.log(`  OPS lineage: ${contRun.materialization?.opsIds.join(' ') ?? '(none)'}`);
 
+  // --- Stage 9: Live Runtime Telemetry observation --------------------------
+  // The Continuous Engineering Department at Stage 8 confirmed the system
+  // was stable on the freshly-deployed env. In production, the platform's
+  // runtime instrumentation now observes the live system. The synthetic
+  // source stands in for that instrumentation; here we observe a single
+  // base, PAGE-0001, and the SyntheticTelemetrySource deterministically
+  // returns a breach (an error_rate above the default threshold). The
+  // observation is sha256-anchored and carries its own id so the Safe
+  // Change Auditor can later re-derive the same content byte-for-byte.
+  console.log('Stage 9/11 - Live Runtime Telemetry observation (synthetic)');
+  const telemetrySource = new SyntheticTelemetrySource();
+  const telemetryBase = baseline.pages[0]?.artifactId ?? 'PAGE-0001';
+  const telemetryObservation: TelemetryObservation = telemetrySource.observe(
+    telemetryBase,
+    { errorRate: 0.5 },
+  );
+  console.log(
+    `  observation ${telemetryObservation.id} on ${telemetryObservation.baseId}: ` +
+      `metric=${telemetryObservation.metric} breach=${telemetryObservation.breach} ` +
+      `evidence=${telemetryObservation.evidenceHash.slice(0, 12)}…`,
+  );
+
+  // --- Stage 10: Continuous Discovery Recursion -----------------------------
+  // The recursion department compares the current telemetry report against
+  // the prior continuous-engineering worker report, classifies the delta,
+  // and routes actionable/regression items to the Safe Change Department.
+  // Since the new observation is a breach (was pass -> now fail, REGRESSED)
+  // and was NOT in the prior report, it is classified as `regression`.
+  console.log('Stage 10/11 - Continuous Discovery Recursion');
+  const recursionResult = await runRecursionDepartment(services, {
+    prior: contRun.workerReport.driftFindings,
+    current: [
+      {
+        artifactId: telemetryObservation.baseId,
+        dimension: 'CORRECTNESS',
+        was: 'pass',
+        now: 'fail',
+        kind: 'REGRESSED',
+        source: 'telemetry',
+        evidenceRef: telemetryObservation.id,
+      } satisfies DriftItem,
+    ],
+    projectId: baseline.projectId,
+    env: { units: new Map() }, // empty env: change dept is only asked to classify, not apply
+    apply: false,
+  });
+  console.log(
+    `  ${recursionResult.classification.deltas.length} item(s) classified, ` +
+      `${recursionResult.classification.regressions.length} regression(s), ` +
+      `${recursionResult.classification.actionable.length} actionable; ` +
+      `allRemediated=${recursionResult.allRemediated}; ` +
+      `hash=${recursionResult.classification.classificationHash.slice(0, 12)}…`,
+  );
+  const firstChange = recursionResult.changes[0];
+  if (firstChange === undefined) {
+    logger.warn('demo.recursion.empty', { classificationHash: recursionResult.classification.classificationHash });
+    return 1;
+  }
+
+  // --- Stage 11: Safe Change Intelligence -----------------------------------
+  // Rebuild the deployed env so we can apply the authorized remediation in
+  // place. The Safe Change Department runs the full pipeline: Change
+  // Analyst -> Boss (independent) -> Auditor (hash-reproducing) -> apply.
+  // On success, the artifact's DoC walks through the L4 drift loop:
+  //   CERTIFIED COMPLETE -> REGRESSION_DETECTED -> RE-MEDIATED ->
+  //   RE-MEDIATION-VERIFIED -> CERTIFIED COMPLETE
+  console.log('Stage 11/11 - Safe Change Intelligence (apply + drift loop)');
+  const changeEnv = createDeploymentEnvironment('production');
+  await deployRelease(services, opsRun.scope, changeEnv);
+  for (const exp of opsRun.scope) await verifyDeployedUnit(services, exp, changeEnv);
+  const beforeHash = changeEnv.units.get(telemetryBase)?.configHash;
+  const changeResult = await runSafeChangeDepartment(services, {
+    drift: firstChange.drift,
+    observation: telemetryObservation,
+    projectId: baseline.projectId,
+    env: changeEnv,
+    apply: true,
+  });
+  const afterHash = changeEnv.units.get(telemetryBase)?.configHash;
+  if (changeResult.status !== 'AUTHORIZED_AND_APPLIED') {
+    logger.warn('demo.change.failed', { status: changeResult.status, reason: (changeResult as { reason?: string }).reason });
+    return 1;
+  }
+  console.log(
+    `  ${changeResult.status}: boss=${changeResult.trail.bossDecision.verdict} ` +
+      `auditor=${changeResult.trail.auditorDecision.verdict}; ` +
+      `proposal=${changeResult.materialization.proposalId} ` +
+      `approval=${changeResult.materialization.approvalId} ` +
+      `change=${changeResult.materialization.changeId ?? '(none)'}; ` +
+      `configHash ${beforeHash?.slice(0, 12)}… -> ${afterHash?.slice(0, 12)}…`,
+  );
+
+  // Walk the L4 drift loop on the baseId's -IMPL artifact. The artifact
+  // is currently at DEPLOYED-VERIFIED (advanced by the Operations Dept in
+  // Stage 7). First advance to CERTIFIED COMPLETE (Stage 8's Continuous
+  // Engineering Dept stamps this on the closure, but per-artifact this is
+  // the explicit step). Then the runtime-regression detector downgrades
+  // it to REGRESSION_DETECTED, the safe-change-boss accepts the
+  // remediation (-> RE-MEDIATED), the safe-change-auditor confirms
+  // (-> RE-MEDIATION-VERIFIED), and the cert engine re-stamps
+  // CERTIFIED COMPLETE. Each step is recorded on the artifact's provenance.
+  const implId = `${telemetryBase}-IMPL`;
+  const impl = await services.store.get(implId);
+  if (impl === null) {
+    logger.warn('demo.driftLoop.missingImpl', { implId });
+    return 1;
+  }
+  const startState = docStateOf(impl);
+  if (startState === undefined) {
+    logger.warn('demo.driftLoop.unstampedImpl', { implId });
+    return 1;
+  }
+  // 0) DEPLOYED-VERIFIED -> CERTIFIED COMPLETE (cert engine) — this is the
+  // prerequisite to the regression loop.
+  const certified = await recordDocGate(services.store, implId, 'CERTIFIED COMPLETE', {
+    kind: 'system',
+    id: 'certification-engine',
+  }, { gate: 'certification-engine' });
+  void certified;
+  // 1) CERTIFIED COMPLETE -> REGRESSION_DETECTED (runtime regression detector)
+  await recordDocGate(services.store, implId, 'REGRESSION_DETECTED', {
+    kind: 'system',
+    id: 'runtime-regression-detector',
+  }, { gate: 'runtime-regression-detector', evidenceId: telemetryObservation.id });
+  // 2) REGRESSION_DETECTED -> RE-MEDIATED (safe-change-boss)
+  await recordDocGate(services.store, implId, 'RE-MEDIATED', {
+    kind: 'verifier',
+    id: 'safe-change-boss-01',
+  }, { gate: 'safe-change-boss', evidenceId: changeResult.trail.bossDecision.decisionHash });
+  // 3) RE-MEDIATED -> RE-MEDIATION-VERIFIED (safe-change-auditor)
+  await recordDocGate(services.store, implId, 'RE-MEDIATION-VERIFIED', {
+    kind: 'verifier',
+    id: 'safe-change-auditor-01',
+  }, { gate: 'safe-change-auditor', evidenceId: changeResult.trail.auditorDecision.decisionHash });
+  // 4) RE-MEDIATION-VERIFIED -> CERTIFIED COMPLETE (certification engine)
+  const final = await recordDocGate(services.store, implId, 'CERTIFIED COMPLETE', {
+    kind: 'system',
+    id: 'certification-engine',
+  }, { gate: 'certification-engine', evidenceId: changeResult.trail.auditorDecision.decisionHash });
+  console.log(
+    `  DoC drift loop on ${implId}: ${startState} -> REGRESSION_DETECTED -> ` +
+      `RE-MEDIATED -> RE-MEDIATION-VERIFIED -> ${docStateOf(final)}`,
+  );
+
   // --- Honest reporting: lineage, certification and confidence as facts ------
+
   const firstPageId = baseline.pages[0]?.artifactId ?? 'PAGE-0001';
   const lineage = await lineageStatus(store, firstPageId);
   const coverage = coverageSummary(graph, [baseline.projectId]);
@@ -418,8 +574,8 @@ async function main(): Promise<number> {
     `Blueprint confidence: ${certification.confidence?.aggregateScore ?? 'n/a'} ` +
       `(unproduced dimensions excluded: ${unproduced.join(', ') || 'none'})`,
   );
-    console.log('Level-3 + Level-4 + Level-5 demo finished.');
-  return certification.certified && opsRun.status === 'passed' && contRun.finalVerdict === 'CERTIFIED_COMPLETE' ? 0 : 1;
+    console.log('Level-3 + Level-4 + Level-5 + L4 Live Telemetry + Recursion + Safe Change demo finished.');
+  return certification.certified && opsRun.status === 'passed' && contRun.finalVerdict === 'CERTIFIED_COMPLETE' && changeResult.status === 'AUTHORIZED_AND_APPLIED' && docStateOf(final) === 'CERTIFIED COMPLETE' ? 0 : 1;
 }
 
 main()

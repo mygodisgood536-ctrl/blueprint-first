@@ -112,8 +112,15 @@ describe('definition-of-complete state machine (§0.17)', () => {
     const services = makeServices();
     const id = seed(services);
     let last: string | undefined;
-    // Creation implies DISCOVERED; walk every subsequent gate.
+    // Creation implies DISCOVERED; walk the HAPPY PATH through CERTIFIED
+    // COMPLETE. The L4 drift-loop states (REGRESSION_DETECTED, RE-MEDIATED,
+    // RE-MEDIATION-VERIFIED) are exercised separately by the change/recursion
+    // department tests.
     for (const state of DOC_STATES.slice(1)) {
+      if (state === 'CERTIFIED COMPLETE') {
+        // Terminal of the happy path; stop here so the artifact is locked.
+        break;
+      }
       const updated = await recordDocGate(
         services.store,
         id,
@@ -124,6 +131,15 @@ describe('definition-of-complete state machine (§0.17)', () => {
       last = docStateOf(updated);
       assert.equal(last, state);
     }
+    // Walk the final happy-path step to CERTIFIED COMPLETE.
+    const final = await recordDocGate(
+      services.store,
+      id,
+      'CERTIFIED COMPLETE',
+      governorFor('CERTIFIED COMPLETE'),
+      { gate: 'CERTIFIED COMPLETE' },
+    );
+    last = docStateOf(final);
     assert.equal(last, 'CERTIFIED COMPLETE');
     await assert.rejects(
       () => recordDocGate(services.store, id, 'DISCOVERED', WORKER, {}),

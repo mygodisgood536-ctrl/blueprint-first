@@ -25,6 +25,14 @@ export interface DriftItem {
   readonly was: string;
   readonly now: string;
   readonly kind: 'REGRESSED' | 'RESOLVED' | 'DEGRADED' | 'CHANGED';
+  /**
+   * Where this drift item came from. Level 4 introduces telemetry-driven
+   * drift in addition to the re-verification path. The field is always
+   * present (L0-L3 callers will see 'verification' from the worker).
+   */
+  readonly source: 'verification' | 'telemetry' | 'remediation';
+  /** Free-form evidence reference; for telemetry this is the observation id. */
+  readonly evidenceRef?: string;
 }
 
 export interface LiveVerificationResult {
@@ -97,7 +105,7 @@ export class LiveVerificationEngine {
         if (was === 'pass' && now === 'fail') kind = 'REGRESSED';
         else if (was === 'pass' && now === 'inconclusive') kind = 'DEGRADED';
         else if (was !== 'pass' && now === 'pass') kind = 'RESOLVED';
-        drift.push({ artifactId, dimension, was, now, kind });
+        drift.push({ artifactId, dimension, was, now, kind, source: 'verification' });
       }
     }
 
