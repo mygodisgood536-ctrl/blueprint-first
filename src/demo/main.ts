@@ -47,6 +47,8 @@ import { runOperationsDepartment } from '../operations/department.ts';
 import { runContinuousEngineeringDepartment } from '../continuous/department.ts';
 import { runSafeChangeDepartment } from '../change/department.ts';
 import { runRecursionDepartment } from '../recursion/department.ts';
+import { runPermanentEngineeringOrganization, candidateFromDrift } from '../perm/department.ts';
+import { emptyGuardianMemory, classifySignal } from '../perm/guardian.ts';
 import { SyntheticTelemetrySource } from '../telemetry/source.ts';
 import {
   createDeploymentEnvironment,
@@ -206,7 +208,7 @@ async function main(): Promise<number> {
   };
 
   // --- Stage 1: discovery department -----------------------------------------
-    console.log('Stage 1/11 - Discovery Department (Clusters A+B + independent boss)');
+    console.log('Stage 1/12 - Discovery Department (Clusters A+B + independent boss)');
   const discovery = await new DiscoveryDepartment(services).discover({
     name: DISCOVERY_JSON.product.name,
     vision: 'A lightweight task tracker that small teams can adopt in minutes.',
@@ -223,7 +225,7 @@ async function main(): Promise<number> {
   );
 
   // --- Stage 2: design ---------------------------------------------------------
-    console.log('Stage 2/11 - AI Design Studio');
+    console.log('Stage 2/12 - AI Design Studio');
   const design = await new AiDesignStudio(services).designFromBaseline(baseline);
   if (design.status !== 'accepted' || design.blueprintId === undefined) {
     logger.warn('demo.design.failed', { status: design.status, code: design.error?.code });
@@ -232,7 +234,7 @@ async function main(): Promise<number> {
   console.log(`  accepted: blueprint ${design.blueprintId} with ${design.artifactIds.length - 1} designs`);
 
   // --- Stage 3: approval gate ----------------------------------------------------
-    console.log('Stage 3/11 - Blueprint approval gate');
+    console.log('Stage 3/12 - Blueprint approval gate');
   const approval = await approveBlueprint(services, design.blueprintId);
   if (!approval.approved) {
     logger.warn('demo.approval.rejected', { reasons: approval.reasons });
@@ -241,7 +243,7 @@ async function main(): Promise<number> {
   console.log(`  approved by product-owner-01, evidence ${approval.evidenceId ?? '?'}`);
 
   // --- Stage 4: build ------------------------------------------------------------
-    console.log('Stage 4/11 - AI Build Studio');
+    console.log('Stage 4/12 - AI Build Studio');
   const build = await new AiBuildStudio(services).buildFromBlueprint(design.blueprintId);
   if (build.status !== 'accepted') {
     logger.warn('demo.build.failed', { status: build.status, code: build.error?.code });
@@ -250,7 +252,7 @@ async function main(): Promise<number> {
   console.log(`  accepted: manifest ${build.manifestId} aggregating ${build.artifactIds.length - 1} implementations`);
 
   // --- Stage 5: verified engineering organization ------------------------------
-    console.log('Stage 5/11 - Verified Engineering Organization');
+    console.log('Stage 5/12 - Verified Engineering Organization');
   const closureIds = [
     ...new Set<string>([
       design.blueprintId,
@@ -309,7 +311,7 @@ async function main(): Promise<number> {
   // Runs after certification so the governed DoC walker may legitimately advance
   // certified designs/implementations to DESIGN-VERIFIED / TEST-VERIFIED rather
   // than halting at an un-certified CERTIFIED boundary.
-    console.log('Stage 6/11 - AI Acceptance Testing Department');
+    console.log('Stage 6/12 - AI Acceptance Testing Department');
   const testRun = await runTestDepartment(services, baseline.projectId, { sampleSize: 2 });
   if (testRun.status !== 'passed') {
     logger.warn('demo.test.failed', {
@@ -334,7 +336,7 @@ async function main(): Promise<number> {
   // --- Stage 7: AI Operations & Observability Layer ----------------------------
   // Runs after the Acceptance Testing Department certifies the -TEST closure,
   // which is the only inventory Stage 4 is permitted to deploy.
-  console.log('Stage 7/11 - AI Operations & Observability Layer (Deployment)');
+  console.log('Stage 7/12 - AI Operations & Observability Layer (Deployment)');
   const opsRun = await runOperationsDepartment(services, baseline.projectId, { sampleSize: 2 });
   if (opsRun.status !== 'passed') {
     logger.warn('demo.ops.failed', {
@@ -362,7 +364,7 @@ async function main(): Promise<number> {
   // flow against the DEPLOYED-VERIFIED closure, and (when no drift is
   // detected) advances the Definition of Complete to CERTIFIED COMPLETE
   // by materializing -OPS lineage and the project's PERM manifest.
-  console.log('Stage 8/11 - Continuous Engineering Department (Permanent Self-Healing Org)');
+  console.log('Stage 8/12 - Continuous Engineering Department (Permanent Self-Healing Org)');
   const contRun = await runContinuousEngineeringDepartment(services, baseline.projectId, { sampleSize: 2 });
   if (contRun.finalVerdict !== 'CERTIFIED_COMPLETE') {
     logger.warn('demo.continuous.failed', {
@@ -388,7 +390,7 @@ async function main(): Promise<number> {
   // returns a breach (an error_rate above the default threshold). The
   // observation is sha256-anchored and carries its own id so the Safe
   // Change Auditor can later re-derive the same content byte-for-byte.
-  console.log('Stage 9/11 - Live Runtime Telemetry observation (synthetic)');
+  console.log('Stage 9/12 - Live Runtime Telemetry observation (synthetic)');
   const telemetrySource = new SyntheticTelemetrySource();
   const telemetryBase = baseline.pages[0]?.artifactId ?? 'PAGE-0001';
   const telemetryObservation: TelemetryObservation = telemetrySource.observe(
@@ -407,7 +409,7 @@ async function main(): Promise<number> {
   // and routes actionable/regression items to the Safe Change Department.
   // Since the new observation is a breach (was pass -> now fail, REGRESSED)
   // and was NOT in the prior report, it is classified as `regression`.
-  console.log('Stage 10/11 - Continuous Discovery Recursion');
+  console.log('Stage 10/12 - Continuous Discovery Recursion');
   const recursionResult = await runRecursionDepartment(services, {
     prior: contRun.workerReport.driftFindings,
     current: [
@@ -445,7 +447,7 @@ async function main(): Promise<number> {
   // On success, the artifact's DoC walks through the L4 drift loop:
   //   CERTIFIED COMPLETE -> REGRESSION_DETECTED -> RE-MEDIATED ->
   //   RE-MEDIATION-VERIFIED -> CERTIFIED COMPLETE
-  console.log('Stage 11/11 - Safe Change Intelligence (apply + drift loop)');
+  console.log('Stage 11/12 - Safe Change Intelligence (apply + drift loop)');
   const changeEnv = createDeploymentEnvironment('production');
   await deployRelease(services, opsRun.scope, changeEnv);
   for (const exp of opsRun.scope) await verifyDeployedUnit(services, exp, changeEnv);
@@ -523,6 +525,62 @@ async function main(): Promise<number> {
       `RE-MEDIATED -> RE-MEDIATION-VERIFIED -> ${docStateOf(final)}`,
   );
 
+  // --- Stage 12: Permanent Engineering Organization --------------------------
+  // Level 5 — composition-only orchestrator that drives Guardian (signal
+  // classification) → Impact Analysis (surprise set) → Safe Change
+  // Department (Worker / Boss / Auditor) → Change History → Living Blueprint.
+  // The PEO does NOT certify. The Continuous Engineering Boss + Auditor
+  // remain the only certifiers. We exercise two signals so the demo shows:
+  //   - a NOVEL first-seen drift (recommended, not applied — needs human)
+  //   - a RECURRING drift that escalates to the L4 safe change path.
+  console.log('Stage 12/12 - Permanent Engineering Organization (L5 composition)');
+  const peoCandidate = candidateFromDrift(
+    'CHG-PE-9001',
+    firstChange.drift,
+    'self-healing',
+    'config_restoration',
+    'PEO demo candidate from Stage 11 drift',
+    'composition of Guardian + Impact + Safe Change',
+    services,
+  ).candidate;
+  const peoDriftRecurring: DriftItem = {
+    artifactId: firstChange.drift.artifactId,
+    dimension: firstChange.drift.dimension,
+    was: firstChange.drift.was,
+    now: firstChange.drift.now,
+    kind: firstChange.drift.kind,
+    source: firstChange.drift.source,
+  };
+  const peoPriorWatch1 = classifySignal({
+    signal: { kind: 'drift', drift: peoDriftRecurring },
+    priorWatches: [],
+    memory: emptyGuardianMemory(),
+  });
+  const peoPriorWatch2 = classifySignal({
+    signal: { kind: 'drift', drift: peoDriftRecurring },
+    priorWatches: [peoPriorWatch1],
+    memory: emptyGuardianMemory(),
+  });
+  const peoResult = await runPermanentEngineeringOrganization(services, {
+    candidate: peoCandidate,
+    priorWatches: [peoPriorWatch1, peoPriorWatch2],
+    memory: emptyGuardianMemory(),
+    projectId: baseline.projectId,
+  });
+  console.log(
+    `  PEO chain: source=${peoResult.source}; ` +
+      `Guardian=${peoResult.watch.classifiedAs}; ` +
+      `impact=${peoResult.impact.affected.length} affected (hash ${peoResult.impact.analysisHash.slice(0, 12)}…); ` +
+      `SafeChange=${peoResult.change.status}; ` +
+      `authorized=${peoResult.authorized}; ` +
+      `escalated=${peoResult.escalated}; ` +
+      `watchEvidence=${peoResult.watch.evidenceHash.slice(0, 12)}…; ` +
+      `rationale=${peoResult.rationale.slice(0, 80)}…`,
+  );
+  if (peoResult.watch.classifiedAs !== 'RECURRING') {
+    logger.warn('demo.peo.unexpectedClassification', { classifiedAs: peoResult.watch.classifiedAs });
+  }
+
   // --- Honest reporting: lineage, certification and confidence as facts ------
 
   const firstPageId = baseline.pages[0]?.artifactId ?? 'PAGE-0001';
@@ -574,8 +632,14 @@ async function main(): Promise<number> {
     `Blueprint confidence: ${certification.confidence?.aggregateScore ?? 'n/a'} ` +
       `(unproduced dimensions excluded: ${unproduced.join(', ') || 'none'})`,
   );
-    console.log('Level-3 + Level-4 + Level-5 + L4 Live Telemetry + Recursion + Safe Change demo finished.');
-  return certification.certified && opsRun.status === 'passed' && contRun.finalVerdict === 'CERTIFIED_COMPLETE' && changeResult.status === 'AUTHORIZED_AND_APPLIED' && docStateOf(final) === 'CERTIFIED COMPLETE' ? 0 : 1;
+    console.log('Level-3 + Level-4 + Level-5 (Permanent Engineering Organization) + L4 Live Telemetry + Recursion + Safe Change demo finished.');
+  return certification.certified
+    && opsRun.status === 'passed'
+    && contRun.finalVerdict === 'CERTIFIED_COMPLETE'
+    && changeResult.status === 'AUTHORIZED_AND_APPLIED'
+    && docStateOf(final) === 'CERTIFIED COMPLETE'
+    && peoResult.watch.classifiedAs === 'RECURRING'
+    ? 0 : 1;
 }
 
 main()

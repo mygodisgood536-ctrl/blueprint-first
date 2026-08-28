@@ -31,9 +31,45 @@ LEVEL 2   Verified Engineering Organization ......... COMPLETE (verified)
 ├── Eleven-dimension coverage per artifact class .... ENFORCED + TESTED
 └── Definition-of-Complete state machine (§0.17) .... IMPLEMENTED + TESTED
 
-LEVEL 3   Full Discovery + Simulation + Testing ..... NEXT
-LEVEL 4   Operations & Observability ................ PLANNED
-LEVEL 5   Permanent Self-Healing Engineering Org .... PLANNED
+LEVEL 3   Full Discovery + Simulation + Testing ..... COMPLETE (verified)
+LEVEL 4   Operations & Observability ................ COMPLETE (verified)
+LEVEL 5   Permanent Self-Healing Engineering Org .... COMPLETE (verified)
+```
+
+## Current position (Level 5 — verified)
+
+```
+243 / 243 tests passing across 60 test suites
++16 L5-specific tests covering PEO composition, Guardian (KNOWN/RECURRING/NOVEL),
+   Impact Analysis determinism, Self-Healing (reproduce/refuse), Evolution Review,
+   Learning engine, Change History append-only invariant, Living Blueprint
+   snapshot/restore, and L4 integration.
+
+Typecheck:  clean
+Build:      clean
+Demo:       Stages 1-12 complete (Stage 12 = Permanent Engineering Organization
+            composition over the L4 Safe Change + Continuous Engineering chain)
+
+L5 components (src/perm/*):
+  - department.ts          : PEO orchestrator (composes L4 engines, never certifies)
+  - types.ts               : GuardianWatch, CandidateChange, EvolutionSeed, ...
+  - guardian.ts            : classifies runtime signals (KNOWN/RECURRING/NOVEL)
+  - impact-analysis.ts     : declared+discovered surprise set, deterministic hash
+  - self-healing.ts        : reproduces drift before proposing any fix; refuses
+                             to fabricate when reproduction fails
+  - evolution.ts           : review-only evolution seeds; never applies
+  - learning.ts            : lesson recording with deterministic hashes
+  - change-history.ts      : append-only lineage with duplicate-entry rejection
+  - living-blueprint.ts    : certified snapshots + restore via currentLivingBlueprint
+  - dependency-map.ts      : graph-based downstream surface for impact analysis
+  - index.ts               : public surface
+
+Independence preserved:
+  - L4 Continuous Engineering Boss + Auditor remain the only certifiers
+  - PEO never stamps CERTIFIED; authorized = (change.status !== 'REJECTED')
+  - Evolution review never applies; Living Blueprint never mutates upstream state
+  - Self-Healing never fabricates a candidate without reproduction
+  - Change History rejects duplicate entry IDs
 ```
 
 ## Level-by-level mapping to modules
@@ -80,17 +116,17 @@ eleven-dimension coverage enforced per artifact class via council-resolvable
 judgment dimensions; Definition-of-Complete machine (§0.17) in `core/doc.ts`
 with governor entitlement checks and inference from recorded history.
 
-### Level 3 — Full Discovery + Simulation + Testing (planned)
+### Level 3 — Full Discovery + Simulation + Testing (COMPLETE)
 Remaining discovery clusters; Behavioral/Non-Functional discovery; Recursive
 Page Expansion; Edge-Case Discovery; Industry Comparison Engine; Discovery Red
 Team; Negative-Space Discovery; Contradiction Engine; Digital Twin; AI
 Acceptance Testing.
 
-### Level 4 — Operations & Observability (planned)
+### Level 4 — Operations & Observability (COMPLETE)
 Deployment artifacts (`*-DEPLOY`, `*-OPS` lineage), Live Verification Engine
 against running systems, drift detection against the Living Blueprint.
 
-### Level 5 — Permanent Self-Healing Engineering Organization (planned)
+### Level 5 — Permanent Self-Healing Engineering Organization (COMPLETE)
 Continuous Engineering department, AI Engineering Guardian, AI Self-Healing
 Engineering System, Living Blueprint maintenance, Continuous Product Evolution,
 Engineering Memory, Safe Change Intelligence, Continuous Learning Engine.
