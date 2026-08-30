@@ -82,6 +82,18 @@ function artifactSummary(a: Artifact): Record<string, unknown> {  return {
   };
 }
 
+function projectSummary(p: Artifact): Record<string, unknown> {
+  return {
+    id: p.id,
+    type: p.type,
+    title: p.title,
+    status: p.status,
+    mode: p.attributes['mode'],
+    lifecycleComplete: p.attributes['lifecycleComplete'] ?? null,
+    version: p.version,
+  };
+}
+
 /** Options for buildServer; all optional for backwards compatibility. */
 export interface BuildServerOptions {
   /**
@@ -136,9 +148,19 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
   // --- summary ---------------------------------------------------------------
   app.get('/api/summary', async (_req, res) => {
     const evidenceEntries = await result.evidence.all();
+    const project = result.project;
+    const projectMode = result.projectMode;
+    const lifecycleComplete =
+      result.registry === undefined ? null : await result.registry.lifecycleComplete(project.id);
     res.json({
       productName: result.baseline.projectId,
       projectId: result.baseline.projectId,
+      project: {
+        id: project.id,
+        title: project.title,
+        mode: projectMode,
+        lifecycleComplete,
+      },
       envName: result.config.envName,
       dataDir: result.config.dataDir,
       provider: 'ScriptedProvider (DETERMINISTIC DEMO RESPONSES - not a live model)',
@@ -147,6 +169,80 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
       evidenceCount: evidenceEntries.length,
       graph: result.stats,
       discoveryArtifacts: result.baseline.totalArtifacts,
+      designCoverage: {
+        coveredCount: result.designCoverage.covered.length,
+        totalDimensions: result.designCoverage.allDimensions.length,
+        missing: result.designCoverage.missing,
+        assessmentHash: result.designCoverage.assessmentHash,
+      },
+      businessModel: {
+        roleCount: result.businessModel.roles.length,
+        permissionCount: result.businessModel.rolePermissions.length,
+        entityCount: result.businessModel.entities.length,
+        workflowCount: result.businessModel.workflows.length,
+        adminRoles: result.businessModel.adminCapabilities.map((a) => a.role),
+      },
+      threatModel: {
+        threatCount: result.threatModel.threats.length,
+        strideCategories: [...new Set(result.threatModel.threats.map((t) => t.category))],
+        requirementCount: result.threatModel.securityRequirements.length,
+        p0Count: result.threatModel.securityRequirements.filter((r) => r.priority === 'P0').length,
+      },
+      uxVerification: {
+        tokenScore: result.uxVerification.tokenCoverage.score,
+        accessibilityScore: result.uxVerification.accessibilityCoverage.score,
+        responsiveScore: result.uxVerification.responsiveCoverage.score,
+        overallScore: result.uxVerification.overallScore,
+        findingsCount: result.uxVerification.findings.length,
+      },
+      designCodeTrace: {
+        total: result.designCodeTrace.total,
+        traced: result.designCodeTrace.traced,
+        unimplemented: result.designCodeTrace.unimplemented,
+        orphans: result.designCodeTrace.orphans,
+        forwardComplete: result.designCodeTrace.forwardComplete,
+        reverseComplete: result.designCodeTrace.reverseComplete,
+      },
+      projectBinding: {
+        documentCount: result.projectBinding.documentCount,
+        documentIds: result.projectBinding.documentIds.slice(0, 20),
+        ownerCount: result.projectBinding.ownerCount,
+      },
+      portability: {
+        artifactCount: result.portability.artifactCount,
+        edgeCount: result.portability.edgeCount,
+        evidenceCount: result.portability.evidenceCount,
+        integrityVerified: result.portability.integrityVerified,
+      },
+      account: {
+        accountCount: result.account.accountCount,
+        ownerAccountId: result.account.ownerAccountId,
+        ownerCanAccess: result.account.ownerCanAccess,
+        strangerCanAccess: result.account.strangerCanAccess,
+      },
+      designQuality: {
+        overallScore: result.designQuality.overallScore,
+        identitySpecificity: result.designQuality.identitySpecificity,
+        componentConsistency: result.designQuality.componentConsistency,
+        accessibility: result.designQuality.accessibility,
+        findingsCount: result.designQuality.findings.length,
+      },
+      designConsistency: {
+        overallConsistency: result.designConsistency.overallConsistency,
+        tokenVariance: result.designConsistency.tokenConsistency.variance,
+        componentVariance: result.designConsistency.componentConsistency.variance,
+        spacingVariance: result.designConsistency.spacingConsistency.variance,
+        typographyVariance: result.designConsistency.typographyConsistency.variance,
+        exceptionsCount: result.designConsistency.exceptions.length,
+      },
+      visual: {
+        identityTone: result.visual.identity.direction.tone,
+        seedHue: result.visual.identity.direction.seedHue,
+        seedSaturation: result.visual.identity.direction.seedSaturation,
+        componentCount: result.visual.components.inventoried.length,
+        motionDurationStandard: result.visual.tokens.motion?.durationStandard,
+        reducedMotion: result.visual.tokens.motion?.reducedMotion,
+      },
       blueprintId: result.design.blueprintId,
       manifestId: result.build.manifestId ?? null,
       certified: result.certification.certified,
@@ -161,6 +257,110 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
       peoClassification: result.peoResult.watch.classifiedAs,
       peoAuthorized: result.peoResult.authorized,
     });
+  });
+
+  // --- projects (project foundation) ------------------------------------------
+  app.get('/api/projects', async (_req, res) => {
+    const projects = await result.registry.listProjects();
+    res.json({
+      count: projects.length,
+      projects: projects.map((p) => ({
+        id: p.id,
+        title: p.title,
+        mode: p.attributes['mode'],
+        status: p.status,
+        lifecycleComplete: p.attributes['lifecycleComplete'] ?? null,
+      })),
+    });
+  });
+
+  app.get('/api/projects/:id', async (req, res) => {
+    try {
+      const project = await result.registry.requireProject(req.params['id']!);
+      res.json({
+        ...projectSummary(project),
+        description: project.description,
+        owner: project.attributes['owner'] ?? null,
+        scope: project.attributes['scope'] ?? [],
+        config: project.attributes['projectConfig'] ?? {},
+        designCoverage: {
+          coveredCount: result.designCoverage.covered.length,
+          totalDimensions: result.designCoverage.allDimensions.length,
+          missing: result.designCoverage.missing,
+          gateSatisfied: result.designCoverage.missing.length === 0,
+        },
+        businessModel: {
+          roleCount: result.businessModel.roles.length,
+          permissionCount: result.businessModel.rolePermissions.length,
+          entityCount: result.businessModel.entities.length,
+          workflowCount: result.businessModel.workflows.length,
+          adminRoles: result.businessModel.adminCapabilities.map((a) => a.role),
+        },
+        threatModel: {
+          threatCount: result.threatModel.threats.length,
+          strideCategories: [...new Set(result.threatModel.threats.map((t) => t.category))],
+          requirementCount: result.threatModel.securityRequirements.length,
+          p0Count: result.threatModel.securityRequirements.filter((r) => r.priority === 'P0').length,
+        },
+        uxVerification: {
+          tokenScore: result.uxVerification.tokenCoverage.score,
+          accessibilityScore: result.uxVerification.accessibilityCoverage.score,
+          responsiveScore: result.uxVerification.responsiveCoverage.score,
+          overallScore: result.uxVerification.overallScore,
+          findingsCount: result.uxVerification.findings.length,
+        },
+        designCodeTrace: {
+          total: result.designCodeTrace.total,
+          traced: result.designCodeTrace.traced,
+          unimplemented: result.designCodeTrace.unimplemented,
+          orphans: result.designCodeTrace.orphans,
+          forwardComplete: result.designCodeTrace.forwardComplete,
+          reverseComplete: result.designCodeTrace.reverseComplete,
+        },
+        projectBinding: {
+          documentCount: result.projectBinding.documentCount,
+          documentIds: result.projectBinding.documentIds.slice(0, 20),
+          ownerCount: result.projectBinding.ownerCount,
+        },
+        portability: {
+          artifactCount: result.portability.artifactCount,
+          edgeCount: result.portability.edgeCount,
+          evidenceCount: result.portability.evidenceCount,
+          integrityVerified: result.portability.integrityVerified,
+        },
+        account: {
+          accountCount: result.account.accountCount,
+          ownerAccountId: result.account.ownerAccountId,
+          ownerCanAccess: result.account.ownerCanAccess,
+          strangerCanAccess: result.account.strangerCanAccess,
+        },
+        designQuality: {
+          overallScore: result.designQuality.overallScore,
+          identitySpecificity: result.designQuality.identitySpecificity,
+          componentConsistency: result.designQuality.componentConsistency,
+          accessibility: result.designQuality.accessibility,
+          findingsCount: result.designQuality.findings.length,
+        },
+        designConsistency: {
+          overallConsistency: result.designConsistency.overallConsistency,
+          tokenVariance: result.designConsistency.tokenConsistency.variance,
+          componentVariance: result.designConsistency.componentConsistency.variance,
+          spacingVariance: result.designConsistency.spacingConsistency.variance,
+          typographyVariance: result.designConsistency.typographyConsistency.variance,
+          exceptionsCount: result.designConsistency.exceptions.length,
+        },
+        visual: {
+          identityTone: result.visual.identity.direction.tone,
+          seedHue: result.visual.identity.direction.seedHue,
+          seedSaturation: result.visual.identity.direction.seedSaturation,
+          componentCount: result.visual.components.inventoried.length,
+          motionDurationStandard: result.visual.tokens.motion?.durationStandard,
+          reducedMotion: result.visual.tokens.motion?.reducedMotion,
+        },
+      });
+    } catch {
+      res.status(404).json({ error: 'project-not-found' });
+    }
   });
 
   // --- roadmap ---------------------------------------------------------------

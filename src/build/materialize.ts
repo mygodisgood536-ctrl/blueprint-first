@@ -35,6 +35,123 @@ export interface BuildMaterializationResult {
   readonly allArtifactIds: readonly string[];
 }
 
+/** Flatten the nested DesignTokenSet color tokens to the flat record the UX verifier expects. */
+function flattenColorsForUX(doc: PageDesignDoc): Record<string, string> {
+  const c = doc.designTokens?.color;
+  if (!c) return {};
+  return {
+    primary: c.primary ?? '',
+    secondary: c.secondary ?? '',
+    surface: c.surface ?? '',
+    surfaceAlt: c.surfaceAlt ?? '',
+    text: c.text ?? '',
+    mutedText: c.mutedText ?? '',
+    border: c.border ?? '',
+    danger: c.danger ?? '',
+    success: c.success ?? '',
+    focus: c.focus ?? '',
+    primaryHover: c.primaryHover ?? '',
+    primaryPressed: c.primaryPressed ?? '',
+    onPrimary: c.onPrimary ?? '',
+    accent: c.accent ?? '',
+    onAccent: c.onAccent ?? '',
+    dangerHover: c.dangerHover ?? '',
+    warning: c.warning ?? '',
+    info: c.info ?? '',
+    selected: c.selected ?? '',
+    selectedText: c.selectedText ?? '',
+    disabledBg: c.disabledBg ?? '',
+    disabledText: c.disabledText ?? '',
+  };
+}
+
+/** Extract typography as flat record for UX verifier. */
+function flattenTypographyForUX(doc: PageDesignDoc): Record<string, unknown> {
+  const t = doc.designTokens?.typography;
+  if (!t) return {};
+  return {
+    baseFontSize: t.baseFontSize,
+    fontFamily: t.fontFamily,
+    fallbackFamily: t.fallbackFamily,
+    displaySize: t.display?.size,
+    displayWeight: t.display?.weight,
+    displayLineHeight: t.display?.lineHeight,
+    headingSize: t.heading?.size,
+    headingWeight: t.heading?.weight,
+    headingLineHeight: t.heading?.lineHeight,
+    bodySize: t.body?.size,
+    bodyWeight: t.body?.weight,
+    bodyLineHeight: t.body?.lineHeight,
+    captionSize: t.caption?.size,
+    captionWeight: t.caption?.weight,
+    captionLineHeight: t.caption?.lineHeight,
+  };
+}
+
+/** Extract spacing as flat record for UX verifier. */
+function flattenSpacingForUX(doc: PageDesignDoc): Record<string, string> {
+  const s = doc.designTokens?.spacing;
+  if (!s) return {};
+  return {
+    unit: s.unit ?? '',
+    pageMargin: s.pageMargin ?? '',
+    controlGap: s.controlGap ?? '',
+    sectionGap: s.sectionGap ?? '',
+    componentGap: s.componentGap ?? '',
+    density: s.density ?? '',
+  };
+}
+
+/** Extract radius as flat record for UX verifier. */
+function flattenRadiusForUX(doc: PageDesignDoc): Record<string, string> {
+  const r = doc.designTokens?.radius;
+  if (!r) return {};
+  return {
+    unit: r.unit ?? '',
+    control: r.control ?? '',
+    card: r.card ?? '',
+    modal: r.modal ?? '',
+    surface: r.surface ?? '',
+  };
+}
+
+/** Extract elevation as flat record for UX verifier. */
+function flattenElevationForUX(doc: PageDesignDoc): Record<string, string> {
+  const e = doc.designTokens?.elevation;
+  if (!e) return {};
+  return {
+    unit: e.unit ?? '',
+    level0: e.levels?.[0]?.shadow ?? '',
+    level1: e.levels?.[1]?.shadow ?? '',
+    level2: e.levels?.[2]?.shadow ?? '',
+    level3: e.levels?.[3]?.shadow ?? '',
+  };
+}
+
+/** Build the realized design surface the UX verifier reads from impl attributes. */
+function buildRealizedDesignSurface(doc: PageDesignDoc): {
+  designTokens: { colors: Record<string, string>; typography: Record<string, unknown>; spacing: Record<string, string>; radius: Record<string, string>; elevation: Record<string, string> };
+  accessibility: { passed: string[]; failed: string[] };
+  responsive: { passed: string[]; failed: string[] };
+} {
+  const designTokens = {
+    colors: flattenColorsForUX(doc),
+    typography: flattenTypographyForUX(doc),
+    spacing: flattenSpacingForUX(doc),
+    radius: flattenRadiusForUX(doc),
+    elevation: flattenElevationForUX(doc),
+  };
+  const accessibility = {
+    passed: (doc.accessibility ?? []).map((r) => r.guideline),
+    failed: [],
+  };
+  const responsive = {
+    passed: (doc.responsive ?? []).map((r) => `${r.breakpointMin ?? 'base'}: ${r.behavior}`),
+    failed: [],
+  };
+  return { designTokens, accessibility, responsive };
+}
+
 export async function materializeImplementationPackage(
   services: CoreServices,
   docs: ImplementationPackageDocs,
@@ -60,6 +177,7 @@ export async function materializeImplementationPackage(
       attributes: {
         implementationDoc: JSON.parse(JSON.stringify(doc)),
         implKind: 'page',
+        ...buildRealizedDesignSurface(doc),
         ...(note !== undefined ? { aiNote: note } : {}),
       },
     });

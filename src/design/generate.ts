@@ -12,6 +12,8 @@ import type { CoreServices } from '../core/services.ts';
 import type { FeatureDesignDoc, PageDesignDoc } from './types.ts';
 import type { DiscoveryBaseline } from '../discovery/materialize.ts';
 import { generatePageDesign } from './generate-page.ts';
+import { buildVisualDesignSystem } from './system/visual-system.ts';
+import type { BusinessModel } from '../discovery/business-model.ts';
 
 /** Fails unless every anchor artifact of the baseline is VERIFIED. */
 export async function assertVerifiedBaseline(
@@ -47,10 +49,15 @@ export interface DesignPackageDocs {
 export async function generateDesignPackage(
   services: CoreServices,
   baseline: DiscoveryBaseline,
+  businessModel?: BusinessModel | null,
 ): Promise<DesignPackageDocs> {
+  // Build the shared, project-specific visual design system ONCE so every page
+  // derives its tokens/identity/components/strategies from the same source
+  // (consistency across pages) while still being fully project-driven.
+  const visual = buildVisualDesignSystem(baseline, businessModel);
   const pageDesigns: PageDesignDoc[] = [];
   for (const pageEntry of baseline.pages) {
-    pageDesigns.push(await generatePageDesign(services, baseline, pageEntry));
+    pageDesigns.push(await generatePageDesign(services, baseline, pageEntry, visual));
   }
 
   // Page keys grouped by their owning module artifact id (parentId).

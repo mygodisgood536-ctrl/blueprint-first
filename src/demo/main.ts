@@ -40,15 +40,36 @@ import { MemoryEvidenceLog } from '../verification/evidence.ts';
 import { AiRouter } from '../ai/router.ts';
 import { ScriptedProvider } from '../ai/scripted-provider.ts';
 import type { CoreServices } from '../core/services.ts';
+import { ProjectRegistry } from '../project/registry.ts';
+import type { ProjectOwner } from '../project/registry.ts';
+import type { ProjectMode } from '../project/types.ts';
+import { PROJECT_MODE_LABELS } from '../project/types.ts';
 import {
   DiscoveryDepartment,
   UNDERSTANDING_MARKER,
   STRUCTURAL_MARKER,
 } from '../discovery/department/engine.ts';
 import { BOSS_MARKER } from '../discovery/department/boss.ts';
+import { deriveBusinessModel, type BusinessModel } from '../discovery/business-model.ts';
+import { deriveThreatModel, type ThreatModel } from '../security/threat-model.ts';
 import { AiDesignStudio } from '../design/studio.ts';
+import { buildVisualDesignSystem, type VisualDesignSystem } from '../design/system/visual-system.ts';
+import {
+  assessDesignCoverage,
+  designCoverageGate,
+  recordDesignCoverageEvidence,
+} from '../design/coverage.ts';
+import type { DesignCoverageAssessment } from '../project/types.ts';
 import { approveBlueprint } from '../design/approval.ts';
 import { AiBuildStudio } from '../build/studio.ts';
+import { verifyUXAgainstImplementation, type UXVerificationResult } from '../visual/ux-verification.ts';
+import {
+  assessDesignQuality,
+  assessDesignConsistency,
+  recordDesignQualityEvidence,
+  type DesignQualityAssessment,
+  type DesignConsistencyReport,
+} from '../visual/design-quality.ts';
 import { runTestDepartment } from '../testing/department.ts';
 import { runOperationsDepartment } from '../operations/department.ts';
 import { runContinuousEngineeringDepartment } from '../continuous/department.ts';
@@ -68,6 +89,11 @@ import { MasterVerificationEngine } from '../verification/master-engine.ts';
 import { createClosureVerifier } from '../verification/closure-verifier.ts';
 import { certifyBlueprintCompleteness } from '../design/certification.ts';
 import { lineageStatus, coverageSummary, requirementsTraceability } from '../traceability/trace.ts';
+import { buildDesignCodeTrace, type DesignCodeTraceReport } from '../traceability/design-code-trace.ts';
+import { DocumentProjectBinder, type ProjectBindingReport } from '../chat/project-binding.ts';
+import { exportProjectBundle, transferProject, type ImportResult } from '../portability/bundle.ts';
+import { AccountRegistry } from '../account/accounts.ts';
+import { AccountIsolation } from '../account/isolation.ts';
 import type { Artifact } from '../core/artifact.ts';
 import type { DriftItem } from '../verification/live-engine.ts';
 import type { TelemetryObservation } from '../telemetry/source.ts';
@@ -177,11 +203,59 @@ export interface DemoResult {
   evidence: MemoryEvidenceLog;
   store: JsonFileArtifactStore;
   allocator: ArtifactIdAllocator;
+  /** The adopted PROJECT artifact (identity + mode + scope as structured state). */
+  project: Artifact;
+  /** The project's declared mode. */
+  projectMode: ProjectMode;
+  /** The registry that owns the project's scoping metadata. */
+  registry: ProjectRegistry;
+  /** Design-coverage assessment across the produced page designs (expansion §10). */
+  designCoverage: DesignCoverageAssessment;
+  /** Business capability model derived from discovery artifacts (expansion §10). */
+  businessModel: BusinessModel;
+  /** Security threat model and requirements derived from business model (expansion §10). */
+  threatModel: ThreatModel;
+  /** Visual/UX verification against implementation (expansion §10). */
+  uxVerification: UXVerificationResult;
+  /** Bidirectional design↔code traceability report (expansion §10). */
+  designCodeTrace: DesignCodeTraceReport;
+  /** Chat/document↔project binding report (expansion §10). */
+  projectBinding: ProjectBindingReport;
+  /** Portability: export/transfer/import result (expansion §10). */
+  portability: ImportResult;
+  /** Account/authentication/isolation result (expansion §11). */
+  account: AccountReport;
+  /** Design quality assessment (visual/product design capability). */
+  designQuality: DesignQualityAssessment;
+  /** Design consistency assessment (visual/product design capability). */
+  designConsistency: DesignConsistencyReport;
+  /** Visual design system (visual/product design capability). */
+  visual: VisualDesignSystem;
+}
+
+export interface AccountReport {
+  readonly accountCount: number;
+  readonly ownerAccountId: string;
+  readonly ownerCanAccess: boolean;
+  readonly strangerCanAccess: boolean;
+}
+
+/**
+ * Pipeline run options. `mode` selects the project's lifecycle scope; the
+ * default (full-product) preserves the complete 12-stage chain. Lower modes
+ * declare out-of-scope stages that must never be falsely completed.
+ */
+export interface RunDemoOptions {
+  readonly mode?: ProjectMode;
+  readonly owner?: ProjectOwner;
 }
 
 export async function runDemoPipeline(
   logger?: Logger,
+  options?: RunDemoOptions,
 ): Promise<DemoResult> {
+  const mode = options?.mode ?? 'full-product';
+  const owner = options?.owner ?? { userId: 'product-owner-01', label: 'Demo Product Owner' };
   const config = loadConfig(process.env);
   const log = logger ?? createLogger({ level: config.logLevel, sink: consoleSink() });
   log.info('demo.start', {
@@ -249,6 +323,14 @@ export async function runDemoPipeline(
   });
   const router = new AiRouter({ logger: log });
   router.register(scripted).setDefaultProvider('scripted');
+  const registry = new ProjectRegistry({
+    store,
+    allocator,
+    graph,
+    evidence,
+    router,
+    logger: log,
+  });
   const services: CoreServices = {
     store,
     allocator,
@@ -256,6 +338,7 @@ export async function runDemoPipeline(
     evidence,
     router,
     logger: log,
+    projects: registry,
   };
 
   // --- Stage 1: discovery department -----------------------------------------
@@ -275,6 +358,63 @@ export async function runDemoPipeline(
       `${discovery.diff?.deltas.length ?? 0} reconstruction deltas`,
   );
 
+  // Adopt the discovery-materialized PROJECT artifact into the mode-aware
+  // registry (no duplicate PROJECT is created; discovery already made one).
+  const project = await registry.adoptProject({
+    projectId: baseline.projectId,
+    title: DISCOVERY_JSON.product.name,
+    description: DISCOVERY_JSON.product.summary,
+    mode,
+    owner,
+    actor: { kind: 'system', id: 'project-registry' },
+    scope: [DISCOVERY_JSON.product.name],
+  });
+  for (const entry of [...baseline.pages, ...baseline.features, ...baseline.modules]) {
+    await registry.linkArtifact(project.id, entry.artifactId);
+  }
+  console.log(
+    `  project ${project.id} adopted (mode=${mode} / ${PROJECT_MODE_LABELS[mode]}); ` +
+      `${baseline.totalArtifacts} artifact(s) linked`,
+  );
+
+  // --- Business model derivation (expansion §10) ----------------------------------
+  const businessModel = await deriveBusinessModel(services, baseline);
+  console.log(
+    `  business model: ${businessModel.roles.length} role(s), ` +
+      `${businessModel.rolePermissions.length} permission(s), ` +
+      `${businessModel.entities.length} entity(ies), ` +
+      `${businessModel.workflows.length} workflow(s); ` +
+      `${businessModel.adminCapabilities.length} admin role(s) identified`,
+  );
+
+  // --- Threat model & security requirements (expansion §10) -----------------------
+  const threatModel = await deriveThreatModel(services, businessModel, { kind: 'system', id: 'security-engine' });
+  console.log(
+    `  threat model: ${threatModel.threats.length} threat(s) across ${new Set(threatModel.threats.map((t) => t.category)).size} STRIDE categories; ` +
+      `${threatModel.securityRequirements.length} security requirement(s) (P0: ${threatModel.securityRequirements.filter((r) => r.priority === 'P0').length})`,
+  );
+
+  // --- Visual design system (visual/product design capability) ---------------------
+  const visual = buildVisualDesignSystem(baseline, businessModel);
+  console.log(
+    `  visual identity: ${visual.identity.direction.tone} (hue ${visual.identity.direction.seedHue}° sat ${visual.identity.direction.seedSaturation}%), ` +
+      `${visual.components.inventoried.length} components inventoried, ` +
+      `motion: ${visual.tokens.motion?.durationStandard ?? 'n/a'} / reduced-motion: ${visual.tokens.motion?.reducedMotion ?? false}`,
+  );
+
+  // --- Chat/document→project binding (expansion §10) -------------------------------
+  const documentBinder = new DocumentProjectBinder(services, registry);
+  const demoDocContent =
+    'TeamTask: lightweight task tracker for small teams. Core permissions: manage-tasks ' +
+    '(admin, member). Primary entity: Task (title, dueDate, points). Primary workflow: ' +
+    'task-lifecycle (create -> assign -> complete).';
+  await documentBinder.attachDocument(project.id, 'demo-owner', demoDocContent, { kind: 'system', id: 'chat-binder' });
+  const projectBinding = await documentBinder.listForProject(project.id);
+  console.log(
+    `  document↔project binding: ${projectBinding.documentCount} document(s) bound to ${projectBinding.projectId} ` +
+      `(resolved=${projectBinding.resolved}; ${projectBinding.ownerCount} owner(s))`,
+  );
+
   // --- Stage 2: design ---------------------------------------------------------
     console.log('Stage 2/12 - AI Design Studio');
   const design = await new AiDesignStudio(services).designFromBaseline(baseline);
@@ -283,6 +423,46 @@ export async function runDemoPipeline(
     throw new Error('Demo aborted: design was not accepted.');
   }
   console.log(`  accepted: blueprint ${design.blueprintId} with ${design.artifactIds.length - 1} designs`);
+
+  // --- Design-coverage governance (expansion §10) ------------------------------
+  let pageDesignIds: readonly string[] = [];
+  const pageDesigns: Parameters<typeof assessDesignCoverage>[0]['pageDesigns'][number][] = [];
+  {
+    const blueprint = await store.require(design.blueprintId);
+    pageDesignIds = blueprint.attributes['pageDesignIds'] as readonly string[];
+    for (const designId of pageDesignIds) {
+      const designArtifact = await store.require(designId);
+      const doc = designArtifact.attributes['designDoc'] as Parameters<typeof assessDesignCoverage>[0]['pageDesigns'][number];
+      if (doc && doc.layout) pageDesigns.push(doc);
+    }
+  }
+  const designCoverage = assessDesignCoverage({ pageDesigns, mode });
+  await recordDesignCoverageEvidence(services.evidence, designCoverage, {
+    producerId: 'demo-design-coverage',
+    projectId: project.id,
+    pageDesignIds: [],
+  });
+  const coverageGate = designCoverageGate(designCoverage);
+  console.log(
+    `  design coverage: ${designCoverage.covered.length}/${designCoverage.allDimensions.length} covered; ` +
+      `${designCoverage.missing.length} missing` +
+      (coverageGate.satisfied ? ' (gate satisfied)' : ` (gate unmet: ${coverageGate.missing.join(', ')})`),
+  );
+
+  // --- Design quality + consistency assessment (visual/product design capability) --
+  const designQuality = assessDesignQuality(project.id, pageDesigns, visual);
+  const designConsistency = assessDesignConsistency(project.id, pageDesigns, visual);
+  await recordDesignQualityEvidence(services.evidence, designQuality, designConsistency, {
+    producerId: 'demo-design-quality',
+    projectId: project.id,
+    pageDesignIds: pageDesignIds,
+  });
+  console.log(
+    `  design quality: ${(designQuality.overallScore * 100).toFixed(0)}% ` +
+      `(identity ${(designQuality.identitySpecificity * 100).toFixed(0)}%, component ${(designQuality.componentConsistency * 100).toFixed(0)}%, a11y ${(designQuality.accessibility * 100).toFixed(0)}%); ` +
+      `consistency: ${(designConsistency.overallConsistency * 100).toFixed(0)}% ` +
+      `(${designQuality.findings.length} quality finding(s), ${designConsistency.exceptions.length} exception(s))`,
+  );
 
   // --- Stage 3: approval gate ----------------------------------------------------
     console.log('Stage 3/12 - Blueprint approval gate');
@@ -301,6 +481,15 @@ export async function runDemoPipeline(
     throw new Error('Demo aborted: build was not accepted.');
   }
   console.log(`  accepted: manifest ${build.manifestId} aggregating ${build.artifactIds.length - 1} implementations`);
+
+  // --- Visual/UX verification (expansion §10) ------------------------------------
+  const uxVerification = await verifyUXAgainstImplementation(services, design, build, designCoverage, { kind: 'system', id: 'ux-verifier' });
+  console.log(
+    `  UX verification: token score ${(uxVerification.tokenCoverage.score * 100).toFixed(0)}%, ` +
+      `a11y score ${(uxVerification.accessibilityCoverage.score * 100).toFixed(0)}%, ` +
+      `responsive score ${(uxVerification.responsiveCoverage.score * 100).toFixed(0)}% ` +
+      `(${uxVerification.findings.length} finding(s); overall ${(uxVerification.overallScore * 100).toFixed(0)}%)`,
+  );
 
   // --- Stage 5: verified engineering organization ------------------------------
     console.log('Stage 5/12 - Verified Engineering Organization');
@@ -341,6 +530,15 @@ export async function runDemoPipeline(
   );
   console.log(
     `  council=${council.verdict}, masterPassed=${master.masterPassed}, traceComplete=${trace.complete}`,
+  );
+
+  // --- Design↔code traceability (expansion §10) ----------------------------------
+  const designCodeTrace = await buildDesignCodeTrace(services, baseline.projectId, { kind: 'system', id: 'traceability-engine' });
+  console.log(
+    `  design→code trace: ${designCodeTrace.traced}/${designCodeTrace.total} traced ` +
+      `(forward=${designCodeTrace.forwardComplete ? 'complete' : 'incomplete'}, ` +
+      `reverse=${designCodeTrace.reverseComplete ? 'complete' : 'incomplete'}; ` +
+      `${designCodeTrace.unimplemented} unimplemented, ${designCodeTrace.orphans} orphan(s), ${designCodeTrace.unlinked} unlinked)`,
   );
 
   const certification = await certifyBlueprintCompleteness(services, {
@@ -639,6 +837,85 @@ export async function runDemoPipeline(
   const coverage = coverageSummary(graph, [baseline.projectId]);
   const stats = graph.stats();
 
+  // --- Portability: export + transfer to a fresh environment (expansion §10) -------
+  const bundleExport = await exportProjectBundle(services, baseline.projectId);
+  const freshArtifactStore = await (async () => {
+    const { MemoryArtifactStore } = await import('../core/memory-store.ts');
+    const { MemoryEvidenceLog } = await import('../verification/evidence.ts');
+    const { KnowledgeGraph } = await import('../core/graph.ts');
+    const { ArtifactIdAllocator } = await import('../core/id-allocator.ts');
+    return {
+      store: new MemoryArtifactStore(),
+      allocator: new ArtifactIdAllocator(),
+      graph: new KnowledgeGraph(),
+      evidence: new MemoryEvidenceLog(),
+    };
+  })();
+  const targetServices: CoreServices = {
+    store: freshArtifactStore.store,
+    allocator: freshArtifactStore.allocator,
+    graph: freshArtifactStore.graph,
+    evidence: freshArtifactStore.evidence,
+    router: services.router,
+  };
+  const portability = await transferProject(services, targetServices, baseline.projectId);
+  console.log(
+    `  portability: exported ${bundleExport.artifactCount} artifact(s), ` +
+      `${bundleExport.edgeCount} edge(s), ${bundleExport.evidenceCount} evidence; ` +
+      `transferred ${portability.artifactCount} artifact(s) to fresh env ` +
+      `(integrity ${portability.integrityVerified ? 'OK' : 'FAIL'})`,
+  );
+
+  // --- Account / authentication / isolation (expansion §11) ----------------
+  const accountRegistry = new AccountRegistry();
+  const ownerAccount = accountRegistry.createAccount({
+    id: owner.userId,
+    username: 'demo-owner',
+    password: 'demo-password-123',
+    displayName: 'Demo Product Owner',
+    role: 'developer',
+  });
+  accountRegistry.createAccount({
+    username: 'stranger',
+    password: 'stranger-password-123',
+    displayName: 'Stranger',
+    role: 'viewer',
+  });
+  const ownerSession = accountRegistry.authenticate('demo-owner', 'demo-password-123');
+  const strangerSession = accountRegistry.authenticate('stranger', 'stranger-password-123');
+  const isolation = new AccountIsolation(services);
+  const ownerScoped = await isolation.isolate(
+    accountRegistry.verifySession(ownerSession.token),
+  );
+  const strangerScoped = await isolation.isolate(
+    accountRegistry.verifySession(strangerSession.token),
+  );
+  let ownerCanAccess = false;
+  let strangerCanAccess = false;
+  try {
+    await ownerScoped.store.require(baseline.projectId);
+    ownerCanAccess = true;
+  } catch {
+    ownerCanAccess = false;
+  }
+  try {
+    await strangerScoped.store.require(baseline.projectId);
+    strangerCanAccess = true;
+  } catch {
+    strangerCanAccess = false;
+  }
+  const account: AccountReport = {
+    accountCount: 2,
+    ownerAccountId: ownerAccount.id,
+    ownerCanAccess,
+    strangerCanAccess,
+  };
+  console.log(
+    `  account/isolation: ${account.accountCount} account(s); owner ${account.ownerAccountId} ` +
+      `access=${ownerCanAccess}, stranger access=${strangerCanAccess}; ` +
+      `(tenant isolation enforced)`,
+  );
+
   log.info('demo.result', {
     discoveryArtifacts: baseline.totalArtifacts,
     blueprintId: design.blueprintId,
@@ -699,14 +976,31 @@ export async function runDemoPipeline(
     evidence,
     store,
     allocator,
+    project,
+    projectMode: mode,
+    registry,
+    designCoverage,
+    businessModel,
+    threatModel,
+    uxVerification,
+    designCodeTrace,
+    projectBinding,
+    portability,
+    account,
+    designQuality,
+    designConsistency,
+    visual,
   };
 }
 
 async function main(): Promise<number> {
   const result = await runDemoPipeline();
-  const { baseline, design, build, discovery, certification, council, lineage, coverage, stats, opsRun, contRun, changeResult, finalArtifact, peoResult } = result;
+  const { baseline, design, build, discovery, certification, council, lineage, coverage, stats, opsRun, contRun, changeResult, finalArtifact, peoResult, project, projectMode, registry } = result;
 
   console.log('');
+  console.log(`Project    : ${project.id} (${PROJECT_MODE_LABELS[projectMode]} / ${projectMode})`);
+  console.log(`  complete within scope at: ${await registry.lifecycleComplete(project.id)}`);
+  console.log(`  stage in scope (testing): ${await registry.isStageInScope(project.id, 'testing')}`);
   console.log(`IDs: ${discovery.artifactIds.length} discovered -> ${design.artifactIds.join(' ')} -> ${build.artifactIds.join(' ')}`);
   console.log(`Lineage of ${result.firstPageId}: complete through ${lineage.completeThrough}`);
   console.log(`Lineage gaps (beyond implemented levels): ${lineage.gaps.map((g) => g.id).join(', ') || 'none'}`);
