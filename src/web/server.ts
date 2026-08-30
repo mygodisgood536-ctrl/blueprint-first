@@ -16,6 +16,13 @@ import { runDemoPipeline, type DemoResult } from '../demo/main.ts';
 import type { CoreServices } from '../core/services.ts';
 import { docStateOf } from '../core/doc.ts';
 import type { Artifact } from '../core/artifact.ts';
+import { ConfigurationError, RoutingError } from '../core/errors.ts';
+import { DuplicateCredentialError } from '../ai/credential-store.ts';
+import { ModelCatalogue } from '../ai/model-catalogue.ts';
+import { ModelsDevSource } from '../ai/models-dev-source.ts';
+import { OpenRouterProvider } from '../ai/openrouter-provider.ts';
+import { ProviderManager } from '../ai/provider-manager.ts';
+import type { ModelAccessCategory } from '../ai/provider-metadata.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, 'public');
@@ -74,12 +81,46 @@ function artifactSummary(a: Artifact): Record<string, unknown> {  return {
   };
 }
 
-export async function buildServer(): Promise<{
+/** Options for buildServer; all optional for backwards compatibility. */
+export interface BuildServerOptions {
+  /**
+   * Injected ModelCatalogue. When omitted, a real catalogue is constructed
+   * from Models.dev + OpenRouter using default base URLs (and the
+   * OPENROUTER_API_KEY env var for the OpenRouter key, if present).
+   */
+  modelCatalogue?: ModelCatalogue;
+  /** Injected ProviderManager (selection/credential layer). */
+  providerManager?: ProviderManager;
+  /**
+   * Injectable fetch for the OpenRouter key-check (tests). Never persisted;
+   * used only at verification time.
+   */
+  openRouterFetchImpl?: unknown;
+  /** Demo pipeline result override (tests construct the server cheaply). */
+  result?: DemoResult;
+}
+
+export async function buildServer(options: BuildServerOptions = {}): Promise<{
   app: express.Express;
   result: DemoResult;
+  providerManager: ProviderManager;
+  modelCatalogue: ModelCatalogue;
 }> {
   const logger = createLogger({ level: 'warn', sink: consoleSink() });
-  const result = await runDemoPipeline(logger);
+  const result = options.result ?? (await runDemoPipeline(logger));
+  const modelCatalogue =
+    options.modelCatalogue ??
+    new ModelCatalogue({
+      modelsDevSource: new ModelsDevSource({}),
+      ...(process.env['OPENROUTER_API_KEY']?.trim()
+        ? {
+            openRouterProvider: new OpenRouterProvider({
+              apiKey: process.env['OPENROUTER_API_KEY'].trim(),
+            }),
+          }
+        : {}),
+    });
+  const providerManager = options.providerManager ?? new ProviderManager({ logger });
 
   const app = express();
   app.use(express.json());
@@ -323,7 +364,183 @@ export async function buildServer(): Promise<{
     res.json(result.trace);
   });
 
-  return { app, result };
+  // --- model selector (catalogue + credentials + selection) -------------------------
+  // Honest-surface rules: a catalogue entry proves a model EXISTS; `verified`
+  // proves ACCESSIBLE via a real connection test. Credentials are accepted once
+  // and never echoed; per-user isolation is enforced via the x-bf-user header
+  // (a real account system will later replace this header as the identity source).
+
+  const jsonError = (res: express.Response, status: number, error: unknown): void => {
+    // Error messages never contain secrets (enforced by the core error types).
+    res.status(status).json({ error: error instanceof Error ? error.message : String(error) });
+  };
+
+  const userIdOf = (req: express.Request): string | null => {
+    const raw = req.headers['x-bf-user'];
+    if (typeof raw !== 'string') return null;
+    const trimmed = raw.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  };
+
+  const ACCESS_CATEGORIES: readonly ModelAccessCategory[] = [
+    'free_no_api_key',
+    'free_api_key_required',
+    'free_oauth',
+    'platform_provided',
+    'paid',
+    'local',
+  ];
+
+  app.get('/api/models', async (req, res) => {
+    try {
+      const rawCategories = req.query['accessCategory'];
+      const requested = Array.isArray(rawCategories) ? rawCategories : rawCategories ? [rawCategories] : [];
+      const categories = requested.filter((c): c is ModelAccessCategory =>
+        typeof c === 'string' && (ACCESS_CATEGORIES as readonly string[]).includes(c),
+      );
+      const search = await modelCatalogue.search({
+        ...(typeof req.query['q'] === 'string' && req.query['q'].length > 0
+          ? { searchTerm: req.query['q'] }
+          : {}),
+        ...(categories.length > 0 ? { accessCategories: categories } : {}),
+        ...(req.query['availableOnly'] === 'true' ? { availableOnly: true } : {}),
+      });
+      res.json({ total: search.total, models: search.models, sources: search.sources });
+    } catch (error) {
+      jsonError(res, 502, error); // upstream catalogue failure, reported honestly
+    }
+  });
+
+  app.get('/api/models/stats', async (_req, res) => {
+    try {
+      res.json(await modelCatalogue.getStats());
+    } catch (error) {
+      jsonError(res, 502, error);
+    }
+  });
+
+  app.get('/api/models/selection', (req, res) => {
+    const user = userIdOf(req);
+    if (user === null) {
+      res.status(401).json({ error: 'missing x-bf-user header' });
+      return;
+    }
+    res.json({ selection: providerManager.getCurrentSelection(user) });
+  });
+
+  app.post('/api/models/select', async (req, res) => {
+    const user = userIdOf(req);
+    if (user === null) {
+      res.status(401).json({ error: 'missing x-bf-user header' });
+      return;
+    }
+    const body = req.body as { providerId?: unknown; modelId?: unknown };
+    if (
+      typeof body.providerId !== 'string' || typeof body.modelId !== 'string' ||
+      body.providerId.trim().length === 0 || body.modelId.trim().length === 0
+    ) {
+      res.status(400).json({ error: 'providerId and modelId are required' });
+      return;
+    }
+    try {
+      if (body.providerId === 'local') {
+        res.json(await providerManager.selectLocalModel(user, body.modelId));
+        return;
+      }
+      if (body.providerId === 'openrouter') {
+        const ref = providerManager.credentials.findByUserAndProvider(user, 'openrouter');
+        if (ref === null) {
+          res.status(409).json({
+            error: 'No OpenRouter credential for this user. Add one (POST /api/credentials); CONFIGURED does not mean AVAILABLE.',
+          });
+          return;
+        }
+        res.json(await providerManager.selectOpenRouterModel(user, ref.id, body.modelId));
+        return;
+      }
+      res.status(501).json({ error: `selection for provider \"${body.providerId}\" is not implemented yet` });
+    } catch (error) {
+      jsonError(res, error instanceof RoutingError ? 409 : 502, error);
+    }
+  });
+
+  app.get('/api/models/:providerId/:modelId', async (req, res) => {
+    try {
+      const model = await modelCatalogue.getModel(req.params['providerId']!, req.params['modelId']!);
+      if (model === null) {
+        res.status(404).json({ error: 'model-not-found' });
+        return;
+      }
+      res.json(model);
+    } catch (error) {
+      jsonError(res, 502, error);
+    }
+  });
+
+  app.post('/api/credentials', (req, res) => {
+    const user = userIdOf(req);
+    if (user === null) {
+      res.status(401).json({ error: 'missing x-bf-user header' });
+      return;
+    }
+    const body = req.body as { providerId?: unknown; secret?: unknown };
+    if (typeof body.providerId !== 'string' || body.providerId.trim().length === 0 ||
+        typeof body.secret !== 'string' || body.secret.trim().length === 0) {
+      res.status(400).json({ error: 'providerId and secret are required' });
+      return;
+    }
+    try {
+      const ref = providerManager.credentials.addCredential(user, body.providerId, body.secret);
+      res.status(201).json(ref); // opaque reference only; the secret is never echoed
+    } catch (error) {
+      jsonError(res, error instanceof DuplicateCredentialError ? 409 : 400, error);
+    }
+  });
+
+  app.get('/api/credentials', (req, res) => {
+    const user = userIdOf(req);
+    if (user === null) {
+      res.status(401).json({ error: 'missing x-bf-user header' });
+      return;
+    }
+    res.json({ credentials: providerManager.credentials.listCredentials(user) });
+  });
+
+  app.delete('/api/credentials/:id', (req, res) => {
+    const user = userIdOf(req);
+    if (user === null) {
+      res.status(401).json({ error: 'missing x-bf-user header' });
+      return;
+    }
+    try {
+      providerManager.credentials.removeCredential(user, req.params['id']!);
+      res.status(204).end();
+    } catch (error) {
+      jsonError(res, error instanceof ConfigurationError ? 404 : 400, error);
+    }
+  });
+
+  app.post('/api/credentials/:id/verify', async (req, res) => {
+    const user = userIdOf(req);
+    if (user === null) {
+      res.status(401).json({ error: 'missing x-bf-user header' });
+      return;
+    }
+    try {
+      const ref = providerManager.credentials.getReference(user, req.params['id']!);
+      if (ref.providerId !== 'openrouter') {
+        // Honest surface: no fabricated verification for unimplemented providers.
+        res.status(501).json({ error: `connection verification for provider \"${ref.providerId}\" is not implemented yet` });
+        return;
+      }
+      providerManager.connectOpenRouter(user, ref.id, options.openRouterFetchImpl);
+      res.json(await providerManager.verifyOpenRouter(user, req.params['id']!));
+    } catch (error) {
+      jsonError(res, 404, error);
+    }
+  });
+
+  return { app, result, providerManager, modelCatalogue };
 }
 
 export async function startServer(): Promise<void> {
