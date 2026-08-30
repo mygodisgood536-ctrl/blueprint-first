@@ -25,6 +25,12 @@ export interface AiCompletionRequest {
   messages: AiMessage[];
   temperature?: number;
   maxTokens?: number;
+  /**
+   * Caller-chosen model identifier. Optional; multi-model providers (e.g.
+   * OpenRouter) require it to route the request, while single-model providers
+   * ignore it and keep using their configured model.
+   */
+  model?: string;
   /** Caller-chosen correlation id, echoed in the response when supported. */
   requestId?: string;
 }

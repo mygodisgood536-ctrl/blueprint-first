@@ -64,8 +64,11 @@ export class OpenAiCompatibleProvider implements AiProvider {
   async complete(request: AiCompletionRequest): Promise<AiCompletionResponse> {
     // Resolved at call time; throws ConfigurationError naming missing env vars.
     const creds = resolveOpenAiCredentials(this.settings, this.env);
+    // A caller may target a specific model (multi-model gateways); otherwise
+    // the configured model is used unchanged, preserving existing behavior.
+    const model = request.model ?? creds.model;
     const body = JSON.stringify({
-      model: creds.model,
+      model,
       messages: request.messages,
       ...(request.temperature !== undefined ? { temperature: request.temperature } : {}),
       ...(request.maxTokens !== undefined ? { max_tokens: request.maxTokens } : {}),
@@ -123,7 +126,7 @@ export class OpenAiCompatibleProvider implements AiProvider {
     return {
       content,
       providerId: this.id,
-      modelId: creds.model,
+      modelId: model,
       ...(finishReason !== undefined ? { finishReason } : {}),
       ...(usage !== undefined ? { usage } : {}),
       ...(request.requestId !== undefined ? { requestId: request.requestId } : {}),
