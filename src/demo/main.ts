@@ -20,12 +20,19 @@
  * The AI provider is the deterministic ScriptedProvider everywhere - responses
  * are SCRIPTED DEMO RESPONSES, not a live model. They are recorded as
  * sha256-anchored evidence and never trusted as structure.
+ *
+ * This file doubles as the single source of truth for the L0-L5 pipeline
+ * orchestration: the CLI demo entry (main) and the browser inspection layer
+ * (src/web) both call `runDemoPipeline`, so the web surface reflects the exact
+ * same real system the CLI exposes. The pipeline itself is unchanged; only the
+ * report printing lives in main().
  */
 
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { promises as fs } from 'node:fs';
 import { loadConfig } from '../core/config.ts';
-import { consoleSink, createLogger } from '../core/logging.ts';
+import { consoleSink, createLogger, type Logger } from '../core/logging.ts';
 import { ArtifactIdAllocator } from '../core/id-allocator.ts';
 import { JsonFileArtifactStore } from '../core/json-file-store.ts';
 import { KnowledgeGraph } from '../core/graph.ts';
@@ -61,6 +68,7 @@ import { MasterVerificationEngine } from '../verification/master-engine.ts';
 import { createClosureVerifier } from '../verification/closure-verifier.ts';
 import { certifyBlueprintCompleteness } from '../design/certification.ts';
 import { lineageStatus, coverageSummary, requirementsTraceability } from '../traceability/trace.ts';
+import type { Artifact } from '../core/artifact.ts';
 import type { DriftItem } from '../verification/live-engine.ts';
 import type { TelemetryObservation } from '../telemetry/source.ts';
 
@@ -130,10 +138,53 @@ const DISCOVERY_JSON = {
   ],
 };
 
-async function main(): Promise<number> {
+/**
+ * Result bundle of a full L0-L5 pipeline run. Everything the browser
+ * inspection layer needs is reachable through `services` (store, graph,
+ * evidence, allocator) plus the typed stage results, so the web surface can
+ * present the actual system without re-running or duplicating any logic.
+ */
+export interface DemoResult {
+  services: CoreServices;
+  config: ReturnType<typeof loadConfig>;
+  discovery: Awaited<ReturnType<DiscoveryDepartment['discover']>>;
+  baseline: NonNullable<Awaited<ReturnType<DiscoveryDepartment['discover']>>['baseline']>;
+  design: Awaited<ReturnType<AiDesignStudio['designFromBaseline']>>;
+  approval: Awaited<ReturnType<typeof approveBlueprint>>;
+  build: Awaited<ReturnType<AiBuildStudio['buildFromBlueprint']>>;
+  council: Awaited<ReturnType<ReasoningCouncil['deliberate']>>;
+  master: Awaited<ReturnType<MasterVerificationEngine['verifyArtifactSet']>>;
+  trace: Awaited<ReturnType<typeof requirementsTraceability>>;
+  certification: Awaited<ReturnType<typeof certifyBlueprintCompleteness>>;
+  testRun: Awaited<ReturnType<typeof runTestDepartment>>;
+  opsRun: Awaited<ReturnType<typeof runOperationsDepartment>>;
+  contRun: Awaited<ReturnType<typeof runContinuousEngineeringDepartment>>;
+  telemetryObservation: TelemetryObservation;
+  telemetrySource: SyntheticTelemetrySource;
+  recursionResult: Awaited<ReturnType<typeof runRecursionDepartment>>;
+  changeResult: Awaited<ReturnType<typeof runSafeChangeDepartment>>;
+  peoCandidate: ReturnType<typeof candidateFromDrift>['candidate'];
+  peoResult: Awaited<ReturnType<typeof runPermanentEngineeringOrganization>>;
+  finalArtifact: Artifact;
+  closureIds: string[];
+  firstPageId: string;
+  lineage: Awaited<ReturnType<typeof lineageStatus>>;
+  coverage: Awaited<ReturnType<typeof coverageSummary>>;
+  stats: ReturnType<KnowledgeGraph['stats']>;
+  providerCalls: number;
+  scripted: ScriptedProvider;
+  graph: KnowledgeGraph;
+  evidence: MemoryEvidenceLog;
+  store: JsonFileArtifactStore;
+  allocator: ArtifactIdAllocator;
+}
+
+export async function runDemoPipeline(
+  logger?: Logger,
+): Promise<DemoResult> {
   const config = loadConfig(process.env);
-  const logger = createLogger({ level: config.logLevel, sink: consoleSink() });
-  logger.info('demo.start', {
+  const log = logger ?? createLogger({ level: config.logLevel, sink: consoleSink() });
+  log.info('demo.start', {
     envName: config.envName,
     dataDir: config.dataDir,
     provider: 'ScriptedProvider (DETERMINISTIC DEMO RESPONSES - not a live model)',
@@ -196,7 +247,7 @@ async function main(): Promise<number> {
       },
     ],
   });
-  const router = new AiRouter({ logger });
+  const router = new AiRouter({ logger: log });
   router.register(scripted).setDefaultProvider('scripted');
   const services: CoreServices = {
     store,
@@ -204,7 +255,7 @@ async function main(): Promise<number> {
     graph,
     evidence,
     router,
-    logger,
+    logger: log,
   };
 
   // --- Stage 1: discovery department -----------------------------------------
@@ -215,8 +266,8 @@ async function main(): Promise<number> {
     targetUsers: ['small teams'],
   });
   if (discovery.status !== 'accepted' || discovery.baseline === undefined) {
-    logger.warn('demo.discovery.failed', { status: discovery.status, code: discovery.error?.code });
-    return 1;
+    log.warn('demo.discovery.failed', { status: discovery.status, code: discovery.error?.code });
+    throw new Error('Demo aborted: discovery was not accepted.');
   }
   const baseline = discovery.baseline;
   console.log(
@@ -228,8 +279,8 @@ async function main(): Promise<number> {
     console.log('Stage 2/12 - AI Design Studio');
   const design = await new AiDesignStudio(services).designFromBaseline(baseline);
   if (design.status !== 'accepted' || design.blueprintId === undefined) {
-    logger.warn('demo.design.failed', { status: design.status, code: design.error?.code });
-    return 1;
+    log.warn('demo.design.failed', { status: design.status, code: design.error?.code });
+    throw new Error('Demo aborted: design was not accepted.');
   }
   console.log(`  accepted: blueprint ${design.blueprintId} with ${design.artifactIds.length - 1} designs`);
 
@@ -237,8 +288,8 @@ async function main(): Promise<number> {
     console.log('Stage 3/12 - Blueprint approval gate');
   const approval = await approveBlueprint(services, design.blueprintId);
   if (!approval.approved) {
-    logger.warn('demo.approval.rejected', { reasons: approval.reasons });
-    return 1;
+    log.warn('demo.approval.rejected', { reasons: approval.reasons });
+    throw new Error('Demo aborted: blueprint approval rejected.');
   }
   console.log(`  approved by product-owner-01, evidence ${approval.evidenceId ?? '?'}`);
 
@@ -246,8 +297,8 @@ async function main(): Promise<number> {
     console.log('Stage 4/12 - AI Build Studio');
   const build = await new AiBuildStudio(services).buildFromBlueprint(design.blueprintId);
   if (build.status !== 'accepted') {
-    logger.warn('demo.build.failed', { status: build.status, code: build.error?.code });
-    return 1;
+    log.warn('demo.build.failed', { status: build.status, code: build.error?.code });
+    throw new Error('Demo aborted: build was not accepted.');
   }
   console.log(`  accepted: manifest ${build.manifestId} aggregating ${build.artifactIds.length - 1} implementations`);
 
@@ -299,8 +350,8 @@ async function main(): Promise<number> {
     trace,
   });
   if (!certification.certified) {
-    logger.warn('demo.certification.refused', { reasons: certification.reasons });
-    return 1;
+    log.warn('demo.certification.refused', { reasons: certification.reasons });
+    throw new Error('Demo aborted: blueprint certification refused.');
   }
   console.log(
     `  certification: CERTIFIED; ${certification.stampedArtifactIds.length} artifact(s) stamped; ` +
@@ -314,12 +365,12 @@ async function main(): Promise<number> {
     console.log('Stage 6/12 - AI Acceptance Testing Department');
   const testRun = await runTestDepartment(services, baseline.projectId, { sampleSize: 2 });
   if (testRun.status !== 'passed') {
-    logger.warn('demo.test.failed', {
+    log.warn('demo.test.failed', {
       failedChecks: testRun.failedChecks,
       boss: testRun.boss.rationale,
       auditor: testRun.auditor.rationale,
     });
-    return 1;
+    throw new Error('Demo aborted: acceptance testing did not pass.');
   }
   console.log(
     `  ${testRun.status}: ${testRun.executed.length} checks; boss=${testRun.boss.verdict}; ` +
@@ -339,12 +390,12 @@ async function main(): Promise<number> {
   console.log('Stage 7/12 - AI Operations & Observability Layer (Deployment)');
   const opsRun = await runOperationsDepartment(services, baseline.projectId, { sampleSize: 2 });
   if (opsRun.status !== 'passed') {
-    logger.warn('demo.ops.failed', {
+    log.warn('demo.ops.failed', {
       failedUnits: opsRun.failedUnits,
       boss: opsRun.boss.rationale,
       auditor: opsRun.auditor.rationale,
     });
-    return 1;
+    throw new Error('Demo aborted: operations/deploy did not pass.');
   }
   console.log(
     `  ${opsRun.status}: ${opsRun.executed.length} unit(s) deployed to production; boss=${opsRun.boss.verdict}; ` +
@@ -367,11 +418,11 @@ async function main(): Promise<number> {
   console.log('Stage 8/12 - Continuous Engineering Department (Permanent Self-Healing Org)');
   const contRun = await runContinuousEngineeringDepartment(services, baseline.projectId, { sampleSize: 2 });
   if (contRun.finalVerdict !== 'CERTIFIED_COMPLETE') {
-    logger.warn('demo.continuous.failed', {
+    log.warn('demo.continuous.failed', {
       verdict: contRun.finalVerdict,
       rationale: contRun.rationale,
     });
-    return 1;
+    throw new Error('Demo aborted: continuous engineering did not reach CERTIFIED_COMPLETE.');
   }
   console.log(
     `  ${contRun.finalVerdict}: ${contRun.workerReport.scopedCount} artifact(s) observed, ` +
@@ -436,8 +487,8 @@ async function main(): Promise<number> {
   );
   const firstChange = recursionResult.changes[0];
   if (firstChange === undefined) {
-    logger.warn('demo.recursion.empty', { classificationHash: recursionResult.classification.classificationHash });
-    return 1;
+    log.warn('demo.recursion.empty', { classificationHash: recursionResult.classification.classificationHash });
+    throw new Error('Demo aborted: recursion produced no change.');
   }
 
   // --- Stage 11: Safe Change Intelligence -----------------------------------
@@ -461,8 +512,8 @@ async function main(): Promise<number> {
   });
   const afterHash = changeEnv.units.get(telemetryBase)?.configHash;
   if (changeResult.status !== 'AUTHORIZED_AND_APPLIED') {
-    logger.warn('demo.change.failed', { status: changeResult.status, reason: (changeResult as { reason?: string }).reason });
-    return 1;
+    log.warn('demo.change.failed', { status: changeResult.status, reason: (changeResult as { reason?: string }).reason });
+    throw new Error('Demo aborted: safe change did not authorize+apply.');
   }
   console.log(
     `  ${changeResult.status}: boss=${changeResult.trail.bossDecision.verdict} ` +
@@ -485,13 +536,13 @@ async function main(): Promise<number> {
   const implId = `${telemetryBase}-IMPL`;
   const impl = await services.store.get(implId);
   if (impl === null) {
-    logger.warn('demo.driftLoop.missingImpl', { implId });
-    return 1;
+    log.warn('demo.driftLoop.missingImpl', { implId });
+    throw new Error('Demo aborted: missing -IMPL artifact for drift loop.');
   }
   const startState = docStateOf(impl);
   if (startState === undefined) {
-    logger.warn('demo.driftLoop.unstampedImpl', { implId });
-    return 1;
+    log.warn('demo.driftLoop.unstampedImpl', { implId });
+    throw new Error('Demo aborted: -IMPL artifact has no DoC stamp.');
   }
   // 0) DEPLOYED-VERIFIED -> CERTIFIED COMPLETE (cert engine) — this is the
   // prerequisite to the regression loop.
@@ -578,7 +629,7 @@ async function main(): Promise<number> {
       `rationale=${peoResult.rationale.slice(0, 80)}…`,
   );
   if (peoResult.watch.classifiedAs !== 'RECURRING') {
-    logger.warn('demo.peo.unexpectedClassification', { classifiedAs: peoResult.watch.classifiedAs });
+    log.warn('demo.peo.unexpectedClassification', { classifiedAs: peoResult.watch.classifiedAs });
   }
 
   // --- Honest reporting: lineage, certification and confidence as facts ------
@@ -588,7 +639,7 @@ async function main(): Promise<number> {
   const coverage = coverageSummary(graph, [baseline.projectId]);
   const stats = graph.stats();
 
-  logger.info('demo.result', {
+  log.info('demo.result', {
     discoveryArtifacts: baseline.totalArtifacts,
     blueprintId: design.blueprintId,
     manifestId: build.manifestId ?? '',
@@ -615,9 +666,49 @@ async function main(): Promise<number> {
     },
   });
 
+  return {
+    services,
+    config,
+    discovery,
+    baseline,
+    design,
+    approval,
+    build,
+    council,
+    master,
+    trace,
+    certification,
+    testRun,
+    opsRun,
+    contRun,
+    telemetryObservation,
+    telemetrySource,
+    recursionResult,
+    changeResult,
+    peoCandidate,
+    peoResult,
+    finalArtifact: final,
+    closureIds,
+    firstPageId,
+    lineage,
+    coverage,
+    stats,
+    providerCalls: scripted.calls.length,
+    scripted,
+    graph,
+    evidence,
+    store,
+    allocator,
+  };
+}
+
+async function main(): Promise<number> {
+  const result = await runDemoPipeline();
+  const { baseline, design, build, discovery, certification, council, lineage, coverage, stats, opsRun, contRun, changeResult, finalArtifact, peoResult } = result;
+
   console.log('');
   console.log(`IDs: ${discovery.artifactIds.length} discovered -> ${design.artifactIds.join(' ')} -> ${build.artifactIds.join(' ')}`);
-  console.log(`Lineage of ${firstPageId}: complete through ${lineage.completeThrough}`);
+  console.log(`Lineage of ${result.firstPageId}: complete through ${lineage.completeThrough}`);
   console.log(`Lineage gaps (beyond implemented levels): ${lineage.gaps.map((g) => g.id).join(', ') || 'none'}`);
   if (certification.certified) {
     console.log(
@@ -637,14 +728,19 @@ async function main(): Promise<number> {
     && opsRun.status === 'passed'
     && contRun.finalVerdict === 'CERTIFIED_COMPLETE'
     && changeResult.status === 'AUTHORIZED_AND_APPLIED'
-    && docStateOf(final) === 'CERTIFIED COMPLETE'
+    && docStateOf(finalArtifact) === 'CERTIFIED COMPLETE'
     && peoResult.watch.classifiedAs === 'RECURRING'
     ? 0 : 1;
 }
 
-main()
-  .then((code) => process.exit(code))
-  .catch((error: unknown) => {
-    console.error('demo.failed', error);
-    process.exit(1);
-  });
+// Only run the CLI entry point when this file is executed directly.
+// When imported by the browser inspection layer (src/web), the pipeline is
+// exposed via `runDemoPipeline` and must NOT auto-run or call process.exit.
+if (process.argv[1] !== undefined && fileURLToPath(import.meta.url) === process.argv[1]) {
+  main()
+    .then((code) => process.exit(code))
+    .catch((error: unknown) => {
+      console.error('demo.failed', error);
+      process.exit(1);
+    });
+}

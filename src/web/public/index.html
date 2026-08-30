@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Blueprint-First Inspection</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header>
+    <h1>Blueprint-First <span class="muted">L0–L5 engineering system</span></h1>
+    <div id="header-sub" class="muted small">Loading…</div>
+  </header>
+
+  <main>
+    <!-- Certification banner -->
+    <section id="cert-banner" class="card banner">
+      <div class="banner-label">Certification state</div>
+      <div id="cert-state" class="big">…</div>
+    </section>
+
+    <!-- Roadmap -->
+    <section class="card">
+      <h2>2. L0–L5 Roadmap / Status</h2>
+      <table id="roadmap" class="grid">
+        <thead><tr><th>Level</th><th>Title</th><th>Status</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <!-- Project overview -->
+    <section class="card">
+      <h2>1. Project overview</h2>
+      <div id="overview" class="kv"></div>
+    </section>
+
+    <!-- Discovery -->
+    <section class="card">
+      <h2>3. Discovery</h2>
+      <div id="discovery" class="kv"></div>
+    </section>
+
+    <!-- Design / engineering artifacts -->
+    <section class="card">
+      <h2>4. Design &amp; engineering artifacts</h2>
+      <div id="design" class="kv"></div>
+    </section>
+
+    <!-- Certification detail -->
+    <section class="card">
+      <h2>23. Certification &amp; confidence detail</h2>
+      <div id="certification" class="kv"></div>
+    </section>
+
+    <!-- Council -->
+    <section class="card">
+      <h2>5. Multi-Perspective Reasoning Council</h2>
+      <div id="council" class="kv"></div>
+    </section>
+
+    <!-- Verification -->
+    <section class="card">
+      <h2>6. Verification (Master Verification Engine)</h2>
+      <div id="verification" class="kv"></div>
+    </section>
+
+    <!-- Acceptance testing -->
+    <section class="card">
+      <h2>7. Acceptance testing</h2>
+      <div id="testing" class="kv"></div>
+    </section>
+
+    <!-- Deployment -->
+    <section class="card">
+      <h2>8. Deployment</h2>
+      <div id="deployment" class="kv"></div>
+    </section>
+
+    <!-- Runtime telemetry -->
+    <section class="card">
+      <h2>9. Runtime telemetry</h2>
+      <div id="telemetry" class="kv"></div>
+    </section>
+
+    <!-- Continuous engineering -->
+    <section class="card">
+      <h2>10. Continuous Engineering</h2>
+      <div id="continuous" class="kv"></div>
+    </section>
+
+    <!-- Recursion -->
+    <section class="card">
+      <h2>Continuous Discovery Recursion</h2>
+      <div id="recursion" class="kv"></div>
+    </section>
+
+    <!-- Safe Change -->
+    <section class="card">
+      <h2>11. Safe Change Intelligence</h2>
+      <div id="safe-change" class="kv"></div>
+    </section>
+
+    <!-- PEO -->
+    <section class="card">
+      <h2>12. Permanent Engineering Organization (PEO)</h2>
+      <div id="peo" class="kv"></div>
+    </section>
+
+    <!-- PEO sub organs -->
+    <section class="card">
+      <h2>13–18. PEO sub-organs</h2>
+      <div id="peo-organs" class="kv"></div>
+    </section>
+
+    <!-- Artifact inventory with DoC states -->
+    <section class="card">
+      <h2>20. Artifact inventory &amp; Definition-of-Complete states</h2>
+      <div id="artifacts-summary" class="kv"></div>
+      <table id="artifacts" class="grid">
+        <thead><tr><th>ID</th><th>Type</th><th>Title</th><th>Status</th><th>DoC</th><th>Confidence</th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <!-- Dependency map -->
+    <section class="card">
+      <h2>21. Dependency map</h2>
+      <div id="dep-map" class="kv"></div>
+    </section>
+
+    <!-- Lineage / provenance -->
+    <section class="card">
+      <h2>22. Lineage / provenance</h2>
+      <div id="lineage" class="kv"></div>
+    </section>
+
+    <!-- Evidence -->
+    <section class="card">
+      <h2>24. Evidence / results</h2>
+      <div id="evidence" class="kv"></div>
+    </section>
+
+    <!-- Traceability -->
+    <section class="card">
+      <h2>Traceability</h2>
+      <div id="traceability" class="kv"></div>
+    </section>
+
+    <!-- Available-not-exercised capabilities -->
+    <section class="card">
+      <h2>Capabilities available in core, not exercised in this run</h2>
+      <div id="caps" class="kv"></div>
+    </section>
+  </main>
+
+  <footer class="muted small">
+    Blueprint-First — inspection surface reads the live L0–L5 pipeline result. No data is fabricated; stages the pipeline did not run are marked as not exercised.
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>
