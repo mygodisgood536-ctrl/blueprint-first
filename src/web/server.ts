@@ -18,6 +18,7 @@ import { docStateOf } from '../core/doc.ts';
 import type { Artifact } from '../core/artifact.ts';
 import { ConfigurationError, RoutingError } from '../core/errors.ts';
 import { DuplicateCredentialError } from '../ai/credential-store.ts';
+import { DocumentStore, DocumentNotFoundError } from '../chat/document.ts';
 import { ModelCatalogue } from '../ai/model-catalogue.ts';
 import { ModelsDevSource } from '../ai/models-dev-source.ts';
 import { OpenRouterProvider } from '../ai/openrouter-provider.ts';
@@ -91,6 +92,8 @@ export interface BuildServerOptions {
   modelCatalogue?: ModelCatalogue;
   /** Injected ProviderManager (selection/credential layer). */
   providerManager?: ProviderManager;
+  /** Injected DocumentStore (large-prompt / document handling). */
+  documentStore?: DocumentStore;
   /**
    * Injectable fetch for the OpenRouter key-check (tests). Never persisted;
    * used only at verification time.
@@ -105,6 +108,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
   result: DemoResult;
   providerManager: ProviderManager;
   modelCatalogue: ModelCatalogue;
+  documentStore: DocumentStore;
 }> {
   const logger = createLogger({ level: 'warn', sink: consoleSink() });
   const result = options.result ?? (await runDemoPipeline(logger));
@@ -121,6 +125,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
         : {}),
     });
   const providerManager = options.providerManager ?? new ProviderManager({ logger });
+  const documentStore = options.documentStore ?? new DocumentStore();
 
   const app = express();
   app.use(express.json());
@@ -540,7 +545,69 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
     }
   });
 
-  return { app, result, providerManager, modelCatalogue };
+  // --- chat-first / document handling (expansion §14-15) -------------------------
+  // Short inputs stay inline chat messages; large inputs become document
+  // references so chat state stays lightweight. Classification is the single
+  // deterministic threshold (default 4000 chars; override via BF_DOCUMENT_MAX_CHARS
+  // once auto-configured). Processing is async and non-blocking: the server
+  // computes quickly, the client shows progress/recovery, and large screens
+  // render only the bounded preview unless the user explicitly requests full.
+
+  app.post('/api/chat/ingest', async (req, res) => {
+    const user = userIdOf(req);
+    if (user === null) {
+      res.status(401).json({ error: 'missing x-bf-user header' });
+      return;
+    }
+    const text = (req.body as { text?: unknown }).text;
+    if (typeof text !== 'string' || text.length === 0) {
+      res.status(400).json({ error: 'text is required' });
+      return;
+    }
+    const outcome = documentStore.ingest(user, text);
+    res.status(201).json(outcome);
+  });
+
+  app.get('/api/documents', (req, res) => {
+    const user = userIdOf(req);
+    if (user === null) {
+      res.status(401).json({ error: 'missing x-bf-user header' });
+      return;
+    }
+    res.json({ documents: documentStore.listForOwner(user), count: documentStore.countForOwner(user) });
+  });
+
+  app.get('/api/documents/:id', (req, res) => {
+    const user = userIdOf(req);
+    if (user === null) {
+      res.status(401).json({ error: 'missing x-bf-user header' });
+      return;
+    }
+    try {
+      const view = documentStore.getView(user, req.params['id']!, {
+        full: req.query['full'] === 'true',
+      });
+      res.json(view);
+    } catch (error) {
+      jsonError(res, error instanceof DocumentNotFoundError ? 404 : 400, error);
+    }
+  });
+
+  app.delete('/api/documents/:id', (req, res) => {
+    const user = userIdOf(req);
+    if (user === null) {
+      res.status(401).json({ error: 'missing x-bf-user header' });
+      return;
+    }
+    try {
+      documentStore.removeForOwner(user, req.params['id']!);
+      res.status(204).end();
+    } catch (error) {
+      jsonError(res, error instanceof DocumentNotFoundError ? 404 : 400, error);
+    }
+  });
+
+  return { app, result, providerManager, modelCatalogue, documentStore };
 }
 
 export async function startServer(): Promise<void> {
