@@ -22,8 +22,10 @@ const ROUTES = {
   '/reset': { view: 'forgot', public: true },
   // Protected
   '/dashboard': { view: 'dashboard', auth: true },
+  '/projects': { view: 'projects', auth: true },
   '/projects/new': { view: 'project-new', auth: true },
   '/projects/:id': { view: 'project', auth: true },
+  '/projects/:id/settings': { view: 'project-settings', auth: true },
   '/providers': { view: 'providers', auth: true },
   '/settings/profile': { view: 'settings-profile', auth: true },
   '/settings/security': { view: 'settings-security', auth: true },

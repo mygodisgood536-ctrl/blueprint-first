@@ -169,15 +169,15 @@ Backend: `POST /api/auth/forgot` → `POST /api/auth/forgot/verify` → `POST /a
 `POST /api/auth/signup` · `POST /api/auth/login` · `POST /api/auth/logout` · `GET /api/auth/session` · `POST /api/auth/forgot` · `POST /api/auth/forgot/verify` · `POST /api/auth/reset` · `POST /api/account/password` · `GET /api/account/authenticator` · `POST /api/account/authenticator/setup` · `POST /api/account/authenticator/enable` · `POST /api/account/authenticator/disable` · `GET /api/account/security-events` · `GET /api/account/sessions` · `POST /api/account/sessions/revoke-others` · `POST /api/account/profile` · `POST /api/account/preferences`
 
 **Server API** (`src/web/server.ts`):
-`GET /api/me` · `GET /api/summary` · `GET /api/activity` · `GET /api/roadmap` · `GET /api/caps` · `GET /api/projects` · `GET /api/projects/:id` · `POST /api/projects` · `DELETE /api/projects/:id` · `POST /api/projects/:id/run/:stageId` · `POST /api/projects/:id/approve` · `GET /api/projects` pipeline stages (discovery, design, council, verification, testing, deployment, telemetry, continuous, recursion, safe-change, peo) · `GET /api/artifacts` · `GET /api/artifacts/:id` · `GET /api/dependency-map` · `GET /api/lineage` · `GET /api/evidence` · `GET /api/certification` · `GET /api/traceability` · `GET /api/models` · `GET /api/models/stats` · `GET /api/models/selection` · `POST /api/models/select` · `GET /api/models/:providerId/:modelId` · `POST /api/credentials` · `GET /api/credentials` · `DELETE /api/credentials/:id` · `POST /api/credentials/:id/verify` · `POST /api/chat/ingest` · `POST /api/documents/upload` · `GET /api/documents` · `GET /api/documents/:id` · `DELETE /api/documents/:id`
+`GET /api/me` · `GET /api/summary` · `GET /api/activity` · `GET /api/roadmap` · `GET /api/caps` · `GET /api/projects` · `GET /api/projects/:id` · `POST /api/projects` · `DELETE /api/projects/:id` · `POST /api/projects/:id/run/:stageId` · `POST /api/projects/:id/approve` · `PUT /api/projects/:id` (owner-checked title/mode update) · `GET /api/projects` pipeline stages (discovery, design, council, verification, testing, deployment, telemetry, continuous, recursion, safe-change, peo) · `GET /api/artifacts` · `GET /api/artifacts/:id` · `GET /api/dependency-map` · `GET /api/lineage` · `GET /api/evidence` · `GET /api/certification` · `GET /api/traceability` · `GET /api/models` · `GET /api/models/stats` · `GET /api/models/selection` · `POST /api/models/select` · `GET /api/models/:providerId/:modelId` · `POST /api/credentials` · `GET /api/credentials` · `DELETE /api/credentials/:id` · `POST /api/credentials/:id/verify` · `POST /api/chat/ingest` · `POST /api/documents/upload` · `GET /api/documents` · `GET /api/documents/:id` · `DELETE /api/documents/:id`
 
 ### Missing Backend Capabilities
 
 | Capability | Status |
 |---|---|
-| `PUT /api/projects/:id` (update/project settings) | `[!]` Not started |
+| `PUT /api/projects/:id` (update/project settings) | `[✓]` Implemented (Stage 6) |
 | Per-project AI preferences endpoint | `[!]` Not started |
-| `GET /api/projects/:id` explicit owner check confirmation | `[~]` Need inspection |
+| `GET /api/projects/:id` explicit owner check confirmation | `[✓]` Confirmed (`requireOwnedProject`; enforced by `projects-api.test.ts` isolation test) |
 
 ## 6. Page Inventory (Condensed)
 
@@ -196,9 +196,10 @@ Backend: `POST /api/auth/forgot` → `POST /api/auth/forgot/verify` → `POST /a
 | Page | Frontend view | Backend | Status |
 |------|---------------|---------|--------|
 | Dashboard | `dashboard.js` | `/api/me`, `/api/projects`, `/api/activity`, `/api/models/selection`, `/api/credentials` | `[✓]` |
-| Projects list | (none) | `GET /api/projects` | `[!]` |
+| Projects list | `projects.js` | `GET /api/projects` | `[✓]` |
 | Create project | `project-new.js` | `POST /api/projects` | `[~]` |
-| Project workspace | (none) | all pipeline endpoints | `[!]` |
+| Project workspace | `project.js` | all pipeline endpoints | `[✓]` |
+| Project settings | `project-settings.js` | `PUT /api/projects/:id` + `DELETE /api/projects/:id` | `[✓]` |
 | Artifacts | (none) | `GET /api/artifacts` | `[!]` |
 | Evidence | (none) | `GET /api/evidence` | `[!]` |
 

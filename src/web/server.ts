@@ -497,6 +497,45 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
   });
           
 
+  // ── project update (settings) ─────────────────────────────────────────────
+  app.put('/api/projects/:id', async (req, res) => {
+    const user = userIdOf(req);
+    if (user === null) {
+      res.status(401).json({ error: 'authentication required' });
+      return;
+    }
+    if (result.registry === undefined) {
+      res.status(501).json({ error: 'The project engine is not available in this build.' });
+      return;
+    }
+    const project = await requireOwnedProject(user, req.params['id']!);
+    if (project === null) {
+      res.status(404).json({ error: 'project-not-found' });
+      return;
+    }
+    const body = req.body as { title?: unknown; mode?: unknown };
+    const newTitle =
+      typeof body.title === 'string' && body.title.trim().length >= 2 && body.title.trim().length <= 64
+        ? body.title.trim() : null;
+    const newMode =
+      typeof body.mode === 'string' && (PROJECT_MODES as readonly string[]).includes(body.mode)
+        ? body.mode : null;
+    if (newTitle === null && newMode === null) {
+      res.status(400).json({ error: 'No valid updates provided. Supply title (2-64 chars) and/or a valid mode.' });
+      return;
+    }
+    try {
+      const updated = await result.services.store.update(project.id, project.version, (draft) => ({
+        ...draft,
+        ...(newTitle !== null ? { title: newTitle } : {}),
+        attributes: { ...draft.attributes, ...(newMode !== null ? { mode: newMode } : {}) },
+      }));
+      res.json({ project: projectSummary(updated) });
+    } catch (error) {
+      jsonError(res, 400, error);
+    }
+  });
+
   app.post('/api/projects', async (req, res) => {
     const user = userIdOf(req);
     if (user === null) {

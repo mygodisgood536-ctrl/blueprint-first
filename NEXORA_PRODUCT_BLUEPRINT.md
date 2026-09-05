@@ -109,9 +109,10 @@
 ### Page: Projects List
 - **Purpose:** See all projects.
 - **Access:** Authenticated.
-- **Content:** Per-user projects (isolated). Each: title, mode, status, lifecycle stage, last activity. Archive/delete.
-- **Backend:** `GET /api/projects` → `/api/projects` route in server.ts (owner-filtered).
-- **Status:** `[!]` Not started — no list view exists (sidebar links to `#/projects/new` but no list view).
+- **Content:** Per-user projects (isolated). Each card: title, mode badge, status, project id, last activity. Delete with confirm. Empty state with Create CTA.
+- **View:** `projects.js` (grid of `.project-card` items). Sidebar "Projects" links here.
+- **Backend:** `GET /api/projects` → `/api/projects` route in server.ts (owner-filtered) + `DELETE /api/projects/:id`.
+- **Status:** `[✓]` Implemented (Stage 6).
 
 ### Page: Create Project
 - **Purpose:** Start a new engineering project.
@@ -124,17 +125,20 @@
 ### Page: Project Workspace
 - **Purpose:** Drive the Blueprint-First pipeline.
 - **Access:** Authenticated (owner or admin).
-- **Entry:** From Projects list → open project.
+- **Entry:** From Projects list → open project (route `#/projects/:id`).
+- **View:** `project.js` — identity header, mode/status/stages-run/approval meta, full lifecycle stage list (in-scope and out-of-scope) with honest `OUT_OF_SCOPE` labelling, "Run stage" action for in-scope pending stages only, link to settings.
 - **Tabs/stages:** Discovery → Design → Design Verification → Blueprint → Approval → Architecture → Implementation → Testing → Verification → Deployment → Operations → Maintenance → Continuous Improvement.
-- **In-scope stages** depend on project mode (see `PROJECT_MODE_STAGES`). Out-of-scope stages shown honestly as "not in scope."
+- **In-scope stages** depend on project mode (see `PROJECT_MODE_STAGES`). Out-of-scope stages are shown but disabled with a clear "not in scope" label.
 - **Actions:** Run stage (`POST /api/projects/:id/run/:stageId`), approve blueprint (`POST /api/projects/:id/approve`).
 - **Views:** `GET /api/discovery`, `GET /api/design`, `GET /api/council`, `GET /api/verification`, etc.
-- **Status:** `[!]` Frontend not started. Backend complete.
+- **Status:** `[✓]` Implemented (Stage 6).
 
 ### Page: Project Settings
-- **Purpose:** Edit project title/mode, archive.
-- **Backend:** Needs `PUT /api/projects/:id` — NOT implemented yet.
-- **Status:** `[!]` Backend gap (no update endpoint).
+- **Purpose:** Edit project title/mode; delete the project.
+- **Access:** Authenticated (owner). Route: `#/projects/:id/settings`.
+- **View:** `project-settings.js` — title + mode form (PUT), danger-zone delete (DELETE with confirm), 404 state for missing/foreign projects.
+- **Backend:** `PUT /api/projects/:id` (owner-checked title/mode update; validates 2–64 char title and `PROJECT_MODES` enum) and `DELETE /api/projects/:id`.
+- **Status:** `[✓]` Implemented (Stage 6).
 
 ## Account Pages
 

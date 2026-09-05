@@ -121,6 +121,9 @@ async function getProject(id) {
 async function deleteProject(id) {
   await request(`/projects/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
+async function updateProject(id, data) {
+  return request(`/projects/${encodeURIComponent(id)}`, { method: 'PUT', body: JSON.stringify(data) });
+}
 
 // ── Pipeline ──────────────────────────────────
 async function runStage(projectId, stageId) {
@@ -202,7 +205,7 @@ export const api = {
   updateProfile, updatePreferences, getPreferences,
   authenticatorStatus, setupAuthenticator, enableAuthenticator, disableAuthenticator,
   securityEvents,
-  listProjects, createProject, getProject, deleteProject,
+  listProjects, createProject, getProject, deleteProject, updateProject,
   runStage, approveBlueprint,
   listModels, getModel, getSelection, selectModel,
   listCredentials, addCredential, removeCredential, verifyCredential,

@@ -1118,3 +1118,24 @@
 .pref-item__key code { font-family: var(--font-mono); font-size: var(--font-size-sm); }
 .pref-item__value { flex: 1; min-width: 160px; }
 .pref-item__type { font-size: var(--font-size-xs); color: rgb(var(--color-text-tertiary)); }
+
+/* ── Project views ──────────────────────── */
+.project-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--space-md); }
+.project-card { background: rgb(var(--color-bg-raised)); border: 1px solid rgb(var(--color-stroke)); border-radius: var(--radius-md); padding: var(--space-md); display: flex; flex-direction: column; gap: var(--space-sm); }
+.project-card__header { display: flex; align-items: center; justify-content: space-between; gap: var(--space-sm); }
+.project-card__title { font-size: var(--font-size-md); font-weight: var(--font-weight-semibold); margin: 0; }
+.project-card__meta { display: flex; gap: var(--space-sm); font-size: var(--font-size-xs); color: rgb(var(--color-text-tertiary)); }
+.project-card__status { text-transform: capitalize; }
+.project-card__actions { display: flex; gap: var(--space-sm); margin-top: auto; }
+.project-detail { margin-bottom: var(--space-lg); }
+.stages-list { display: flex; flex-direction: column; gap: var(--space-sm); }
+.stage-item { display: flex; align-items: center; justify-content: space-between; gap: var(--space-md); padding: var(--space-sm) 0; border-bottom: 1px solid rgb(var(--color-stroke)); }
+.stage-item__info { display: flex; flex-direction: column; gap: 2px; }
+.stage-item__label { font-weight: var(--font-weight-medium); }
+.stage-item__status { font-size: var(--font-size-xs); color: rgb(var(--color-text-tertiary)); text-transform: uppercase; }
+.stage-item__at { font-size: var(--font-size-xs); color: rgb(var(--color-text-tertiary)); }
+.stage-item--pending .stage-item__status { color: rgb(var(--color-text-tertiary)); }
+.stage-item--recorded .stage-item__status { color: rgb(var(--color-success)); }
+.stage-item--out_of_scope .stage-item__status { color: rgb(var(--color-text-tertiary)); opacity: 0.6; }
+.panel--danger { border-color: rgb(var(--color-danger)); }
+.panel--danger .panel__title { color: rgb(var(--color-danger)); }

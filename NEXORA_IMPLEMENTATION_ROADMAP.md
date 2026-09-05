@@ -134,16 +134,37 @@
 
 **Dependencies:** Stage 4.
 
-## Stage 6 — Projects  `[~] PARTIAL`
+## Stage 6 — Projects  `[✓] COMPLETE`
 
 **Objective:** Project listing, creation, workspace, settings.
 
 | Sub-stage | Objective | Backend | Frontend | Status |
 |-----------|-----------|---------|----------|--------|
-| 6.1 | Projects list (per-user, status, mode, progress) | `[✓]` `GET /api/projects` | Build list view | `[!]` |
-| 6.2 | Create Project (title, mode, idea intake) | `[✓]` `POST /api/projects` | `project-new.js` verify | `[~]` |
-| 6.3 | Project detail/workspace shell | `[✓]` `GET /api/projects/:id` | Build workspace shell | `[!]` |
-| 6.4 | Project settings (archive) | `[!]` no `PUT` endpoint — **backend gap** | — | `[!]` |
+| 6.1 | Projects list (per-user, status, mode, progress) | `[✓]` `GET /api/projects` | `projects.js` (NEW) — grid of cards, empty state, delete with confirm | `[✓]` |
+| 6.2 | Create Project (title, mode, idea intake) | `[✓]` `POST /api/projects` | `project-new.js` verified — creates then routes to workspace | `[✓]` |
+| 6.3 | Project detail/workspace shell | `[✓]` `GET /api/projects/:id` | `project.js` (NEW) — lifecycle stages, in/out-of-scope honest labels, run-stage action | `[✓]` |
+| 6.4 | Project settings (title/mode edit, delete) | `[✓]` `PUT /api/projects/:id` (gap filled) | `project-settings.js` (NEW) + danger-zone delete | `[✓]` |
+
+**Backend work in this stage:**
+- `PUT /api/projects/:id` added to `server.ts` (the 6.4 gap): owner-checked via `requireOwnedProject`, validates title (2–64 chars) and mode against `PROJECT_MODES`, persists through the durable artifact store, returns updated summary; 404 for foreign/missing projects, 400 when no valid updates supplied.
+- Sidebar "Projects" now routes to the real list (`#/projects`) instead of the create form.
+- Router: `/projects` and `/projects/:id/settings` registered; `/projects/:id` unchanged.
+
+**Frontend work in this stage:**
+- `projects.js` — per-user project grid (title, mode badge, status, id), honest empty state with create CTA, delete with `confirm()`.
+- `project.js` — workspace shell: identity header, mode/status/stages-run/approval meta, full lifecycle stage list with honest `OUT_OF_SCOPE` handling, run-stage buttons for in-scope pending stages only, 404 and error states.
+- `project-settings.js` — edit title/mode via `PUT`, danger-zone delete via `DELETE`, 404/error states.
+- `api.js` — `updateProject(id, data)` added and exported.
+- `components.css` — project grid/cards/stages/danger-panel styles (balanced 256/256).
+
+**Verification (Stage 6):** `test/projects-api.test.ts` (NEW, node --test) — 5/5 pass:
+1. full lifecycle: create 201 → list contains project → detail with in-scope stages → PUT title+mode 200 persisted → invalid mode 400 → empty update 400 → in-scope stage run 200 + RECORDED → out-of-scope stage 409 → delete 204 → detail 404 → list no longer contains it
+2. empty state: fresh user count 0
+3. isolation: second account gets 404 on get/PUT/run/DELETE of the first account's project; project untouched
+4. unauthenticated list/create/PUT → 401
+5. iteration persistence: project created on server 1 still listed and readable after a full server restart on the same data dir (durable store), same account logged back in
+
+**Regression:** full suite `npm test` — **363 tests, 363 pass, 0 fail**. `tsc --noEmit` GREEN. All touched frontend JS `node --check` OK. CSS balanced (tokens 8/8, layout 80/80, components 256/256).
 
 **Dependencies:** Stage 5.
 

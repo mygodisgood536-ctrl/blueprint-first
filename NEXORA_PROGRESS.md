@@ -484,3 +484,36 @@ All 11 sub-stages implemented and verified. The complete security model works en
 
 **Persistence verified:** Preferences and projects survive server restart (durable account store + durable artifact store).
 
+## Stage 6 — Projects  `[✓] COMPLETE`
+
+**Goal:** Per-user project list, workspace shell, settings, and the missing `PUT /api/projects/:id` endpoint, with full e2e + persistence verification.
+
+**Backend (server.ts):**
+- `PUT /api/projects/:id` added (the previously-noted 6.4 gap). Owner-checked via `requireOwnedProject`; validates `title` (string, 2–64 chars) and `mode` (must be a member of `PROJECT_MODES`); 400 when neither is supplied, 404 when the project is foreign or missing, 200 with the updated summary on success. Persists through the durable artifact store.
+- Existing `GET /api/projects`, `GET /api/projects/:id`, `POST /api/projects`, `DELETE /api/projects/:id`, `POST /api/projects/:id/run/:stageId`, `POST /api/projects/:id/approve` unchanged.
+
+**Frontend (new + updated):**
+- `views/projects.js` (NEW) — per-user project grid with mode/status/id cards, empty state with Create CTA, delete with `confirm()`. Sidebar "Projects" now routes here.
+- `views/project.js` (NEW) — workspace shell: identity header, mode/status/stages-run/approval meta, full lifecycle stage list with honest `OUT_OF_SCOPE` labels for stages outside the project's mode, "Run stage" buttons only for in-scope pending stages, link to settings, 404 / error states.
+- `views/project-settings.js` (NEW) — title/mode form that PUTs to the new endpoint, danger-zone delete via `DELETE`, 404 state.
+- `api.js` — `updateProject(id, data)` added.
+- `router.js` — `/projects` and `/projects/:id/settings` registered; `/projects/:id` unchanged.
+- `components.css` — project grid / card / stages / danger-panel styles (balanced 256/256).
+
+**E2E harness (test/projects-api.test.ts, NEW, node --test):**
+- Real `ProjectRegistry` + `JsonFileArtifactStore` + `MemoryEvidenceLog` + scripted `AiRouter`. No demo pipeline.
+- 5 tests, 5 pass:
+  1. **Full lifecycle:** create 201 → list contains → detail with in-scope stages → PUT title+mode 200 → invalid mode 400 → empty update 400 → in-scope stage run 200 + RECORDED → out-of-scope stage 409 → delete 204 → detail 404 → list no longer contains it.
+  2. **Empty state:** fresh user count 0.
+  3. **Isolation:** second account gets 404 on get/PUT/run/DELETE of first account's project; project untouched.
+  4. **Unauthenticated:** list/create/PUT → 401.
+  5. **Restart persistence:** project created on server 1 still listed and readable after a full restart on the same data dir (durable store); same account logged back in.
+
+**Bugs found & fixed:**
+- `_fix_test.mjs` repair script picked up by `node --test` as a test (had no test() registration) — deleted after use.
+- Test ran the persistence case with a *new* signup on the second server, so it couldn't see the persisted project. Switched to `loginCookie` with the original `alice_persist` account — pass.
+
+**Regression:** `npm test` — **363 tests, 363 pass, 0 fail**. `tsc --noEmit` GREEN. All touched JS `node --check` OK. CSS balanced (tokens 8/8, layout 80/80, components 256/256).
+
+**Docs updated:** `NEXORA_MASTER_SPEC.md` (PUT added to API inventory; missing-capabilities table cleared), `NEXORA_IMPLEMENTATION_ROADMAP.md` (Stage 6 → COMPLETE with per-substage evidence), `NEXORA_PRODUCT_BLUEPRINT.md` (Projects list, workspace, settings marked `[✓]`).
+
