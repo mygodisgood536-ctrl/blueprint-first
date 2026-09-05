@@ -18,6 +18,7 @@ import { router } from './router.js';
 const SIDEBAR_LINKS = [
   { href: '#/dashboard', label: 'Dashboard', icon: '◧' },
   { href: '#/projects', label: 'Projects', icon: '⧉' },
+  { href: '#/documents', label: 'Documents', icon: '📄' },
   { href: '#/providers', label: 'Providers', icon: '⚙' },
   { href: '#/settings/profile', label: 'Settings', icon: '⚿' },
   { href: '#/help', label: 'Help', icon: '?' },

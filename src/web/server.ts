@@ -24,7 +24,7 @@ import { registerAuthApi } from './auth-api.ts';
 import { DurableDocumentStore, documentsFilePath } from './durable-documents.ts';
 import { ensureDir, resolveDataDir } from '../runtime/paths.ts';
 import { DuplicateCredentialError } from '../ai/credential-store.ts';
-import { DocumentStore, DocumentNotFoundError } from '../chat/document.ts';
+import { DocumentStore, DocumentNotFoundError, sha256, type DocumentRef } from '../chat/document.ts';
 import { ModelCatalogue } from '../ai/model-catalogue.ts';
 import { ModelsDevSource } from '../ai/models-dev-source.ts';
 import { OpenRouterProvider } from '../ai/openrouter-provider.ts';
@@ -546,7 +546,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
       res.status(501).json({ error: 'The project engine is not available in this build.' });
       return;
     }
-    const body = req.body as { name?: unknown; vision?: unknown; mode?: unknown };
+    const body = req.body as { name?: unknown; vision?: unknown; mode?: unknown; visionDocumentId?: unknown };
     const name = typeof body.name === 'string' ? body.name.trim() : '';
     if (name.length < 2 || name.length > 64) {
       res.status(400).json({ error: 'Project name must be 2-64 characters.' });
@@ -562,6 +562,34 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
       res.status(400).json({ error: `Unknown project mode "${mode}".` });
       return;
     }
+    // Optional Stage-7 wiring: if the client already sent the vision through
+    // /api/chat/ingest and got back a document reference, attach it to the
+    // project config so the project's intent record points at the document
+    // rather than copying its bytes. Owner-scoped: the doc must belong to
+    // this user, otherwise we return 400 (it cannot be linked).
+    let visionDocumentRef: DocumentRef | null = null;
+    const visionDocumentId = typeof body.visionDocumentId === 'string' ? body.visionDocumentId : '';
+    if (visionDocumentId.length > 0) {
+      try {
+        const docView = documentStore.getView(user, visionDocumentId, { full: true });
+        if (docView.content !== undefined) {
+          visionDocumentRef = {
+            id: docView.id,
+            ownerId: docView.ownerId,
+            charLength: docView.charLength,
+            byteLength: docView.byteLength,
+            preview: docView.preview,
+            contentHash: sha256(docView.content),
+          };
+        }
+      } catch (error) {
+        if (error instanceof DocumentNotFoundError) {
+          res.status(400).json({ error: 'visionDocumentId refers to a document that does not exist or belongs to another account.' });
+          return;
+        }
+        throw error;
+      }
+    }
     const account = req.account;
     try {
       const project = await result.registry.createProject({
@@ -571,7 +599,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
         owner: { userId: user, label: account !== undefined ? account.displayName ?? account.username : user },
         actor: { kind: 'human', id: user },
         scope: [name],
-        config: { vision, source: 'nexona-web' },
+        config: { vision, source: 'nexona-web', ...(visionDocumentRef ? { visionDocument: visionDocumentRef } : {}) },
       });
       // Creating a project records a PROJECT artifact; it does NOT fabricate
       // a pipeline run, so the discovery artifact count is honestly zero.

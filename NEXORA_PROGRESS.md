@@ -517,3 +517,42 @@ All 11 sub-stages implemented and verified. The complete security model works en
 
 **Docs updated:** `NEXORA_MASTER_SPEC.md` (PUT added to API inventory; missing-capabilities table cleared), `NEXORA_IMPLEMENTATION_ROADMAP.md` (Stage 6 → COMPLETE with per-substage evidence), `NEXORA_PRODUCT_BLUEPRINT.md` (Projects list, workspace, settings marked `[✓]`).
 
+
+## Stage 7 — Files & Inputs  `[✓] COMPLETE`
+
+**Goal:** Real text-file upload + per-user document library + chat-ingest wired into project creation.
+
+**Backend (server.ts):**
+- `POST /api/documents/upload` already implemented in Phase 1 (text only, 5 MB multipart, owner-scoped, validation, durable). No changes this stage.
+- `POST /api/chat/ingest` already implemented (short text → inline message; ≥4,000 chars → `DocumentRef`).
+- `POST /api/projects` extended: now accepts an **optional** `visionDocumentId` string. Server looks up the document via `documentStore.getView(user, visionDocumentId, { full: true })`, owner-scoped (`DocumentNotFoundError` → 400 if foreign/missing), and stores a `DocumentRef` under `config.visionDocument` on the project — no byte duplication, the project links to the document.
+- Imported `sha256` and `DocumentRef` type from `src/chat/document.ts`.
+
+**Frontend (3 new views + supporting edits):**
+- `views/documents.js` (NEW) — per-user document grid: card with id, char/byte length, content-hash preview, Open and Delete; empty state with upload CTA; 401/error/retry.
+- `views/document.js` (NEW) — document detail: back link, identity header, bounded preview, monospace full content, delete, 404 + error/retry.
+- `views/documents-upload.js` (NEW) — drag-and-drop + file picker with 5 MB client guard, progress bar, success toast + auto-route to detail. A second card exposes a paste-text box that calls `api.chatIngest(text)` and shows the short→message vs long→document classification live (with a link to the created document).
+- `views/project-new.js` — vision text is sent through `api.chatIngest(text)` first; if it returns a `documentRef`, the project is created with `visionDocumentId`; the success line now shows `(vision stored as <code>doc_…</code>)` so the wiring is visible.
+- `api.js` — `chatIngest(text)` added and exported.
+- `router.js` — `/documents`, `/documents/upload`, `/documents/:id` registered.
+- `app.js` — sidebar now has `Documents` between Projects and Providers (📄).
+- `components.css` — appended `.back-link`, `.document-grid`, `.document-card*`, `.document-detail*`, `.upload-zone*`, `.upload-progress*`, `.ingest-result*` (balanced 285/285).
+
+**E2E harness (`test/documents-api.test.ts`, NEW, node --test):**
+- Real `ProjectRegistry` + `JsonFileArtifactStore` + `MemoryEvidenceLog` + scripted `AiRouter` (same harness shape as `projects-api.test.ts`).
+- 5 tests, 5 pass:
+  1. **Multipart upload + round-trip:** upload returns `DocumentRef` with id/charLength; list contains it; detail with `?full=true` returns the same content; delete → 204; subsequent detail → 404.
+  2. **Empty/whitespace-only upload body → 400.**
+  3. **Cross-account isolation + 401:** Bob gets 404 reading/deleting Alice's document; `GET /api/documents` without a session → 401.
+  4. **Optional `visionDocumentId`:** Alice creates a document via chat-ingest, then creates a project with `visionDocumentId`; the project's `config.visionDocument.id` round-trips through `GET /api/projects/:id`.
+  5. **Foreign `visionDocumentId` rejected:** Bob attempts to use Alice's `visionDocumentId` on `POST /api/projects` → 400.
+
+**Bugs found & fixed during this stage:**
+- Test file had string-literal raw LFs (multi-line template strings inside TypeScript). Fixed via a CRLF-aware escape pass that preserves template literals (which intentionally contain CRLF).
+- The initial `buildDocServer` used a stub `result` without `registry`, so `POST /api/projects` returned 501 "engine not available". Switched to the real harness.
+- The upload endpoint trims before storing, so the round-trip test uses an input without leading/trailing whitespace (the byte count is exact).
+
+**Regression:** `node --test` over all 44 test files (run in two batches; this Windows shell environment hangs on the one-shot full run, but each batch completes cleanly): **345/345 tests pass, 0 fail, 82 suites**. The pre-existing `test/chat-docs-api.test.ts` (5 tests) continues to pass alongside. `node --check` OK on all 7 touched JS files. CSS balanced (tokens 8/8, layout 80/80, components 285/285). The TS additions are confined to the existing `server.ts` and reuse imports already used by the rest of the documents surface.
+
+**Docs updated:** `NEXORA_MASTER_SPEC.md` (Documents list/detail/upload rows in Page Inventory added; §22 frontend row marked `[✓]`), `NEXORA_IMPLEMENTATION_ROADMAP.md` (Stage 7 → COMPLETE with per-substage evidence, regression summary, bug list), `NEXORA_PRODUCT_BLUEPRINT.md` (Files & Inputs Pages section appended: Documents List, Document Detail, Document Upload, Chat ingest integration), `NEXORA_PROGRESS.md` (this Stage 7 section).
+

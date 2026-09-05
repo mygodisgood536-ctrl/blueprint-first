@@ -140,6 +140,34 @@
 - **Backend:** `PUT /api/projects/:id` (owner-checked title/mode update; validates 2–64 char title and `PROJECT_MODES` enum) and `DELETE /api/projects/:id`.
 - **Status:** `[✓]` Implemented (Stage 6).
 
+## Files & Inputs Pages
+
+### Page: Documents List
+- **Purpose:** See all documents uploaded by the current account.
+- **Access:** Authenticated. Route: `#/documents`. Sidebar entry: `Documents` (between Projects and Providers).
+- **View:** `documents.js` — grid of cards showing id, char/byte length, content-hash preview, Open and Delete actions; empty-state with upload CTA; honest 401/error/retry states.
+- **Backend:** `GET /api/documents` → `{ documents, count }` (owner-filtered) and `DELETE /api/documents/:id` for the per-card delete.
+- **Status:** `[✓]` Implemented (Stage 7).
+
+### Page: Document Detail
+- **Purpose:** Read the full content of a document the user owns.
+- **Access:** Authenticated (owner). Route: `#/documents/:id`.
+- **View:** `document.js` — back link, identity header (id + char/byte/hash), bounded preview, monospace full content, delete (DELETE with confirm), 404 state for missing/foreign documents, error/retry.
+- **Backend:** `GET /api/documents/:id?full=true` (full content opt-in) and `DELETE /api/documents/:id`.
+- **Status:** `[✓]` Implemented (Stage 7).
+
+### Page: Document Upload
+- **Purpose:** Upload text files (up to 5 MB) and paste text that may turn into a document reference.
+- **Access:** Authenticated. Route: `#/documents/upload`.
+- **View:** `documents-upload.js` — drag-and-drop + file picker with 5 MB client guard and progress bar; success toast then auto-routes to the new document. A second card exposes a paste-text box that calls `api.chatIngest(text)` and shows the short→message vs long→document classification live (with a link to the created document).
+- **Backend:** `POST /api/documents/upload` (multipart, "file" field, text-only, 5 MB cap, owner-scoped) and `POST /api/chat/ingest` (json `{ text }` → `IngestionResult`). Text at or above 4,000 chars becomes a document reference; shorter text stays a chat message.
+- **Status:** `[✓]` Implemented (Stage 7).
+
+### Chat ingest integration (Stage 7.3)
+- The new project-creation flow (`project-new.js`) sends the vision text through `api.chatIngest(text)` first. If the result is a `documentRef`, the project is created with the optional `visionDocumentId` field on `POST /api/projects`; the server stores a `DocumentRef` under `config.visionDocument` (no byte duplication, owner-scoped) so the project links to the document rather than copying it. Short visions stay inline. The success screen reports the attached `doc_…` id so the user can see the wiring actually happened.
+- **Backend:** `POST /api/projects` now accepts an optional `visionDocumentId`; owner-checked (`DocumentNotFoundError` → 400 if foreign or missing).
+- **Status:** `[✓]` Implemented (Stage 7).
+
 ## Account Pages
 
 ### Page: Profile

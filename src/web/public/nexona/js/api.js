@@ -188,6 +188,9 @@ async function getDocument(id) {
 async function deleteDocument(id) {
   await request(`/documents/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
+async function chatIngest(text) {
+  return request('/chat/ingest', { method: 'POST', body: JSON.stringify({ text }) });
+}
 
 // ── Summary (engine showcase) ───────────────
 async function summary() {
@@ -209,6 +212,6 @@ export const api = {
   runStage, approveBlueprint,
   listModels, getModel, getSelection, selectModel,
   listCredentials, addCredential, removeCredential, verifyCredential,
-  uploadDocument, listDocuments, getDocument, deleteDocument,
+  uploadDocument, listDocuments, getDocument, deleteDocument, chatIngest,
   summary, activity,
 };

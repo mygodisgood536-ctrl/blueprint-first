@@ -1139,3 +1139,34 @@
 .stage-item--out_of_scope .stage-item__status { color: rgb(var(--color-text-tertiary)); opacity: 0.6; }
 .panel--danger { border-color: rgb(var(--color-danger)); }
 .panel--danger .panel__title { color: rgb(var(--color-danger)); }
+
+/* === Documents (Stage 7) === */
+.back-link { display: inline-block; margin-bottom: var(--space-2); color: rgb(var(--color-text-secondary)); text-decoration: none; font-size: var(--font-size-sm); }
+.back-link:hover { color: rgb(var(--color-primary)); }
+.document-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: var(--space-4); }
+.document-card { background: rgb(var(--color-bg-elevated)); border: 1px solid rgb(var(--color-border)); border-radius: var(--radius-md); padding: var(--space-4); display: flex; flex-direction: column; gap: var(--space-3); }
+.document-card__header { display: flex; justify-content: space-between; align-items: center; gap: var(--space-2); }
+.document-card__title { font-size: var(--font-size-sm); font-weight: 600; margin: 0; word-break: break-all; }
+.document-card__preview { margin: 0; font-size: var(--font-size-sm); color: rgb(var(--color-text-secondary)); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.document-card__meta { display: flex; justify-content: space-between; font-size: var(--font-size-xs); color: rgb(var(--color-text-tertiary)); }
+.document-card__hash { font-family: var(--font-family-mono, monospace); }
+.document-card__actions { display: flex; gap: var(--space-2); margin-top: auto; }
+.document-detail { display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-5); }
+.document-detail__label { display: block; font-size: var(--font-size-xs); text-transform: uppercase; letter-spacing: 0.05em; color: rgb(var(--color-text-tertiary)); margin-bottom: var(--space-2); }
+.document-detail__preview p { margin: 0; color: rgb(var(--color-text-secondary)); }
+.document-detail__pre { background: rgb(var(--color-bg-base, 16 16 16)); border: 1px solid rgb(var(--color-border)); border-radius: var(--radius-sm); padding: var(--space-4); font-family: var(--font-family-mono, monospace); font-size: var(--font-size-sm); white-space: pre-wrap; word-break: break-word; max-height: 600px; overflow: auto; margin: 0; }
+.upload-zone { display: flex; flex-direction: column; align-items: center; gap: var(--space-3); padding: var(--space-7); border: 2px dashed rgb(var(--color-border)); text-align: center; cursor: pointer; transition: border-color 0.15s, background 0.15s; }
+.upload-zone:hover, .upload-zone--over { border-color: rgb(var(--color-primary)); background: rgb(var(--color-primary) / 0.05); }
+.upload-zone:focus-visible { outline: 2px solid rgb(var(--color-primary)); outline-offset: 2px; }
+.upload-zone__icon { font-size: 2.5rem; color: rgb(var(--color-text-tertiary)); }
+.upload-zone__hint { margin: 0; color: rgb(var(--color-text-secondary)); }
+.upload-zone__link { color: rgb(var(--color-primary)); text-decoration: underline; cursor: pointer; }
+.upload-zone__file { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); border: 0; }
+.upload-zone__limit { margin: 0; font-size: var(--font-size-xs); color: rgb(var(--color-text-tertiary)); }
+.upload-progress { margin-top: var(--space-3); }
+.upload-progress__bar { width: 100%; height: 6px; background: rgb(var(--color-border)); border-radius: 999px; overflow: hidden; }
+.upload-progress__fill { height: 100%; width: 0%; background: rgb(var(--color-primary)); transition: width 0.2s; }
+.upload-progress__text { margin-top: var(--space-2); font-size: var(--font-size-sm); color: rgb(var(--color-text-secondary)); }
+.ingest-result { margin-top: var(--space-3); padding: var(--space-3); background: rgb(var(--color-bg-base, 16 16 16)); border: 1px solid rgb(var(--color-border)); border-radius: var(--radius-sm); }
+.ingest-result__kind { font-weight: 600; margin-bottom: var(--space-2); }
+.ingest-result__preview { margin: 0; color: rgb(var(--color-text-secondary)); }

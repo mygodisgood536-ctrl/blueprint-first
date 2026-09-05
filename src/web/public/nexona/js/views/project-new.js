@@ -93,11 +93,24 @@ export function mount(params, account) {
     submitBtn.disabled = true;
     submitBtn.classList.add('btn--loading');
     document.getElementById('run-progress').hidden = false;
+    const progressBody = document.getElementById('run-progress-body');
+    progressBody.innerHTML = `<p class="muted">Routing vision through chat ingest…</p>`;
 
     try {
-      const res = await api.createProject({ name, vision, mode });
-      document.getElementById('run-progress-body').innerHTML = `
-        <p class="ok">Project created: <strong>${esc(res.project?.id ?? '')}</strong> (${esc(mode)}). The Blueprint-First chain produced ${res.summary?.discoveryArtifacts ?? '…'} discovery artifacts.</p>`;
+      // Stage 7.3: long visions are first sent through /api/chat/ingest so
+      // chat state stays lightweight and the project links to a document
+      // reference instead of duplicating the bytes. Short visions stay inline.
+      const ingest = await api.chatIngest(vision);
+      const visionDocumentId = ingest.kind === 'document' ? ingest.documentRef.id : undefined;
+
+      progressBody.innerHTML = `<p class="muted">Creating project…</p>`;
+      const res = await api.createProject({ name, vision, mode, visionDocumentId });
+
+      const note = visionDocumentId
+        ? ` (vision stored as <code>${esc(visionDocumentId)}</code>)`
+        : '';
+      progressBody.innerHTML = `
+        <p class="ok">Project created: <strong>${esc(res.project?.id ?? '')}</strong> (${esc(mode)})${note}. The Blueprint-First chain produced ${res.summary?.discoveryArtifacts ?? '…'} discovery artifacts.</p>`;
       toasts.success('Project created', (res.project?.title ?? 'Project') + ' is ready.');
       router.go(`/projects/${encodeURIComponent(res.project?.id ?? '')}`);
     } catch (err) {

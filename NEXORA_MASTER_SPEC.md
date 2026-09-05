@@ -197,9 +197,12 @@ Backend: `POST /api/auth/forgot` → `POST /api/auth/forgot/verify` → `POST /a
 |------|---------------|---------|--------|
 | Dashboard | `dashboard.js` | `/api/me`, `/api/projects`, `/api/activity`, `/api/models/selection`, `/api/credentials` | `[✓]` |
 | Projects list | `projects.js` | `GET /api/projects` | `[✓]` |
-| Create project | `project-new.js` | `POST /api/projects` | `[~]` |
+| Create project | `project-new.js` | `POST /api/projects` (accepts optional `visionDocumentId` from `chat/ingest`) | `[✓]` |
 | Project workspace | `project.js` | all pipeline endpoints | `[✓]` |
 | Project settings | `project-settings.js` | `PUT /api/projects/:id` + `DELETE /api/projects/:id` | `[✓]` |
+| Documents list | `documents.js` | `GET /api/documents` | `[✓]` |
+| Document detail | `document.js` | `GET /api/documents/:id?full=true` + `DELETE /api/documents/:id` | `[✓]` |
+| Document upload | `documents-upload.js` | `POST /api/documents/upload` (multipart, 5 MB) + `POST /api/chat/ingest` (live classification) | `[✓]` |
 | Artifacts | (none) | `GET /api/artifacts` | `[!]` |
 | Evidence | (none) | `GET /api/evidence` | `[!]` |
 
@@ -242,7 +245,7 @@ Show only real backend info: user identity, projects, progress, next action, att
 ## 22. Real File/Image Uploads
 
 | `[✓]` | Backend: `POST /api/documents/upload` (text only, 5 MB, multipart, validation, per-user isolation verified) |
-| `[!]` | Frontend upload component needs verification |
+| `[✓]` | Frontend: `views/documents.js` (list), `views/document.js` (detail), `views/documents-upload.js` (drag-and-drop + paste path with live `chat/ingest` classification) — covered by `test/documents-api.test.ts` (5/5). |
 | `[!]` | Image uploads: backend rejects binary — gap if images required |
 
 ## 23. Transparent Engineering Process
