@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NEXORA — Component Test</title>
+  <link rel="stylesheet" href="/nexona/css/tokens.css" />
+  <link rel="stylesheet" href="/nexona/css/components.css" />
+  <link rel="stylesheet" href="/nexona/css/layout.css" />
+  <meta name="color-scheme" content="dark">
+  <style>
+    .test-section { padding: var(--space-xl); border-bottom: 1px solid rgb(var(--color-stroke)); }
+    .test-section h2 { font-size: var(--font-size-lg); margin-bottom: var(--space-lg); color: rgb(var(--color-accent)); }
+    .test-row { display: flex; flex-wrap: wrap; gap: var(--space-md); margin-bottom: var(--space-lg); align-items: flex-start; }
+    .test-item { display: flex; flex-direction: column; gap: var(--space-xs); }
+    .test-label { font-size: var(--font-size-xs); color: rgb(var(--color-text-tertiary)); text-transform: uppercase; letter-spacing: 0.04em; }
+  </style>
+</head>
+<body>
+  <div class="test-section">
+    <h2>Buttons</h2>
+    <div class="test-row">
+      <div class="test-item"><span class="test-label">Primary</span><button class="btn btn--primary">Primary</button></div>
+      <div class="test-item"><span class="test-label">Secondary</span><button class="btn btn--secondary">Secondary</button></div>
+      <div class="test-item"><span class="test-label">Ghost</span><button class="btn btn--ghost">Ghost</button></div>
+      <div class="test-item"><span class="test-label">Text</span><button class="btn btn--text">Text</button></div>
+      <div class="test-item"><span class="test-label">Large</span><button class="btn btn--primary btn--lg">Large</button></div>
+      <div class="test-item"><span class="test-label">Small</span><button class="btn btn--primary btn--sm">Small</button></div>
+      <div class="test-item"><span class="test-label">Block</span><button class="btn btn--primary btn--block">Block Button</button></div>
+      <div class="test-item"><span class="test-label">Disabled</span><button class="btn btn--primary" disabled>Disabled</button></div>
+      <div class="test-item"><span class="test-label">Loading</span><button class="btn btn--primary btn--loading"><span class="btn__text">Loading</span><span class="btn__spinner"></span></button></div>
+    </div>
+  </div>
+
+  <div class="test-section">
+    <h2>Badges</h2>
+    <div class="test-row">
+      <span class="badge badge--success">Success</span>
+      <span class="badge badge--warning">Warning</span>
+      <span class="badge badge--error">Error</span>
+      <span class="badge badge--info">Info</span>
+      <span class="badge badge--neutral">Neutral</span>
+    </div>
+  </div>
+
+  <div class="test-section">
+    <h2>Cards</h2>
+    <div class="test-row">
+      <div class="card" style="width:280px">
+        <div class="card__header"><h3 class="card__title">Card Title</h3><p class="card__subtitle">Card subtitle</p></div>
+        <div class="card__body"><p class="card__text">Card body content goes here.</p></div>
+        <div class="card__footer"><button class="btn btn--primary btn--sm">Action</button></div>
+      </div>
+      <div class="card card--interactive" style="width:280px">
+        <div class="card__header"><h3 class="card__title">Interactive Card</h3></div>
+        <div class="card__body"><p class="card__text">Clickable card with hover effect.</p></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="test-section">
+    <h2>Form States</h2>
+    <div class="test-row">
+      <div class="test-item"><span class="test-label">Default</span><input class="form-input" placeholder="Default input" style="width:200px"></div>
+      <div class="test-item"><span class="test-label">Error</span><input class="form-input form-input--error" placeholder="Error input" style="width:200px"></div>
+      <div class="test-item"><span class="test-label">Success</span><input class="form-input form-input--success" placeholder="Success input" style="width:200px"></div>
+      <div class="test-item"><span class="test-label">Disabled</span><input class="form-input" placeholder="Disabled" disabled style="width:200px"></div>
+    </div>
+  </div>
+
+  <div class="test-section">
+    <h2>Tables</h2>
+    <table class="table">
+      <thead><tr class="table__row--header"><th class="table__header">Name</th><th class="table__header">Status</th><th class="table__header">Date</th></tr></thead>
+      <tbody>
+        <tr class="table__row"><td class="table__cell">Project Alpha</td><td class="table__cell"><span class="badge badge--success">Active</span></td><td class="table__cell">2026-09-03</td></tr>
+        <tr class="table__row"><td class="table__cell">Project Beta</td><td class="table__cell"><span class="badge badge--warning">Pending</span></td><td class="table__cell">2026-09-02</td></tr>
+        <tr class="table__row"><td class="table__cell">Project Gamma</td><td class="table__cell"><span class="badge badge--error">Failed</span></td><td class="table__cell">2026-09-01</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="test-section">
+    <h2>Empty State</h2>
+    <div class="empty-state">
+      <div class="empty-state__icon">📭</div>
+      <h3 class="empty-state__title">No projects yet</h3>
+      <p class="empty-state__desc">Create your first project to start engineering software with evidence and precision.</p>
+      <div class="empty-state__action"><button class="btn btn--primary">Create Project</button></div>
+    </div>
+  </div>
+
+  <div class="test-section">
+    <h2>Loading Skeleton</h2>
+    <div class="test-row">
+      <div style="width:280px">
+        <div class="skeleton skeleton--title"></div>
+        <div class="skeleton skeleton--text" style="width:90%"></div>
+        <div class="skeleton skeleton--text" style="width:75%"></div>
+        <div class="skeleton skeleton--text" style="width:60%"></div>
+      </div>
+      <div class="skeleton skeleton--card" style="width:280px"></div>
+      <div class="skeleton skeleton--avatar"></div>
+    </div>
+  </div>
+
+  <div class="test-section">
+    <h2>Error State</h2>
+    <div class="error-state">
+      <div class="error-state__icon">⚠️</div>
+      <h3 class="error-state__title">Something went wrong</h3>
+      <p class="error-state__desc">We couldn't load your projects. Check your connection and try again.</p>
+      <div class="error-state__action"><button class="btn btn--primary">Retry</button></div>
+    </div>
+  </div>
+
+  <div class="test-section">
+    <h2>Success State</h2>
+    <div class="success-state">
+      <div class="success-state__icon">✅</div>
+      <h3 class="success-state__title">Project created</h3>
+      <p class="success-state__desc">Your project is ready. Start the discovery phase to begin.</p>
+    </div>
+  </div>
+
+  <div class="test-section">
+    <h2>Toast</h2>
+    <div class="test-row">
+      <div class="toast toast--success"><span class="toast__icon">✓</span><div class="toast__content"><div class="toast__title">Success</div><div class="toast__message">Operation completed.</div></div><button class="toast__dismiss">×</button></div>
+      <div class="toast toast--error"><span class="toast__icon">✕</span><div class="toast__content"><div class="toast__title">Error</div><div class="toast__message">Something failed.</div></div><button class="toast__dismiss">×</button></div>
+      <div class="toast toast--info"><span class="toast__icon">ℹ</span><div class="toast__content"><div class="toast__title">Info</div><div class="toast__message">For your information.</div></div><button class="toast__dismiss">×</button></div>
+    </div>
+  </div>
+
+  <div class="test-section">
+    <h2>Modal</h2>
+    <button class="btn btn--primary" onclick="document.getElementById('test-modal').hidden=false">Open Modal</button>
+    <div class="modal-overlay" id="test-modal" hidden style="position:relative; inset:auto; padding:var(--space-xl)">
+      <div class="modal" style="margin:0 auto">
+        <div class="modal__header"><h3 class="modal__title">Confirm Action</h3><button class="btn btn--icon" onclick="document.getElementById('test-modal').hidden=true">×</button></div>
+        <div class="modal__body"><p>Are you sure you want to proceed?</p></div>
+        <div class="modal__footer"><button class="btn btn--secondary" onclick="document.getElementById('test-modal').hidden=true">Cancel</button><button class="btn btn--primary">Confirm</button></div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

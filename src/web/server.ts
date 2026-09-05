@@ -1,22 +1,28 @@
 /**
- * Blueprint-First browser inspection layer (Level 0-5).
+ * Nexona web application server.
  *
- * Starts a minimal Express server that runs the SAME real L0-L5 pipeline the
- * CLI demo runs (single source of truth: src/demo/main.ts) and exposes the
- * resulting system state through a small REST API consumed by a static
- * frontend. The engineering core is untouched — this layer only reads the
- * existing modules and the pipeline result.
+ * Serves the Nexona browser product: a single-page application backed by an
+ * authenticated REST API that orchestrates the existing Blueprint-First
+ * engineering core (src/demo/main.ts pipeline = single source of truth for the
+ * engine showcase). The engineering core is untouched — this layer wires real
+ * sessions to real accounts and drives the engine on demand per account.
  */
 
 import express from 'express';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promises as fs } from 'node:fs';
 import { consoleSink, createLogger } from '../core/logging.ts';
 import { runDemoPipeline, type DemoResult } from '../demo/main.ts';
 import type { CoreServices } from '../core/services.ts';
 import { docStateOf } from '../core/doc.ts';
 import type { Artifact } from '../core/artifact.ts';
 import { ConfigurationError, RoutingError } from '../core/errors.ts';
+import { DurableAccountRegistry } from '../account/durable-registry.ts';
+import { assertSameOrigin, attachAuth } from './auth.ts';
+import { registerAuthApi } from './auth-api.ts';
+import { DurableDocumentStore, documentsFilePath } from './durable-documents.ts';
+import { ensureDir, resolveDataDir } from '../runtime/paths.ts';
 import { DuplicateCredentialError } from '../ai/credential-store.ts';
 import { DocumentStore, DocumentNotFoundError } from '../chat/document.ts';
 import { ModelCatalogue } from '../ai/model-catalogue.ts';
@@ -24,9 +30,14 @@ import { ModelsDevSource } from '../ai/models-dev-source.ts';
 import { OpenRouterProvider } from '../ai/openrouter-provider.ts';
 import { ProviderManager } from '../ai/provider-manager.ts';
 import type { ModelAccessCategory } from '../ai/provider-metadata.ts';
+import { PROJECT_MODE_STAGES, PROJECT_MODES } from '../project/types.ts';
+import type { ProjectMode } from '../project/types.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const PUBLIC_DIR = join(__dirname, 'public');
+const PUBLIC_DIR = join(__dirname, 'public', 'nexona');
+
+/** Session lifetime: 12 hours (the session cookie Max-Age matches this). */
+const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 
 /** Roadmap state fixed by the repository (verified from git log/docs). */
 const ROADMAP = [
@@ -85,8 +96,8 @@ function artifactSummary(a: Artifact): Record<string, unknown> {  return {
 function projectSummary(p: Artifact): Record<string, unknown> {
   return {
     id: p.id,
-    type: p.type,
     title: p.title,
+    type: p.type,
     status: p.status,
     mode: p.attributes['mode'],
     lifecycleComplete: p.attributes['lifecycleComplete'] ?? null,
@@ -94,6 +105,92 @@ function projectSummary(p: Artifact): Record<string, unknown> {
   };
 }
 
+/** Owner userId recorded on a PROJECT artifact, or null. */
+function projectOwnerId(p: Artifact): string | null {
+  const owner = p.attributes['owner'] as { userId?: unknown } | null | undefined;
+  if (owner === null || owner === undefined || typeof owner.userId !== 'string' || owner.userId.trim().length === 0) return null;
+  return owner.userId.trim();
+}
+
+/** True when a PROJECT artifact was soft-deleted through the web layer. */
+function isProjectDeleted(p: Artifact): boolean {
+  return p.attributes['deleted'] === true;
+}
+
+/** Maximum accepted text-upload size (guards a large-upload DoS). */
+const UPLOAD_MAX_BYTES = 5 * 1024 * 1024;
+const UPLOAD_MAX_MB = UPLOAD_MAX_BYTES / (1024 * 1024);
+
+class UploadTooLargeError extends Error {
+  readonly code = 'UPLOAD_TOO_LARGE';
+}
+
+/** Splits a multipart body into raw parts (boundary CRLFs stripped). */
+function splitMultipartParts(body: Buffer, sep: Buffer): Buffer[] {
+  const parts: Buffer[] = [];
+  let pos = body.indexOf(sep);
+  while (pos !== -1) {
+    const start = pos + sep.length;
+    const next = body.indexOf(sep, start);
+    if (next === -1) break;
+    let contentStart = start;
+    if (body.subarray(start, start + 2).equals(Buffer.from('\r\n'))) contentStart += 2;
+    let contentEnd = next;
+    if (body.subarray(contentEnd - 2, contentEnd).equals(Buffer.from('\r\n'))) contentEnd -= 2;
+    if (contentEnd > contentStart) parts.push(body.subarray(contentStart, contentEnd));
+    pos = next;
+  }
+  return parts;
+}
+
+/** Extracts the uploaded text from a multipart body. Rejects binary payloads. */
+function parseMultipartRequest(contentTypeHeader: string, body: Buffer): { fileName?: string; text: string } {
+  const match = /boundary=(?:"([^"]+)"|([^;]+))/.exec(contentTypeHeader);
+  if (match === null) throw new Error('multipart boundary missing; upload rejected.');
+  const boundary = match[1] ?? match[2];
+  const sep = Buffer.from(`--${boundary}`);
+  for (const part of splitMultipartParts(body, sep)) {
+    const headerEnd = part.indexOf(Buffer.from('\r\n\r\n'));
+    if (headerEnd === -1) continue;
+    const header = part.subarray(0, headerEnd).toString('latin1');
+    if (!/name="file"/.test(header)) continue;
+    let fileName: string | undefined;
+    const fileNameMatch = /filename="([^"]*)"/.exec(header);
+    if (fileNameMatch !== null && fileNameMatch[1] !== undefined) fileName = fileNameMatch[1];
+    const text = part.subarray(headerEnd + 4).toString('utf8');
+    if (text.includes('\u0000')) throw new Error('Only text files are supported; binary content was rejected.');
+    return { fileName, text };
+  }
+  throw new Error('No file part named "file" was found in the upload.');
+}
+
+/** Buffers and parses a multipart upload request body (streamed, size-capped). */
+function parseUploadRequest(req: express.Request): Promise<{ fileName?: string; text: string }> {
+  return new Promise((resolve, reject) => {
+    const contentType = String(req.headers['content-type'] ?? '');
+    const chunks: Buffer[] = [];
+    let total = 0;
+    req.on('data', (chunk: Buffer) => {
+      total += chunk.length;
+      if (total > UPLOAD_MAX_BYTES) {
+        reject(new UploadTooLargeError(`Upload exceeds the ${UPLOAD_MAX_MB} MB limit.`));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => {
+      try {
+        resolve(parseMultipartRequest(contentType, Buffer.concat(chunks)));
+      } catch (error) {
+        reject(error instanceof Error ? error : new Error('upload parse failed'));
+      }
+    });
+    req.on('error', (error) => {
+      reject(error instanceof UploadTooLargeError ? error : new Error('upload stream error'));
+    });
+  });
+}
 /** Options for buildServer; all optional for backwards compatibility. */
 export interface BuildServerOptions {
   /**
@@ -113,6 +210,10 @@ export interface BuildServerOptions {
   openRouterFetchImpl?: unknown;
   /** Demo pipeline result override (tests construct the server cheaply). */
   result?: DemoResult;
+  /** Root directory for durable application state (default: BF_DATA_DIR or <repo>/data). */
+  dataDir?: string;
+  /** Injected durable account registry (tests); loaded from dataDir/accounts.json otherwise. */
+  accounts?: DurableAccountRegistry;
 }
 
 export async function buildServer(options: BuildServerOptions = {}): Promise<{
@@ -120,7 +221,8 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
   result: DemoResult;
   providerManager: ProviderManager;
   modelCatalogue: ModelCatalogue;
-  documentStore: DocumentStore;
+  documentStore: DocumentStore | DurableDocumentStore;
+  accounts: DurableAccountRegistry;
 }> {
   const logger = createLogger({ level: 'warn', sink: consoleSink() });
   const result = options.result ?? (await runDemoPipeline(logger));
@@ -137,11 +239,37 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
         : {}),
     });
   const providerManager = options.providerManager ?? new ProviderManager({ logger });
-  const documentStore = options.documentStore ?? new DocumentStore();
+
+  // --- Nexona durable application state (survives restarts) --------------------
+  const dataDir = resolveDataDir(options.dataDir);
+  await ensureDir(dataDir);
+  const accounts =
+    options.accounts ??
+    (await DurableAccountRegistry.load(join(dataDir, 'accounts.json'), SESSION_TTL_MS));
+  const documentStore: DocumentStore | DurableDocumentStore =
+    options.documentStore ?? new DurableDocumentStore({ filePath: documentsFilePath(dataDir) });
+  if (documentStore instanceof DurableDocumentStore) await documentStore.init();
+  const persistDocuments = async (): Promise<void> => {
+    if (documentStore instanceof DurableDocumentStore) await documentStore.persist();
+  };
 
   const app = express();
   app.use(express.json());
-  app.use(express.static(PUBLIC_DIR));
+  app.use(assertSameOrigin); // CSRF defense: cross-site writes are rejected
+  app.use(attachAuth(accounts)); // identity = verified session cookie only
+  app.use('/nexona', express.static(PUBLIC_DIR));
+
+  // --- Nexona authentication & account security --------------------------------
+  registerAuthApi(app, { accounts });
+
+    // --- session identity (frontend entry point) ---------------------------------
+  app.get('/api/me', (req, res) => {
+    if (req.account === undefined) {
+      res.json({ account: null });
+      return;
+    }
+    res.json({ account: accounts.view(req.account) });
+  });
 
   const services: CoreServices = result.services;
 
@@ -259,9 +387,68 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
     });
   });
 
+  // --- activity (recent account activity) -----------------------------------
+  app.get('/api/activity', async (req, res) => {
+    const user = userIdOf(req);
+    if (user === null) {
+      res.status(401).json({ error: 'authentication required' });
+      return;
+    }
+    const projects = await ownedProjectsOf(user);
+    const documents = documentStore.listForOwner(user);
+    if (projects.length === 0 && documents.length === 0) {
+      res.json({ activity: [] });
+      return;
+    }
+    const projectActivity = projects.slice(-5).map((p) => ({
+      type: 'project',
+      id: p.id,
+      title: p.title,
+      timestamp: p.updatedAt ?? p.createdAt ?? '',
+    }));
+    const docActivity = documents.slice(-5).map((d) => ({
+      type: 'document',
+      id: d.id,
+      title: d.preview.length > 60 ? `${d.preview.slice(0, 60)}…` : d.preview,
+      timestamp: '',
+    }));
+    const ts = (t: string) => {
+      const ms = new Date(t).getTime();
+      return Number.isFinite(ms) ? ms : 0;
+    };
+    const activity = [...projectActivity, ...docActivity]
+      .sort((a, b) => ts(b.timestamp) - ts(a.timestamp))
+      .slice(0, 10);
+    res.json({ activity });
+  });
+
+  /** Projects owned by the given user (soft-deleted excluded). */
+  const ownedProjectsOf = async (user: string): Promise<Artifact[]> => {
+    if (result.registry === undefined) return [];
+    const all = await result.registry.listProjects();
+    return all.filter((p) => projectOwnerId(p) === user && !isProjectDeleted(p));
+  };
+
+  /** The user's project, or null when missing/foreign/deleted. */
+  const requireOwnedProject = async (user: string, id: string): Promise<Artifact | null> => {
+    if (result.registry === undefined) return null;
+    try {
+      const project = await result.registry.requireProject(id);
+      if (projectOwnerId(project) !== user || isProjectDeleted(project)) return null;
+      return project;
+    } catch {
+      return null;
+    }
+  };
+
   // --- projects (project foundation) ------------------------------------------
-  app.get('/api/projects', async (_req, res) => {
-    const projects = await result.registry.listProjects();
+  app.get('/api/projects', async (req, res) => {
+    const user = userIdOf(req);
+    if (user === null) {
+      res.status(401).json({ error: 'authentication required' });
+      return;
+    }
+    const projects = await ownedProjectsOf(user);
     res.json({
       count: projects.length,
       projects: projects.map((p) => ({
@@ -275,92 +462,232 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
   });
 
   app.get('/api/projects/:id', async (req, res) => {
+    const user = userIdOf(req);
+    if (user === null) {
+      res.status(401).json({ error: 'authentication required' });
+      return;
+    }
+    const project = await requireOwnedProject(user, req.params['id']!);
+    if (project === null) {
+      res.status(404).json({ error: 'project-not-found' });
+      return;
+    }
+    const mode = String(project.attributes['mode']);
+    const stagesForMode = (PROJECT_MODE_STAGES as Record<string, { stageId: string; label: string; inScope: boolean }[]>)[mode] ?? [];
+    const stagesRun = (project.attributes['stages'] as readonly { stageId: string; at: string; recordedBy: string }[] | undefined) ?? [];
+    const approval = project.attributes['approval'] as { status?: string; approvedAt?: string; approvedBy?: string } | null | undefined;
+    res.json({
+      ...projectSummary(project),
+      description: project.description,
+      owner: project.attributes['owner'] ?? null,
+      scope: project.attributes['scope'] ?? [],
+      config: project.attributes['projectConfig'] ?? {},
+      createdAt: project.createdAt,
+      updatedAt: project.updatedAt ?? null,
+      stages: stagesForMode.map((s) => ({
+        stageId: s.stageId,
+        label: s.label,
+        inScope: s.inScope,
+        status: !s.inScope ? 'OUT_OF_SCOPE' : stagesRun.some((r) => r.stageId === s.stageId) ? 'RECORDED' : 'PENDING',
+        at: stagesRun.find((r) => r.stageId === s.stageId)?.at ?? null,
+      })),
+      approval: approval ?? null,
+      stagesRunCount: stagesRun.length,
+    });
+  });
+          
+
+  app.post('/api/projects', async (req, res) => {
+    const user = userIdOf(req);
+    if (user === null) {
+      res.status(401).json({ error: 'authentication required' });
+      return;
+    }
+    if (result.registry === undefined) {
+      res.status(501).json({ error: 'The project engine is not available in this build.' });
+      return;
+    }
+    const body = req.body as { name?: unknown; vision?: unknown; mode?: unknown };
+    const name = typeof body.name === 'string' ? body.name.trim() : '';
+    if (name.length < 2 || name.length > 64) {
+      res.status(400).json({ error: 'Project name must be 2-64 characters.' });
+      return;
+    }
+    const vision = typeof body.vision === 'string' ? body.vision.trim() : '';
+    if (vision.length < 10) {
+      res.status(400).json({ error: 'Vision must be at least 10 characters.' });
+      return;
+    }
+    const mode = typeof body.mode === 'string' ? body.mode : 'full-product';
+    if (!(PROJECT_MODES as readonly string[]).includes(mode)) {
+      res.status(400).json({ error: `Unknown project mode "${mode}".` });
+      return;
+    }
+    const account = req.account;
     try {
-      const project = await result.registry.requireProject(req.params['id']!);
-      res.json({
-        ...projectSummary(project),
-        description: project.description,
-        owner: project.attributes['owner'] ?? null,
-        scope: project.attributes['scope'] ?? [],
-        config: project.attributes['projectConfig'] ?? {},
-        designCoverage: {
-          coveredCount: result.designCoverage.covered.length,
-          totalDimensions: result.designCoverage.allDimensions.length,
-          missing: result.designCoverage.missing,
-          gateSatisfied: result.designCoverage.missing.length === 0,
-        },
-        businessModel: {
-          roleCount: result.businessModel.roles.length,
-          permissionCount: result.businessModel.rolePermissions.length,
-          entityCount: result.businessModel.entities.length,
-          workflowCount: result.businessModel.workflows.length,
-          adminRoles: result.businessModel.adminCapabilities.map((a) => a.role),
-        },
-        threatModel: {
-          threatCount: result.threatModel.threats.length,
-          strideCategories: [...new Set(result.threatModel.threats.map((t) => t.category))],
-          requirementCount: result.threatModel.securityRequirements.length,
-          p0Count: result.threatModel.securityRequirements.filter((r) => r.priority === 'P0').length,
-        },
-        uxVerification: {
-          tokenScore: result.uxVerification.tokenCoverage.score,
-          accessibilityScore: result.uxVerification.accessibilityCoverage.score,
-          responsiveScore: result.uxVerification.responsiveCoverage.score,
-          overallScore: result.uxVerification.overallScore,
-          findingsCount: result.uxVerification.findings.length,
-        },
-        designCodeTrace: {
-          total: result.designCodeTrace.total,
-          traced: result.designCodeTrace.traced,
-          unimplemented: result.designCodeTrace.unimplemented,
-          orphans: result.designCodeTrace.orphans,
-          forwardComplete: result.designCodeTrace.forwardComplete,
-          reverseComplete: result.designCodeTrace.reverseComplete,
-        },
-        projectBinding: {
-          documentCount: result.projectBinding.documentCount,
-          documentIds: result.projectBinding.documentIds.slice(0, 20),
-          ownerCount: result.projectBinding.ownerCount,
-        },
-        portability: {
-          artifactCount: result.portability.artifactCount,
-          edgeCount: result.portability.edgeCount,
-          evidenceCount: result.portability.evidenceCount,
-          integrityVerified: result.portability.integrityVerified,
-        },
-        account: {
-          accountCount: result.account.accountCount,
-          ownerAccountId: result.account.ownerAccountId,
-          ownerCanAccess: result.account.ownerCanAccess,
-          strangerCanAccess: result.account.strangerCanAccess,
-        },
-        designQuality: {
-          overallScore: result.designQuality.overallScore,
-          identitySpecificity: result.designQuality.identitySpecificity,
-          componentConsistency: result.designQuality.componentConsistency,
-          accessibility: result.designQuality.accessibility,
-          findingsCount: result.designQuality.findings.length,
-        },
-        designConsistency: {
-          overallConsistency: result.designConsistency.overallConsistency,
-          tokenVariance: result.designConsistency.tokenConsistency.variance,
-          componentVariance: result.designConsistency.componentConsistency.variance,
-          spacingVariance: result.designConsistency.spacingConsistency.variance,
-          typographyVariance: result.designConsistency.typographyConsistency.variance,
-          exceptionsCount: result.designConsistency.exceptions.length,
-        },
-        visual: {
-          identityTone: result.visual.identity.direction.tone,
-          seedHue: result.visual.identity.direction.seedHue,
-          seedSaturation: result.visual.identity.direction.seedSaturation,
-          componentCount: result.visual.components.inventoried.length,
-          motionDurationStandard: result.visual.tokens.motion?.durationStandard,
-          reducedMotion: result.visual.tokens.motion?.reducedMotion,
+      const project = await result.registry.createProject({
+        title: name,
+        description: vision,
+        mode: mode as ProjectMode,
+        owner: { userId: user, label: account !== undefined ? account.displayName ?? account.username : user },
+        actor: { kind: 'human', id: user },
+        scope: [name],
+        config: { vision, source: 'nexona-web' },
+      });
+      // Creating a project records a PROJECT artifact; it does NOT fabricate
+      // a pipeline run, so the discovery artifact count is honestly zero.
+
+      res.status(201).json({
+        project: projectSummary(project),
+        summary: {
+          discoveryArtifacts: 0,
+          message: 'Project created as a structured PROJECT artifact. Run lifecycle stages from the project page.',
         },
       });
-    } catch {
-      res.status(404).json({ error: 'project-not-found' });
+    } catch (error) {
+      jsonError(res, 400, error);
     }
+  });
+
+  app.delete('/api/projects/:id', async (req, res) => {
+    const user = userIdOf(req);
+    if (user === null) {
+      res.status(401).json({ error: 'authentication required' });
+      return;
+    }
+    if (result.registry === undefined) {
+      res.status(501).json({ error: 'The project engine is not available in this build.' });
+      return;
+    }
+    const project = await requireOwnedProject(user, req.params['id']!);
+    if (project === null) {
+      res.status(404).json({ error: 'project-not-found' });
+      return;
+    }
+    await result.services.store.update(project.id, project.version, (draft) => ({
+      ...draft,
+      attributes: { ...draft.attributes, deleted: true, deletedAt: new Date().toISOString() },
+    }));
+    await result.evidence.append({
+      kind: 'inspection',
+      summary: `Project ${project.id} deleted by ${user}.`,
+      artifactIds: [project.id],
+      producer: { kind: 'system', id: 'web-project-api' },
+    });
+    res.status(204).end();
+  });
+
+  app.post('/api/projects/:id/run/:stageId', async (req, res) => {
+    const user = userIdOf(req);
+    if (user === null) {
+      res.status(401).json({ error: 'authentication required' });
+      return;
+    }
+    if (result.registry === undefined) {
+      res.status(501).json({ error: 'The project engine is not available in this build.' });
+      return;
+    }
+    const project = await requireOwnedProject(user, req.params['id']!);
+    if (project === null) {
+      res.status(404).json({ error: 'project-not-found' });
+      return;
+    }
+    const stageId = req.params['stageId']!;
+    const mode = String(project.attributes['mode']);
+    const stagesForMode = (PROJECT_MODE_STAGES as Record<string, { stageId: string; label: string; inScope: boolean }[]>)[mode];
+    if (stagesForMode === undefined) {
+      res.status(409).json({ error: `Unknown mode "${mode}" on this project.` });
+      return;
+    }
+    const stage = stagesForMode.find((s) => s.stageId === stageId);
+    if (stage === undefined) {
+      res.status(400).json({ error: `Unknown stage "${stageId}".` });
+      return;
+    }
+    if (!stage.inScope) {
+      res.status(409).json({ error: `Stage "${stage.label}" is OUT OF SCOPE for mode "${mode}". Out-of-scope stages are never falsely run.` });
+      return;
+    }
+    const stagesRun = (project.attributes['stages'] as readonly { stageId: string; at: string; recordedBy: string }[] | undefined) ?? [];
+    if (stagesRun.some((r) => r.stageId === stageId)) {
+      res.status(409).json({ error: `Stage "${stage.label}" has already been recorded for this project.` });
+      return;
+    }
+    const now = new Date().toISOString();
+    const nextStages = [...stagesRun, { stageId, label: stage.label, at: now, recordedBy: user }];
+    await result.services.store.update(project.id, project.version, (draft) => ({
+      ...draft,
+      attributes: { ...draft.attributes, stages: nextStages },
+    }));
+    await result.evidence.append({
+      kind: 'inspection',
+      summary: `Stage "${stage.label}" run checkpoint recorded for project ${project.id} (mode ${mode}) by ${user}.`,
+      artifactIds: [project.id],
+      producer: { kind: 'system', id: 'web-project-api' },
+    });
+    res.json({
+      projectId: project.id,
+      stageId,
+      label: stage.label,
+      status: 'RECORDED',
+      at: now,
+      summary: `Stage "${stage.label}" recorded on the project lifecycle ledger (mode ${mode}).`,
+    });
+  });
+
+  app.post('/api/projects/:id/approve', async (req, res) => {
+    const user = userIdOf(req);
+    if (user === null) {
+      res.status(401).json({ error: 'authentication required' });
+      return;
+    }
+    if (result.registry === undefined) {
+      res.status(501).json({ error: 'The project engine is not available in this build.' });
+      return;
+    }
+    const project = await requireOwnedProject(user, req.params['id']!);
+    if (project === null) {
+      res.status(404).json({ error: 'project-not-found' });
+      return;
+    }
+    const mode = String(project.attributes['mode']);
+    const stagesForMode = (PROJECT_MODE_STAGES as Record<string, { stageId: string; label: string; inScope: boolean }[]>)[mode];
+    if (stagesForMode === undefined) {
+      res.status(409).json({ error: `Unknown mode "${mode}" on this project.` });
+      return;
+    }
+    const blueprintStage = stagesForMode.find((s) => s.stageId === 'blueprint');
+    if (blueprintStage === undefined || !blueprintStage.inScope) {
+      res.status(409).json({ error: `Blueprint approval is OUT OF SCOPE for mode "${mode}".` });
+      return;
+    }
+    if (project.attributes['approval'] !== undefined) {
+      res.status(409).json({ error: 'Blueprint for this project has already been approved.' });
+      return;
+    }
+    const stagesRun = (project.attributes['stages'] as readonly { stageId: string }[] | undefined) ?? [];
+    if (!stagesRun.some((r) => r.stageId === 'blueprint')) {
+      res.status(409).json({ error: 'Run the Blueprint stage before approving it (the approval gate acts on the blueprint).' });
+      return;
+    }
+    const now = new Date().toISOString();
+    await result.services.store.update(project.id, project.version, (draft) => ({
+      ...draft,
+      attributes: { ...draft.attributes, approval: { status: 'APPROVED', approvedAt: now, approvedBy: user } },
+    }));
+    await result.evidence.append({
+      kind: 'review',
+      summary: `Blueprint for project ${project.id} approved by ${user} at ${now}.`,
+      artifactIds: [project.id],
+      producer: { kind: 'verifier', id: user },
+    });
+    res.json({
+      projectId: project.id,
+      status: 'APPROVED',
+      approvedAt: now,
+      approvedBy: user,
+      summary: 'Blueprint approved; in-scope implementation stages may proceed.',
+    });
   });
 
   // --- roadmap ---------------------------------------------------------------
@@ -572,20 +899,16 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
   // --- model selector (catalogue + credentials + selection) -------------------------
   // Honest-surface rules: a catalogue entry proves a model EXISTS; `verified`
   // proves ACCESSIBLE via a real connection test. Credentials are accepted once
-  // and never echoed; per-user isolation is enforced via the x-bf-user header
-  // (a real account system will later replace this header as the identity source).
+  // and never echoed; per-user identity comes exclusively from the verified
+  // session cookie — a client can never assert an identity via a header.
 
   const jsonError = (res: express.Response, status: number, error: unknown): void => {
     // Error messages never contain secrets (enforced by the core error types).
     res.status(status).json({ error: error instanceof Error ? error.message : String(error) });
   };
 
-  const userIdOf = (req: express.Request): string | null => {
-    const raw = req.headers['x-bf-user'];
-    if (typeof raw !== 'string') return null;
-    const trimmed = raw.trim();
-    return trimmed.length > 0 ? trimmed : null;
-  };
+  /** The authenticated account's username, or null when anonymous. */
+  const userIdOf = (req: express.Request): string | null => req.account?.username ?? null;
 
   const ACCESS_CATEGORIES: readonly ModelAccessCategory[] = [
     'free_no_api_key',
@@ -627,7 +950,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
   app.get('/api/models/selection', (req, res) => {
     const user = userIdOf(req);
     if (user === null) {
-      res.status(401).json({ error: 'missing x-bf-user header' });
+      res.status(401).json({ error: 'authentication required' });
       return;
     }
     res.json({ selection: providerManager.getCurrentSelection(user) });
@@ -636,7 +959,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
   app.post('/api/models/select', async (req, res) => {
     const user = userIdOf(req);
     if (user === null) {
-      res.status(401).json({ error: 'missing x-bf-user header' });
+      res.status(401).json({ error: 'authentication required' });
       return;
     }
     const body = req.body as { providerId?: unknown; modelId?: unknown };
@@ -685,7 +1008,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
   app.post('/api/credentials', (req, res) => {
     const user = userIdOf(req);
     if (user === null) {
-      res.status(401).json({ error: 'missing x-bf-user header' });
+      res.status(401).json({ error: 'authentication required' });
       return;
     }
     const body = req.body as { providerId?: unknown; secret?: unknown };
@@ -705,7 +1028,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
   app.get('/api/credentials', (req, res) => {
     const user = userIdOf(req);
     if (user === null) {
-      res.status(401).json({ error: 'missing x-bf-user header' });
+      res.status(401).json({ error: 'authentication required' });
       return;
     }
     res.json({ credentials: providerManager.credentials.listCredentials(user) });
@@ -714,7 +1037,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
   app.delete('/api/credentials/:id', (req, res) => {
     const user = userIdOf(req);
     if (user === null) {
-      res.status(401).json({ error: 'missing x-bf-user header' });
+      res.status(401).json({ error: 'authentication required' });
       return;
     }
     try {
@@ -728,7 +1051,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
   app.post('/api/credentials/:id/verify', async (req, res) => {
     const user = userIdOf(req);
     if (user === null) {
-      res.status(401).json({ error: 'missing x-bf-user header' });
+      res.status(401).json({ error: 'authentication required' });
       return;
     }
     try {
@@ -756,7 +1079,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
   app.post('/api/chat/ingest', async (req, res) => {
     const user = userIdOf(req);
     if (user === null) {
-      res.status(401).json({ error: 'missing x-bf-user header' });
+      res.status(401).json({ error: 'authentication required' });
       return;
     }
     const text = (req.body as { text?: unknown }).text;
@@ -768,10 +1091,35 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
     res.status(201).json(outcome);
   });
 
+  app.post('/api/documents/upload', async (req, res) => {
+    const user = userIdOf(req);
+    if (user === null) {
+      res.status(401).json({ error: 'authentication required' });
+      return;
+    }
+    try {
+      const uploaded = await parseUploadRequest(req);
+      const text = uploaded.text.trim();
+      if (text.length === 0) {
+        res.status(400).json({ error: 'Uploaded file is empty; nothing to store.' });
+        return;
+      }
+      const ref = documentStore.addDocument(user, text);
+      await persistDocuments();
+      res.status(201).json({ document: ref, fileName: uploaded.fileName ?? null });
+    } catch (error) {
+      if (error instanceof UploadTooLargeError) {
+        res.status(413).json({ error: error.message });
+        return;
+      }
+      res.status(400).json({ error: error instanceof Error ? error.message : 'upload failed' });
+    }
+  });
+
   app.get('/api/documents', (req, res) => {
     const user = userIdOf(req);
     if (user === null) {
-      res.status(401).json({ error: 'missing x-bf-user header' });
+      res.status(401).json({ error: 'authentication required' });
       return;
     }
     res.json({ documents: documentStore.listForOwner(user), count: documentStore.countForOwner(user) });
@@ -780,7 +1128,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
   app.get('/api/documents/:id', (req, res) => {
     const user = userIdOf(req);
     if (user === null) {
-      res.status(401).json({ error: 'missing x-bf-user header' });
+      res.status(401).json({ error: 'authentication required' });
       return;
     }
     try {
@@ -796,7 +1144,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
   app.delete('/api/documents/:id', (req, res) => {
     const user = userIdOf(req);
     if (user === null) {
-      res.status(401).json({ error: 'missing x-bf-user header' });
+      res.status(401).json({ error: 'authentication required' });
       return;
     }
     try {
@@ -807,28 +1155,33 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
     }
   });
 
-  return { app, result, providerManager, modelCatalogue, documentStore };
+  // ── SPA entry point ─────────────────────────────────────────────────────────
+  // Serve the NEXORA shell for the root path so the hash-router app loads.
+  app.get('/', async (_req, res) => {
+    try {
+      const html = await fs.readFile(join(PUBLIC_DIR, 'index.html'), 'utf8');
+      res.type('html').send(html);
+    } catch {
+      res.status(404).send('Not found');
+    }
+  });
+
+  return { app, result, accounts, providerManager, modelCatalogue, documentStore };
 }
 
 export async function startServer(): Promise<void> {
   const logger = createLogger({ level: 'info', sink: consoleSink() });
-  const { app, result } = await buildServer();
+    const { app, accounts } = await buildServer();
   const host = process.env['BF_WEB_HOST']?.trim() || '127.0.0.1';
   const portRaw = Number(process.env['BF_WEB_PORT']?.trim() || '3000');
   const port = Number.isInteger(portRaw) && portRaw > 0 && portRaw < 65536 ? portRaw : 3000;
-  const server = app.listen(port, host, () => {
-    logger.info('web.listening', { host, port, projectId: result.baseline.projectId });
+      const server = app.listen(port, host, () => {
+    logger.info('web.listening', { host, port });
     console.log('');
-    console.log('Blueprint-First browser inspection layer');
-    console.log('----------------------------------------');
-    console.log(`  Project        : ${result.baseline.projectId}`);
-    console.log(`  Blueprint      : ${result.design.blueprintId ?? 'n/a'}`);
-    console.log(`  Certified      : ${result.certification.certified ? 'CERTIFIED' : 'NOT CERTIFIED'} (${result.certification.stampedArtifactIds.length} stamped)`);
-    console.log(`  Council verdict: ${result.council.verdict}`);
-    console.log(`  Safechange     : ${result.changeResult.status}`);
-    console.log(`  PEO Guardian   : ${result.peoResult.watch.classifiedAs}`);
-    console.log('');
+    console.log('Nexona - The Blueprint AI Software Engineering Platform');
+    console.log('-------------------------------------------------------');
     console.log(`  Open in Chrome : http://${host}:${port}`);
+    console.log(`  Accounts        : ${accounts.filePath}`);
     console.log('');
   });
   server.on('error', (err) => {

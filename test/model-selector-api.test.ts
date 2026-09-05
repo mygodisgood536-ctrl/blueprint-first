@@ -7,6 +7,7 @@ import { ModelsDevSource } from '../src/ai/models-dev-source.ts';
 import { OpenRouterProvider } from '../src/ai/openrouter-provider.ts';
 import { ProviderManager } from '../src/ai/provider-manager.ts';
 import type { DemoResult } from '../src/demo/main.ts';
+import { signupCookie, tempDataDir } from './helpers.ts';
 
 /** Minimal fetch mock returning canned responses per URL. */
 function mockFetch(
@@ -79,46 +80,6 @@ function localModelsPayload(): unknown {
   };
 }
 
-/** Builds the server with injected doubles (no live pipeline, no network). */
-async function buildTestServer(openRouterKeyFetch?: { status: number; body: unknown }): Promise<{
-  app: Express;
-  close: () => Promise<void>;
-  url: string;
-  providerManager: ProviderManager;
-}> {
-  const md = mockFetch(() => ({ status: 200, body: modelsDevPayload() }));
-  const or = mockFetch(() => ({ status: 200, body: openRouterPayload() }));
-  const catalogue = new ModelCatalogue({
-    modelsDevSource: new ModelsDevSource({ fetchImpl: md.fetch as never }),
-    openRouterProvider: new OpenRouterProvider({ apiKey: 'sk-or-test-key-xyz', fetchImpl: or.fetch as never }),
-  });
-  const manager = new ProviderManager();
-  const localUp = mockFetch((url) =>
-    url.endsWith('/models')
-      ? { status: 200, body: localModelsPayload() }
-      : { status: 200, body: { choices: [{ message: { content: 'ok' } }] } },
-  );
-  manager.setLocalRuntime({ baseUrl: 'http://127.0.0.1:11434/v1' }, localUp.fetch);
-  const { app } = await buildServer({
-    result: { baseline: { projectId: 'demo-project' } } as unknown as DemoResult,
-    modelCatalogue: catalogue,
-    providerManager: manager,
-    openRouterFetchImpl: mockFetch(() =>
-      openRouterKeyFetch ?? { status: 200, body: { data: { label: 'k' } } },
-    ).fetch,
-  });
-  const server = app.listen(0, '127.0.0.1');
-  await new Promise<void>((resolve) => server.once('listening', () => resolve()));
-  const address = server.address();
-  const port = typeof address === 'object' && address !== null ? address.port : 0;
-  return {
-    app,
-    providerManager: manager,
-    url: `http://127.0.0.1:${port}`,
-    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
-  };
-}
-
 describe('model selector API (honest surface, per-user isolation)', () => {
   it('serves the catalogue over GET /api/models with filters', async () => {
     const { url, close } = await buildTestServer();
@@ -151,6 +112,7 @@ describe('model selector API (honest surface, per-user isolation)', () => {
       result: { baseline: { projectId: 'p' } } as unknown as DemoResult,
       modelCatalogue: catalogue,
       providerManager: new ProviderManager(),
+      dataDir: await tempDataDir(),
     });
     const server = app.listen(0, '127.0.0.1');
     await new Promise<void>((resolve) => server.once('listening', () => resolve()));
@@ -166,15 +128,16 @@ describe('model selector API (honest surface, per-user isolation)', () => {
     }
   });
 
-  it('returns 404 for an unknown model and 401 without a user header on selection', async () => {
+  it('returns 404 for an unknown model and 401 without a session cookie on selection', async () => {
     const { url, close } = await buildTestServer();
     try {
+      const alice = await signupCookie(url, 'alice');
       const missing = await fetch(`${url}/api/models/anthropic/nope`);
       assert.equal(missing.status, 404);
       const noUser = await fetch(`${url}/api/models/selection`);
       assert.equal(noUser.status, 401);
       const withUser = await fetch(`${url}/api/models/selection`, {
-        headers: { 'x-bf-user': 'alice' },
+        headers: { cookie: alice },
       });
       assert.equal(withUser.status, 200);
       assert.equal(((await withUser.json()) as { selection: unknown }).selection, null);
@@ -186,25 +149,27 @@ describe('model selector API (honest surface, per-user isolation)', () => {
   it('adds a credential without ever echoing the secret; isolates users', async () => {
     const { url, close } = await buildTestServer();
     try {
+      const alice = await signupCookie(url, 'alice');
+      const bob = await signupCookie(url, 'bob');
       const created = await fetch(`${url}/api/credentials`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-bf-user': 'alice' },
+        headers: { 'content-type': 'application/json', cookie: alice },
         body: JSON.stringify({ providerId: 'openrouter', secret: 'sk-or-alice-secret-123' }),
       });
       assert.equal(created.status, 201);
       const ref = (await created.json()) as { id: string; verified: boolean };
       assert.equal(JSON.stringify(ref).includes('sk-or-alice-secret-123'), false);
       assert.equal(ref.verified, false);
-      const bobList = await fetch(`${url}/api/credentials`, { headers: { 'x-bf-user': 'bob' } });
+      const bobList = await fetch(`${url}/api/credentials`, { headers: { cookie: bob } });
       assert.equal(((await bobList.json()) as { credentials: unknown[] }).credentials.length, 0);
       const bobDelete = await fetch(`${url}/api/credentials/${ref.id}`, {
         method: 'DELETE',
-        headers: { 'x-bf-user': 'bob' },
+        headers: { cookie: bob },
       });
       assert.equal(bobDelete.status, 404); // bob cannot touch alice's credential
       const aliceDelete = await fetch(`${url}/api/credentials/${ref.id}`, {
         method: 'DELETE',
-        headers: { 'x-bf-user': 'alice' },
+        headers: { cookie: alice },
       });
       assert.equal(aliceDelete.status, 204);
     } finally {
@@ -215,19 +180,20 @@ describe('model selector API (honest surface, per-user isolation)', () => {
   it('verifies a credential via a REAL key check and records the outcome', async () => {
     const { url, close } = await buildTestServer({ status: 200, body: { data: { label: 'k' } } });
     try {
+      const alice = await signupCookie(url, 'alice');
       const created = await fetch(`${url}/api/credentials`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-bf-user': 'alice' },
+        headers: { 'content-type': 'application/json', cookie: alice },
         body: JSON.stringify({ providerId: 'openrouter', secret: 'sk-or-real' }),
       });
       const ref = (await created.json()) as { id: string };
       const verify = await fetch(`${url}/api/credentials/${ref.id}/verify`, {
         method: 'POST',
-        headers: { 'x-bf-user': 'alice' },
+        headers: { cookie: alice },
       });
       assert.equal(verify.status, 200);
       assert.equal(((await verify.json()) as { success: boolean }).success, true);
-      const list = await fetch(`${url}/api/credentials`, { headers: { 'x-bf-user': 'alice' } });
+      const list = await fetch(`${url}/api/credentials`, { headers: { cookie: alice } });
       const creds = ((await list.json()) as { credentials: { verified: boolean }[] }).credentials;
       assert.equal(creds[0]!.verified, true);
     } finally {
@@ -238,21 +204,22 @@ describe('model selector API (honest surface, per-user isolation)', () => {
   it('verify reports failure honestly on 401 (verified stays false)', async () => {
     const { url, close } = await buildTestServer({ status: 401, body: { message: 'No auth' } });
     try {
+      const dave = await signupCookie(url, 'dave');
       const created = await fetch(`${url}/api/credentials`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-bf-user': 'dave' },
+        headers: { 'content-type': 'application/json', cookie: dave },
         body: JSON.stringify({ providerId: 'openrouter', secret: 'sk-or-bad' }),
       });
       const ref = (await created.json()) as { id: string };
       const verify = await fetch(`${url}/api/credentials/${ref.id}/verify`, {
         method: 'POST',
-        headers: { 'x-bf-user': 'dave' },
+        headers: { cookie: dave },
       });
       assert.equal(verify.status, 200);
       const outcome = (await verify.json()) as { success: boolean; errorMessage?: string };
       assert.equal(outcome.success, false);
       assert.ok(outcome.errorMessage);
-      const list = await fetch(`${url}/api/credentials`, { headers: { 'x-bf-user': 'dave' } });
+      const list = await fetch(`${url}/api/credentials`, { headers: { cookie: dave } });
       const creds = ((await list.json()) as { credentials: { verified: boolean; lastError: string | null }[] }).credentials;
       assert.equal(creds[0]!.verified, false);
       assert.ok(creds[0]!.lastError);
@@ -264,16 +231,18 @@ describe('model selector API (honest surface, per-user isolation)', () => {
   it('selects a local model only via the real verification path', async () => {
     const { url, close } = await buildTestServer();
     try {
+      const alice = await signupCookie(url, 'alice');
+      const bob = await signupCookie(url, 'bob');
       const missing = await fetch(`${url}/api/models/select`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-bf-user': 'alice' },
+        headers: { 'content-type': 'application/json', cookie: alice },
         body: JSON.stringify({ providerId: 'local', modelId: 'not-installed' }),
       });
       assert.equal(missing.status, 409);
       assert.match(((await missing.json()) as { error: string }).error, /not usable/);
       const ok = await fetch(`${url}/api/models/select`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-bf-user': 'alice' },
+        headers: { 'content-type': 'application/json', cookie: alice },
         body: JSON.stringify({ providerId: 'local', modelId: 'llama3.2' }),
       });
       assert.equal(ok.status, 200);
@@ -281,13 +250,13 @@ describe('model selector API (honest surface, per-user isolation)', () => {
       assert.equal(state.status, 'connected');
       assert.equal(state.modelId, 'llama3.2');
       const selection = await fetch(`${url}/api/models/selection`, {
-        headers: { 'x-bf-user': 'alice' },
+        headers: { cookie: alice },
       });
       assert.equal(
         ((await selection.json()) as { selection: { modelId: string } | null }).selection?.modelId,
         'llama3.2',
       );
-      const bobSel = await fetch(`${url}/api/models/selection`, { headers: { 'x-bf-user': 'bob' } });
+      const bobSel = await fetch(`${url}/api/models/selection`, { headers: { cookie: bob } });
       assert.equal(((await bobSel.json()) as { selection: unknown }).selection, null); // per-user
     } finally {
       await close();
@@ -297,9 +266,10 @@ describe('model selector API (honest surface, per-user isolation)', () => {
   it('select with openrouter without a credential returns 409 (CONFIGURED != AVAILABLE)', async () => {
     const { url, close } = await buildTestServer();
     try {
+      const erin = await signupCookie(url, 'erin');
       const response = await fetch(`${url}/api/models/select`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-bf-user': 'erin' },
+        headers: { 'content-type': 'application/json', cookie: erin },
         body: JSON.stringify({ providerId: 'openrouter', modelId: 'openai/gpt-4o' }),
       });
       assert.equal(response.status, 409);
@@ -315,9 +285,10 @@ describe('model selector API (honest surface, per-user isolation)', () => {
   it('select for an unimplemented provider reports 501 honestly (no fake success)', async () => {
     const { url, close } = await buildTestServer();
     try {
+      const frank = await signupCookie(url, 'frank');
       const response = await fetch(`${url}/api/models/select`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-bf-user': 'frank' },
+        headers: { 'content-type': 'application/json', cookie: frank },
         body: JSON.stringify({ providerId: 'anthropic-direct', modelId: 'claude-3' }),
       });
       assert.equal(response.status, 501);
@@ -327,5 +298,43 @@ describe('model selector API (honest surface, per-user isolation)', () => {
     }
   });
 });
-
-
+/** Builds the server with injected doubles (no live pipeline, no network). */
+async function buildTestServer(openRouterKeyFetch?: { status: number; body: unknown }): Promise<{
+  app: Express;
+  close: () => Promise<void>;
+  url: string;
+  providerManager: ProviderManager;
+}> {
+  const md = mockFetch(() => ({ status: 200, body: modelsDevPayload() }));
+  const or = mockFetch(() => ({ status: 200, body: openRouterPayload() }));
+  const catalogue = new ModelCatalogue({
+    modelsDevSource: new ModelsDevSource({ fetchImpl: md.fetch as never }),
+    openRouterProvider: new OpenRouterProvider({ apiKey: 'sk-or-test-key-xyz', fetchImpl: or.fetch as never }),
+  });
+  const manager = new ProviderManager();
+  const localUp = mockFetch((url) =>
+    url.endsWith('/models')
+      ? { status: 200, body: localModelsPayload() }
+      : { status: 200, body: { choices: [{ message: { content: 'ok' } }] } },
+  );
+  manager.setLocalRuntime({ baseUrl: 'http://127.0.0.1:11434/v1' }, localUp.fetch);
+  const { app } = await buildServer({
+    result: { baseline: { projectId: 'demo-project' } } as unknown as DemoResult,
+    modelCatalogue: catalogue,
+    providerManager: manager,
+    openRouterFetchImpl: mockFetch(() =>
+      openRouterKeyFetch ?? { status: 200, body: { data: { label: 'k' } } },
+    ).fetch,
+    dataDir: await tempDataDir(),
+  });
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise<void>((resolve) => server.once('listening', () => resolve()));
+  const address = server.address();
+  const port = typeof address === 'object' && address !== null ? address.port : 0;
+  return {
+    app,
+    providerManager: manager,
+    url: `http://127.0.0.1:${port}`,
+    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+  };
+}
