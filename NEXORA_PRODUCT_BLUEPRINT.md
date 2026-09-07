@@ -133,6 +133,25 @@
 - **Views:** `GET /api/discovery`, `GET /api/design`, `GET /api/council`, `GET /api/verification`, etc.
 - **Status:** `[✓]` Implemented (Stage 6).
 
+## Blueprint-First Workspace — Per-Stage Views (Stage 8)
+
+Each project lifecycle stage is inspectable as its own tab, sharing the project workspace shell. Route: `#/projects/:id/stages/:stageId`.
+
+| Stage (tab) | Route / Endpoint | Frontend view | Backend | Status |
+|-------------|------------------|---------------|---------|--------|
+| 8.1 Discovery | `GET /api/discovery` | `project-stage.js` → Discovery renderer | defensive `PENDING_DISCOVERY` guard | `[✓]` |
+| 8.2 Design | `GET /api/design` | Design renderer | defensive `PENDING_DESIGN` guard | `[✓]` |
+| 8.3 Blueprint | `GET /api/certification` | Blueprint renderer | real `BlueprintCertificationResult` fields; `PENDING_CERT` guard | `[✓]` |
+| 8.4 Approval | `POST /api/projects/:id/approve` | Approval renderer (`Approve blueprint`) | project-scoped (`PROJECT_ONLY`) | `[✓]` |
+| 8.5 Build | `POST /api/projects/:id/run/:stageId` | Build renderer (`Run` per in-scope pending stage) | project-scoped (`PROJECT_ONLY`); in-scope pending stages listed | `[✓]` |
+| 8.6 Verification | `GET /api/verification` | Verification renderer | defensive `PENDING_VERIFICATION` guard | `[✓]` |
+| 8.7 Testing | `GET /api/testing` | Testing renderer | defensive `PENDING_TEST` guard | `[✓]` |
+| 8.8 Operations/Runtime | `GET /api/deployment`, `/api/telemetry`, `/api/continuous`, `/api/recursion`, `/api/safe-change`, `/api/peo` | Operations/Runtime/Telemetry/Continuous renderers | all defensive `PENDING_*` guards | `[✓]` |
+
+- **Wiring:** `api.js` exports `getDiscovery`, `getDesign`, `getCouncil`, `getVerification`, `getTesting`, `getDeployment`, `getTelemetry`, `getContinuous` + `approveBlueprint`/`runStage`; `router.js` registers `#/projects/:id/stages/:stageId` → `project-stage`; `project.js` stage rows link into the per-stage view; `components.css` (`nexona/css/`) grew `.tabs`, `.status-pill--*`, `.stage-panel*`, `.meta-grid*`, `.evidence-row*`, `.diff-view` (braces 321/321).
+- **Security:** all 12 Stage 8 GET endpoints are auth-guarded (401 without a session); approve/run are project-owner checked.
+- **Tests:** `test/stage8-api.test.ts` — 14 tests, 200/401 across all 12 stage endpoints, per-stage shape assertions, approve/run 401 + 404. **14/14 pass.** Full suite **379 pass, 0 fail** (two batches). `tsc --noEmit` GREEN.
+
 ### Page: Project Settings
 - **Purpose:** Edit project title/mode; delete the project.
 - **Access:** Authenticated (owner). Route: `#/projects/:id/settings`.

@@ -767,8 +767,106 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
     res.json({ availableNotExercised: AVAILABLE_NOT_EXERCISED });
   });
 
+  // --- Stage 8: Blueprint-First Workspace --------------------------------------
+  // Each stage endpoint reads from a real backend result that the demo
+  // pipeline populates. When the test harness or a fresh server has not yet
+  // run the pipeline, those fields are missing. We must surface honest
+  // PENDING / "engine not yet run" payloads rather than 500ing, so the
+  // per-stage views can render the empty initial state and the user can see
+  // a real, accurate page.
+
+  const PENDING_DISCOVERY = {
+    status: 'PENDING',
+    error: null,
+    baseline: null,
+    artifactIds: [],
+    findingIds: [],
+    diff: null,
+    uncertainties: null,
+  };
+  const PENDING_DESIGN = {
+    status: 'PENDING',
+    blueprintId: null,
+    artifactIds: [],
+    approval: null,
+  };
+  const PENDING_COUNCIL = { subject: null, verdict: 'PENDING', seats: null };
+  const PENDING_VERIFICATION = {
+    masterPassed: null,
+    subjectsAudited: 0,
+    blockingFails: 0,
+    unresolvedInconclusive: 0,
+    notes: null,
+    closureArtifactCount: 0,
+    rollup: null,
+    reports: 0,
+  };
+  const PENDING_TESTING = {
+    status: 'PENDING',
+    executed: 0,
+    testIds: [],
+    reportId: null,
+    evidenceId: null,
+    advancedToTestVerified: null,
+    docHalts: null,
+    boss: null,
+    auditor: null,
+  };
+  const PENDING_OPS = {
+    status: 'PENDING',
+    executed: 0,
+    deployIds: [],
+    manifestId: null,
+    evidenceId: null,
+    advancedToDeployedVerified: null,
+    docHalts: null,
+    boss: null,
+    auditor: null,
+  };
+  const PENDING_TELEMETRY = { observation: null, sourceKind: null };
+  const PENDING_CONTINUOUS = {
+    finalVerdict: 'PENDING',
+    rationale: null,
+    workerReport: null,
+    bossDecision: null,
+    auditorDecision: null,
+    materialization: null,
+  };
+  const PENDING_RECURSION = {
+    classification: 'PENDING',
+    allRemediated: null,
+    changeCount: 0,
+    baseIds: [],
+  };
+  const PENDING_SAFE_CHANGE = {
+    status: 'PENDING',
+    reason: null,
+    trail: null,
+    materialization: null,
+    finalDocState: null,
+  };
+  const PENDING_PEO = {
+    source: null,
+    authorized: null,
+    escalated: null,
+    rationale: null,
+    watch: null,
+    impact: null,
+    change: null,
+    candidate: null,
+  };
+  const PENDING_CERT = { status: 'PENDING', presentDimensions: [], missingDimensions: [], requiredDimensions: [], certified: null, certifiable: null };
+
   // --- project / discovery ----------------------------------------------------
-  app.get('/api/discovery', (_req, res) => {
+  app.get('/api/discovery', (req, res) => {
+    if (req.account === undefined) {
+      res.status(401).json({ error: 'authentication required' });
+      return;
+    }
+    if (!result.discovery) {
+      res.json(PENDING_DISCOVERY);
+      return;
+    }
     res.json({
       status: result.discovery.status,
       error: result.discovery.error ?? null,
@@ -781,40 +879,72 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
   });
 
   // --- design / engineering artifacts -----------------------------------------
-  app.get('/api/design', (_req, res) => {
+  app.get('/api/design', (req, res) => {
+    if (req.account === undefined) {
+      res.status(401).json({ error: 'authentication required' });
+      return;
+    }
+    if (!result.design) {
+      res.json(PENDING_DESIGN);
+      return;
+    }
     res.json({
       status: result.design.status,
       blueprintId: result.design.blueprintId ?? null,
       artifactIds: result.design.artifactIds,
-      approval: result.approval,
+      approval: result.approval ?? null,
     });
   });
 
   // --- multi-perspective reasoning council ------------------------------------
-  app.get('/api/council', (_req, res) => {
+  app.get('/api/council', (req, res) => {
+    if (req.account === undefined) {
+      res.status(401).json({ error: 'authentication required' });
+      return;
+    }
+    if (!result.council) {
+      res.json(PENDING_COUNCIL);
+      return;
+    }
     res.json({
-      subject: result.council.subject ?? result.design.blueprintId,
+      subject: result.council.subject ?? result.design?.blueprintId ?? null,
       verdict: result.council.verdict,
       seats: result.council.seats ?? null,
     });
   });
 
   // --- master verification ----------------------------------------------------
-  app.get('/api/verification', (_req, res) => {
+  app.get('/api/verification', (req, res) => {
+    if (req.account === undefined) {
+      res.status(401).json({ error: 'authentication required' });
+      return;
+    }
+    if (!result.master) {
+      res.json(PENDING_VERIFICATION);
+      return;
+    }
     res.json({
       masterPassed: result.master.masterPassed,
       subjectsAudited: result.master.subjectCount,
       blockingFails: result.master.blockingFails,
       unresolvedInconclusive: result.master.unresolvedInconclusive,
       notes: result.master.notes,
-      closureArtifactCount: result.closureIds.length,
+      closureArtifactCount: (result.closureIds ?? []).length,
       rollup: result.master.rollup,
       reports: Object.keys(result.master.reports).length,
     });
   });
 
   // --- acceptance testing ------------------------------------------------------
-  app.get('/api/testing', (_req, res) => {
+  app.get('/api/testing', (req, res) => {
+    if (req.account === undefined) {
+      res.status(401).json({ error: 'authentication required' });
+      return;
+    }
+    if (!result.testRun) {
+      res.json(PENDING_TESTING);
+      return;
+    }
     res.json({
       status: result.testRun.status,
       executed: result.testRun.executed,
@@ -829,7 +959,15 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
   });
 
   // --- deployment --------------------------------------------------------------
-  app.get('/api/deployment', (_req, res) => {
+  app.get('/api/deployment', (req, res) => {
+    if (req.account === undefined) {
+      res.status(401).json({ error: 'authentication required' });
+      return;
+    }
+    if (!result.opsRun) {
+      res.json(PENDING_OPS);
+      return;
+    }
     res.json({
       status: result.opsRun.status,
       executed: result.opsRun.executed,
@@ -844,7 +982,15 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
   });
 
   // --- runtime telemetry --------------------------------------------------------
-  app.get('/api/telemetry', (_req, res) => {
+  app.get('/api/telemetry', (req, res) => {
+    if (req.account === undefined) {
+      res.status(401).json({ error: 'authentication required' });
+      return;
+    }
+    if (!result.telemetryObservation || !result.telemetrySource) {
+      res.json(PENDING_TELEMETRY);
+      return;
+    }
     res.json({
       observation: result.telemetryObservation,
       sourceKind: result.telemetrySource.kind,
@@ -852,7 +998,15 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
   });
 
   // --- continuous engineering ----------------------------------------------------
-  app.get('/api/continuous', (_req, res) => {
+  app.get('/api/continuous', (req, res) => {
+    if (req.account === undefined) {
+      res.status(401).json({ error: 'authentication required' });
+      return;
+    }
+    if (!result.contRun) {
+      res.json(PENDING_CONTINUOUS);
+      return;
+    }
     res.json({
       finalVerdict: result.contRun.finalVerdict,
       rationale: result.contRun.rationale,
@@ -864,7 +1018,15 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
   });
 
   // --- recursion -----------------------------------------------------------------
-  app.get('/api/recursion', (_req, res) => {
+  app.get('/api/recursion', (req, res) => {
+    if (req.account === undefined) {
+      res.status(401).json({ error: 'authentication required' });
+      return;
+    }
+    if (!result.recursionResult) {
+      res.json(PENDING_RECURSION);
+      return;
+    }
     res.json({
       classification: result.recursionResult.classification,
       allRemediated: result.recursionResult.allRemediated,
@@ -874,7 +1036,15 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
   });
 
   // --- safe change ----------------------------------------------------------------
-  app.get('/api/safe-change', (_req, res) => {
+  app.get('/api/safe-change', (req, res) => {
+    if (req.account === undefined) {
+      res.status(401).json({ error: 'authentication required' });
+      return;
+    }
+    if (!result.changeResult) {
+      res.json(PENDING_SAFE_CHANGE);
+      return;
+    }
     const change = result.changeResult;
     const materialization =
       change.status === 'AUTHORIZED_AND_APPLIED' || change.status === 'AUTHORIZED_BUT_NOT_APPLIED'
@@ -885,12 +1055,20 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
       reason: change.status === 'REJECTED' ? change.reason : null,
       trail: change.trail,
       materialization,
-      finalDocState: docStateOf(result.finalArtifact) ?? null,
+      finalDocState: result.finalArtifact ? (docStateOf(result.finalArtifact) ?? null) : null,
     });
   });
 
   // --- PEO (Permanent Engineering Organization) -----------------------------------
-  app.get('/api/peo', (_req, res) => {
+  app.get('/api/peo', (req, res) => {
+    if (req.account === undefined) {
+      res.status(401).json({ error: 'authentication required' });
+      return;
+    }
+    if (!result.peoResult) {
+      res.json(PENDING_PEO);
+      return;
+    }
     res.json({
       source: result.peoResult.source,
       authorized: result.peoResult.authorized,
@@ -899,7 +1077,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
       watch: result.peoResult.watch,
       impact: result.peoResult.impact,
       change: result.peoResult.change,
-      candidate: result.peoCandidate,
+      candidate: result.peoCandidate ?? null,
     });
   });
 
@@ -947,13 +1125,24 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
     res.json({ count: all.length, entries: all });
   });
 
-  app.get('/api/certification', (_req, res) => {
+  app.get('/api/certification', (req, res) => {
+    if (req.account === undefined) {
+      res.status(401).json({ error: 'authentication required' });
+      return;
+    }
+    if (!result.certification) {
+      res.json(PENDING_CERT);
+      return;
+    }
+        const cert = result.certification;
     res.json({
-      certified: result.certification.certified,
-      reasons: result.certification.reasons,
-      stampedArtifactIds: result.certification.stampedArtifactIds,
-      evidenceId: result.certification.evidenceId ?? null,
-      confidence: result.certification.confidence ?? null,
+      certified: cert.certified,
+      reasons: cert.reasons,
+      stampedArtifactIds: cert.stampedArtifactIds,
+      evidenceId: cert.evidenceId ?? null,
+      confidence: cert.confidence ?? null,
+      certifiable: cert.certified ? true : false,
+      status: cert.certified === true ? 'CERTIFIED' : 'BLOCKED',
       trace: result.trace,
     });
   });

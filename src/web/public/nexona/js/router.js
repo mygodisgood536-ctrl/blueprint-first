@@ -26,6 +26,7 @@ const ROUTES = {
   '/projects/new': { view: 'project-new', auth: true },
   '/projects/:id': { view: 'project', auth: true },
   '/projects/:id/settings': { view: 'project-settings', auth: true },
+  '/projects/:id/stages/:stageId': { view: 'project-stage', auth: true },
   '/documents': { view: 'documents', auth: true },
   '/documents/upload': { view: 'documents-upload', auth: true },
   '/documents/:id': { view: 'document', auth: true },

@@ -554,5 +554,34 @@ All 11 sub-stages implemented and verified. The complete security model works en
 
 **Regression:** `node --test` over all 44 test files (run in two batches; this Windows shell environment hangs on the one-shot full run, but each batch completes cleanly): **345/345 tests pass, 0 fail, 82 suites**. The pre-existing `test/chat-docs-api.test.ts` (5 tests) continues to pass alongside. `node --check` OK on all 7 touched JS files. CSS balanced (tokens 8/8, layout 80/80, components 285/285). The TS additions are confined to the existing `server.ts` and reuse imports already used by the rest of the documents surface.
 
-**Docs updated:** `NEXORA_MASTER_SPEC.md` (Documents list/detail/upload rows in Page Inventory added; §22 frontend row marked `[✓]`), `NEXORA_IMPLEMENTATION_ROADMAP.md` (Stage 7 → COMPLETE with per-substage evidence, regression summary, bug list), `NEXORA_PRODUCT_BLUEPRINT.md` (Files & Inputs Pages section appended: Documents List, Document Detail, Document Upload, Chat ingest integration), `NEXORA_PROGRESS.md` (this Stage 7 section).
+
+## Stage 8 — Blueprint-First Workspace  `[✓] COMPLETE`
+
+### What landed
+- **Backend hardening (`src/web/server.ts`):** repaired a regression that had deleted the `/api/telemetry`, `/api/continuous`, `/api/recursion`, `/api/safe-change` and `/api/peo` handlers (re-inserted with their exact original response shapes and `PENDING_*` guards). Restored the `/api/certification` handler to the real `BlueprintCertificationResult` field names (`certified`, `reasons`, `stampedArtifactIds`, `evidenceId`, `confidence`, `trace`), removing an invented `status`/dimensions block that had caused 9 `tsc` errors. Added auth guards to all 12 Stage 8 GET endpoints (401 without a session) and defined `PENDING_*` sentinels for every stage.
+- **Frontend wiring:** `views/project-stage.js` (NEW, ~590 lines, `node --check` clean) — tabbed per-stage view at `#/projects/:id/stages/:stageId`; 8 stage fetchers (`getDiscovery`, `getDesign`, `getCouncil`, `getVerification`, `getTesting`, `getDeployment`, `getTelemetry`, `getContinuous`) + `approveBlueprint`/`runStage` in `api.js`; per-stage route in `router.js`; `project.js` rows link into the per-stage view; `PROJECT_ONLY` set (Approval/Build are project-scoped); `components.css` grew `.tabs`, `.status-pill--*`, `.stage-panel*`, `.meta-grid*`, `.evidence-row*`, `.diff-view`, `.dimension-row*` and related selectors (braces balanced 321/321).
+
+### Sub-stage evidence
+| Sub-stage | Stage | Evidence |
+|-----------|-------|----------|
+| 8.1 | Discovery | `GET /api/discovery` defensive + auth; test asserts `status/artifactIds/findingIds/baseline` |
+| 8.2 | Design | `GET /api/design` defensive + auth; test asserts `status/blueprintId/artifactIds/approval` |
+| 8.3 | Blueprint | `GET /api/certification` real-shape + auth; test asserts `status` |
+| 8.4 | Approval | `POST /api/projects/:id/approve` auth (401) + 404 unknown project |
+| 8.5 | Build | `POST /api/projects/:id/run/:stageId` auth (401) + 404; per-stage view `Run` buttons |
+| 8.6 | Verification | `GET /api/verification` defensive + auth; test asserts shape |
+| 8.7 | Testing | `GET /api/testing` defensive + auth; test asserts shape |
+| 8.8 | Operations/Runtime | `GET /api/deployment`, `/api/telemetry`, `/api/continuous`, `/api/recursion`, `/api/safe-change`, `/api/peo` all defensive + auth |
+
+### Verification
+- `test/stage8-api.test.ts` (NEW, 14 tests): **14/14 pass** — 200/401 across all 12 stage endpoints, per-stage response-shape assertions, approve/run 401+404.
+- `npx tsc --noEmit`: **GREEN** (9 prior errors in the certification handler resolved).
+- Full suite in two batches: **379 pass, 0 fail, 95 suites** (~45 s).
+- `node --check` on `api.js`, `router.js`, `views/project-stage.js`, `views/project.js`: OK.
+- CSS brace balance: 321/321.
+
+### Docs updated
+- `NEXORA_IMPLEMENTATION_ROADMAP.md` (Stage 8 → COMPLETE with per-substage evidence + verification)
+- `NEXORA_PROGRESS.md` (this Stage 8 section)
+
 

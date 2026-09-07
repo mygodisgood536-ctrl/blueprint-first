@@ -202,6 +202,32 @@ async function activity() {
   return request('/activity');
 }
 
+// ── Pipeline stages (Stage 8) ─────────────────────
+async function getDiscovery() {
+  return request('/discovery');
+}
+async function getDesign() {
+  return request('/design');
+}
+async function getCouncil() {
+  return request('/council');
+}
+async function getVerification() {
+  return request('/verification');
+}
+async function getTesting() {
+  return request('/testing');
+}
+async function getDeployment() {
+  return request('/deployment');
+}
+async function getTelemetry() {
+  return request('/telemetry');
+}
+async function getContinuous() {
+  return request('/continuous');
+}
+
 export const api = {
   session, signup, login, logout, forgot, forgotVerify, reset,
   changePassword, listSessions, revokeOtherSessions,
@@ -214,4 +240,6 @@ export const api = {
   listCredentials, addCredential, removeCredential, verifyCredential,
   uploadDocument, listDocuments, getDocument, deleteDocument, chatIngest,
   summary, activity,
+  getDiscovery, getDesign, getCouncil, getVerification, getTesting,
+  getDeployment, getTelemetry, getContinuous,
 };

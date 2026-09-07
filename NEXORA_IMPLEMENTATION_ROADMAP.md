@@ -210,20 +210,28 @@ The pre-existing `test/chat-docs-api.test.ts` (5 tests) continues to pass and ex
 
 **Dependencies:** Stage 5.
 
-## Stage 8 — Blueprint-First Workspace  `[!] NOT STARTED`
+## Stage 8 — Blueprint-First Workspace  `[✓] COMPLETE`
 
 **Objective:** Engineering workspace around the existing engine, one stage at a time.
 
 | Sub-stage | Stage | Backend endpoint | Frontend view | Status |
 |-----------|-------|-------------------|---------------|--------|
-| 8.1 | Discovery | `GET /api/discovery` | Build view | `[!]` |
-| 8.2 | Design | `GET /api/design` | Build view | `[!]` |
-| 8.3 | Blueprint | `GET /api/certification` | Build view | `[!]` |
-| 8.4 | Approval | `POST /api/projects/:id/approve` | Build view | `[!]` |
-| 8.5 | Build/Engineering | `POST /api/projects/:id/run/:stageId` | Build view | `[!]` |
-| 8.6 | Verification | `GET /api/verification` | Build view | `[!]` |
-| 8.7 | Testing | `GET /api/testing` | Build view | `[!]` |
-| 8.8 | Operations/Runtime | `GET /api/deployment`, `/api/telemetry`, `/api/continuous` | Build view | `[!]` |
+| 8.1 | Discovery | `GET /api/discovery` | Build view | `[✓]` |
+| 8.2 | Design | `GET /api/design` | Build view | `[✓]` |
+| 8.3 | Blueprint | `GET /api/certification` | Build view | `[✓]` |
+| 8.4 | Approval | `POST /api/projects/:id/approve` | Build view | `[✓]` |
+| 8.5 | Build/Engineering | `POST /api/projects/:id/run/:stageId` | Build view | `[✓]` |
+| 8.6 | Verification | `GET /api/verification` | Build view | `[✓]` |
+| 8.7 | Testing | `GET /api/testing` | Build view | `[✓]` |
+| 8.8 | Operations/Runtime | `GET /api/deployment`, `/api/telemetry`, `/api/continuous` | Build view | `[✓]` |
+
+**Backend (defensive hardening):** every Stage 8 endpoint (`discovery`, `design`, `council`, `verification`, `testing`, `deployment`, `telemetry`, `continuous`, `recursion`, `safe-change`, `peo`, `certification`) now returns a typed `PENDING_*` sentinel when the demo pipeline has not yet produced that result, instead of throwing 500 on a missing field. A regression that deleted the `telemetry`, `continuous`, `recursion`, `safe-change` and `peo` handlers was repaired by re-inserting all five (each with its `PENDING_*` guard and exact original response shape). The `certification` handler was restored to the real `BlueprintCertificationResult` fields (`certified`, `reasons`, `stampedArtifactIds`, `evidenceId`, `confidence`, `trace`) — no invented fields, no precedence bug. All Stage 8 GET endpoints are now auth-guarded (401 without a session).
+
+**Frontend (connected):** tabbed per-stage view at `#/projects/:id/stages/:stageId` (`views/project-stage.js`), 8 stage fetchers wired in `api.js` (`getDiscovery`, `getDesign`, `getCouncil`, `getVerification`, `getTesting`, `getDeployment`, `getTelemetry`, `getContinuous`) plus `approveBlueprint`/`runStage`; per-stage route registered in `router.js`; `PROJECT_ONLY` set marks Approval/Build as project-scoped; `project.js` rows link to the per-stage view; `components.css` grew the `.tabs`, `.status-pill--*`, `.stage-panel*`, `.meta-grid*`, `.evidence-row*` and related selectors (braces balanced 321/321).
+
+**Tests:** `test/stage8-api.test.ts` (NEW, 14 tests) — real `ProjectRegistry` + `JsonFileArtifactStore` + scripted `AiRouter`; 200/401 coverage across all 12 stage endpoints, per-stage response-shape assertions, and approve/run 401 + 404.
+
+**Verification:** `tsc --noEmit` GREEN; full suite run in two alphabetical batches: **379 pass, 0 fail, 0 cancel, 95 suites** (~45 s); `node --check` OK on all 4 touched JS files; CSS balanced 321/321.
 
 **Dependencies:** Stage 6 (project workspace shell).
 

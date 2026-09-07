@@ -101,6 +101,7 @@ export function mount(params, account) {
                 <span class="stage-item__label">${esc(s.label)}</span>
                 <span class="stage-item__status">${esc(s.status)}</span>
               </div>
+              ${s.inScope ? `<a class="btn btn--secondary btn--sm" href="#/projects/${encodeURIComponent(projectId)}/stages/${encodeURIComponent(s.stageId)}">Open</a>` : ''}
               ${s.inScope && s.status === 'PENDING' ? `<button class="btn btn--primary btn--sm run-stage-btn" data-stage="${esc(s.stageId)}">Run</button>` : ''}
               ${s.at ? `<span class="stage-item__at">${esc(new Date(s.at).toLocaleDateString())}</span>` : ''}
             </div>`).join('')}

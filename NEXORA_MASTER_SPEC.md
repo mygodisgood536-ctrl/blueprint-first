@@ -199,6 +199,7 @@ Backend: `POST /api/auth/forgot` → `POST /api/auth/forgot/verify` → `POST /a
 | Projects list | `projects.js` | `GET /api/projects` | `[✓]` |
 | Create project | `project-new.js` | `POST /api/projects` (accepts optional `visionDocumentId` from `chat/ingest`) | `[✓]` |
 | Project workspace | `project.js` | all pipeline endpoints | `[✓]` |
+| Project stage (per-stage tabbed view) | `project-stage.js` | `GET /api/discovery`, `/api/design`, `/api/council`, `/api/certification`, `/api/verification`, `/api/testing`, `/api/deployment`, `/api/telemetry`, `/api/continuous`, `/api/recursion`, `/api/safe-change`, `/api/peo` (`PROJECT_ONLY`: approve/run are project-scoped) | `[✓]` Stage 8 |
 | Project settings | `project-settings.js` | `PUT /api/projects/:id` + `DELETE /api/projects/:id` | `[✓]` |
 | Documents list | `documents.js` | `GET /api/documents` | `[✓]` |
 | Document detail | `document.js` | `GET /api/documents/:id?full=true` + `DELETE /api/documents/:id` | `[✓]` |
@@ -312,7 +313,7 @@ Show only real backend info: user identity, projects, progress, next action, att
 | 5 | Application Shell & Dashboard | `[~]` Partial |
 | 6 | Projects | `[~]` Backend `[✓]`; Frontend `[~]` |
 | 7 | Files & Inputs | `[~]` Backend `[✓]`; Frontend `[~]` |
-| 8 | Blueprint-First Workspace | `[!]` Frontend not started |
+| 8 | Blueprint-First Workspace | `[✓]` Implemented (Stage 8) |
 | 9 | Artifacts, Evidence & Traceability | `[!]` Frontend not started |
 | 10 | AI Providers & Models | `[✓]` Backend; `[!]` Frontend |
 | 11 | Failure & Recovery | `[~]` |
