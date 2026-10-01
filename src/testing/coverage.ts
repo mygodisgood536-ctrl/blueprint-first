@@ -35,14 +35,18 @@ export async function deriveExpectedCoverage(
   services: CoreServices,
   projectId: string,
 ): Promise<readonly CoverageExpectation[]> {
+  // Test scope comes from the VERIFIED inventory only: items that the
+  // discovery/delivery chain actually boss-verified (the "certified Master
+  // Product Inventory"). Unverified raw discoveries are NOT testable subjects
+  // and cannot enter the matrix or leak into any verdict.
   const features = await services.store.list({ types: ['FEATURE'], projectId });
   const pages = await services.store.list({ types: ['PAGE'], projectId });
+  const verifiedBase = (group: readonly { id: string; status: string }[]): readonly string[] =>
+    group
+      .filter((f) => isBaseArtifactId(f.id) && f.status === 'VERIFIED')
+      .map((f) => f.id);
   return [
-    ...features
-      .filter((f) => isBaseArtifactId(f.id))
-      .map((f) => ({ baseId: f.id, kind: 'functional' as const })),
-    ...pages
-      .filter((p) => isBaseArtifactId(p.id))
-      .map((p) => ({ baseId: p.id, kind: 'render' as const })),
+    ...verifiedBase(features).map((baseId) => ({ baseId, kind: 'functional' as const })),
+    ...verifiedBase(pages).map((baseId) => ({ baseId, kind: 'render' as const })),
   ];
 }

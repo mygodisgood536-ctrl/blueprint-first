@@ -28,6 +28,9 @@
  *                                                    register (FINDINGs) that
  *                                                    block certification until
  *                                                    resolved via Council
+ *   Recursive Page Expansion (§0.6) .................. every page determined
+ *                                                    through all 14 expansion
+ *                                                    layers (Pass 10)
  *   Discovery Auditor (DW-E5) ........................ samples the accepted
  *                                                    inventory, re-runs the
  *                                                    §0.18 evidence check,
@@ -41,6 +44,10 @@ import { createArtifact } from '../../core/artifact.ts';
 import { syncArtifactToGraph } from '../../core/graph.ts';
 import { recordStatusChange } from '../../core/store.ts';
 import type { DiscoveryBaseline } from '../materialize.ts';
+import {
+  runRecursivePageExpansion,
+  type RecursiveExpansionResult,
+} from './expansion.ts';
 
 export interface FullDepartmentResult {
   readonly contentAdded: readonly string[];
@@ -51,6 +58,8 @@ export interface FullDepartmentResult {
   readonly comparisonFindings: readonly string[];
   readonly redTeamFindings: readonly string[];
   readonly contradictions: readonly ContradictionEntry[];
+  /** §0.6 Recursive Page Expansion (14 layers per page) — Pass 10. */
+  readonly expansion: RecursiveExpansionResult;
   readonly audited: boolean;
   readonly auditEvidenceId?: string;
   readonly artifactIds: readonly string[];
@@ -66,6 +75,31 @@ function slug(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
+/**
+ * §0.16 duplication discipline: a pass must not re-produce an artifact it (or
+ * an earlier run) already produced for the same subject. Used by every Level-3
+ * pass so running the full department twice is idempotent.
+ */
+async function hasExistingByAttribute(
+  services: CoreServices,
+  type: 'CONTENT' | 'RISK' | 'FINDING' | 'STATE' | 'VALIDATION' | 'A11Y' | 'PERF' | 'SEC_REQ',
+  projectId: string,
+  attribute: string,
+  value: string,
+): Promise<boolean> {
+  const artifacts = await services.store.list({ types: [type], projectId });
+  return artifacts.some((a) => String(a.attributes[attribute]) === value);
+}
+
+/** §0.16 dedup: does this section already carry CONTENT children? */
+async function sectionHasContent(services: CoreServices, sectionId: string): Promise<boolean> {
+  return (
+    services.graph
+      .neighbors(sectionId, 'downstream', 'CONTAINS')
+      .filter((id) => id.startsWith('CONTENT-')).length > 0
+  );
+}
+
 /** Cluster C — DW-C1: derive CONTENT children for every SECTION by its type. */
 async function expandPageContent(
   services: CoreServices,
@@ -75,6 +109,7 @@ async function expandPageContent(
   const added: string[] = [];
   for (const section of baseline.sections) {
     const sectionArtifact = await services.store.require(section.artifactId);
+    if (await sectionHasContent(services, section.artifactId)) continue;
     const contentType = String(sectionArtifact.attributes['contentType'] ?? 'generic');
     const template =
       CONTENT_TEMPLATES[contentType] ?? [`primary ${contentType} content region`];
@@ -94,6 +129,12 @@ async function expandPageContent(
         },
       });
       await services.store.append(content);
+      await services.evidence.append({
+        kind: 'inspection',
+        summary: `DW-C1 produced content artifact ${id} (Layer 2).`,
+        artifactIds: [id],
+        producer,
+      });
       syncArtifactToGraph(services.graph, content);
       services.graph.link(section.artifactId, 'CONTAINS', id);
       added.push(id);
@@ -142,6 +183,12 @@ async function discoverEdgeCases(
         },
       });
       await services.store.append(state);
+      await services.evidence.append({
+        kind: 'inspection',
+        summary: `DW-D1 produced edge-case artifact ${id} (Layer 2).`,
+        artifactIds: [id],
+        producer,
+      });
       syncArtifactToGraph(services.graph, state);
       services.graph.link(page.artifactId, 'CONTAINS', id);
       added.push(id);
@@ -185,6 +232,17 @@ async function registerRisks(
       },
     ];
   for (const entry of statements) {
+    if (
+      await hasExistingByAttribute(
+        services,
+        'RISK',
+        baseline.projectId,
+        'dimension',
+        entry.dimension,
+      )
+    ) {
+      continue;
+    }
     const id = services.allocator.nextId('RISK');
     const risk = createArtifact({
       id,
@@ -201,6 +259,12 @@ async function registerRisks(
       },
     });
     await services.store.append(risk);
+    await services.evidence.append({
+      kind: 'inspection',
+      summary: `Risk & Assumption Register produced ${id} (${entry.kind}/${entry.dimension}).`,
+      artifactIds: [id],
+      producer,
+    });
     syncArtifactToGraph(services.graph, risk);
     ids.push(id);
   }
@@ -311,6 +375,17 @@ async function runIndustryComparison(
       featureKeys.some((k) => k.includes(expectedFeature.split('-')[0] ?? '')) ||
       featureTitles.some((t) => expectedFeature.split('-').some((part) => t.includes(part)));
     if (hit) continue;
+    if (
+      await hasExistingByAttribute(
+        services,
+        'FINDING',
+        baseline.projectId,
+        'expectedFeature',
+        expectedFeature,
+      )
+    ) {
+      continue;
+    }
     const id = services.allocator.nextId('FINDING');
     const finding = createArtifact({
       id,
@@ -328,6 +403,12 @@ async function runIndustryComparison(
       },
     });
     await services.store.append(finding);
+    await services.evidence.append({
+      kind: 'inspection',
+      summary: `Industry Comparison produced gap finding ${id} (${category} / ${expectedFeature}).`,
+      artifactIds: [id],
+      producer,
+    });
     syncArtifactToGraph(services.graph, finding);
     findings.push(id);
   }
@@ -355,6 +436,17 @@ async function runRedTeam(
   ];
   for (const { pattern, label } of expectedClasses) {
     if (pageKeys.some((key) => pattern.test(key))) continue;
+    if (
+      await hasExistingByAttribute(
+        services,
+        'FINDING',
+        baseline.projectId,
+        'pageClassPattern',
+        String(pattern),
+      )
+    ) {
+      continue;
+    }
     const id = services.allocator.nextId('FINDING');
     const finding = createArtifact({
       id,
@@ -372,6 +464,12 @@ async function runRedTeam(
       },
     });
     await services.store.append(finding);
+    await services.evidence.append({
+      kind: 'inspection',
+      summary: `Red Team produced omission finding ${id} (${label}).`,
+      artifactIds: [id],
+      producer,
+    });
     syncArtifactToGraph(services.graph, finding);
     findings.push(id);
   }
@@ -409,6 +507,17 @@ async function scanContradictions(
       if (nonAdminRoles.length === 0) continue;
       const resource = String(permission.attributes['resource'] ?? '').toLowerCase();
       if (resource !== '' && statement.includes(resource)) {
+        if (
+          await hasExistingByAttribute(
+            services,
+            'FINDING',
+            baseline.projectId,
+            'ruleId',
+            rule.id,
+          )
+        ) {
+          continue;
+        }
         const id = services.allocator.nextId('FINDING');
         const finding = createArtifact({
           id,
@@ -428,8 +537,14 @@ async function scanContradictions(
             conflictingRoles: nonAdminRoles,
           },
         });
-        await services.store.append(finding);
-        syncArtifactToGraph(services.graph, finding);
+await services.store.append(finding);
+    await services.evidence.append({
+      kind: 'inspection',
+      summary: `Contradiction Engine produced finding ${id} (${rule.id} vs ${permission.id}).`,
+      artifactIds: [id],
+      producer,
+    });
+    syncArtifactToGraph(services.graph, finding);
         entries.push({ findingId: id, ruleId: rule.id, permissionId: permission.id });
       }
     }
@@ -478,6 +593,46 @@ async function runDiscoveryAudit(
 export interface FullDepartmentOptions {
   /** Industry-category hint used by the §0.9 DNA diff. */
   readonly categoryHint?: string;
+  /** Runs the §0.6 Recursive Page Expansion (Pass 10). Default true. */
+  readonly runExpansion?: boolean;
+}
+
+/**
+ * The Level-3 promotion gate. The department may accept its own output ONLY
+ * when the artifact is genuinely produced: it exists with provenance AND
+ * carries an evidence anchor (on the artifact or the cluster's project record).
+ * Anything that lacks those is NOT stamped VERIFIED — it stays DRAFT and is
+ * reported as a gate failure, exactly like a Boss-reconstruction delta would
+ * be. Exported so the negative path is independently testable.
+ */
+export async function submitProducedArtifactsToGate(
+  services: CoreServices,
+  baseline: DiscoveryBaseline,
+  producedIds: readonly string[],
+  actor: Actor = { kind: 'verifier', id: 'discovery-boss-01' },
+): Promise<{ readonly promoted: number; readonly failures: readonly string[] }> {
+  const failures: string[] = [];
+  let promoted = 0;
+  for (const id of producedIds) {
+    const current = await services.store.require(id);
+    if (current.status !== 'DRAFT') continue;
+    const anchored =
+      current.provenance.length > 0 &&
+      ((await services.evidence.forArtifact(id)).length > 0 ||
+        (await services.evidence.forArtifact(baseline.projectId)).length > 0);
+    if (!anchored) {
+      failures.push(`${id}: no producing evidence/provenance; kept DRAFT.`);
+      continue;
+    }
+    await recordStatusChange(services.store, id, 'IN_REVIEW', actor, {
+      note: 'Submitted for full-department verification.',
+    });
+    await recordStatusChange(services.store, id, 'VERIFIED', actor, {
+      note: 'Accepted by the full Discovery Department (Level 3) after mechanical evidence+provenance gate.',
+    });
+    promoted += 1;
+  }
+  return { promoted, failures };
 }
 
 /**
@@ -511,7 +666,24 @@ export async function runFullDepartmentPasses(
   const redTeamFindings = await runRedTeam(services, baseline, redTeam);
   const contradictions = await scanContradictions(services, baseline, redTeam);
 
-  // Promote everything this phase produced (boss gate, same as L1b waves).
+  // Pass 10 — §0.6 Recursive Page Expansion: every page determined through all
+  // fourteen expansion layers. Runs after the content/edge-case passes so
+  // Layers 2 and 4 observe the earlier derivation and do not duplicate it.
+  let expansion: RecursiveExpansionResult;
+  if (options.runExpansion === false) {
+    expansion = { pages: [], artifactIds: [], tally: { covered: 0, added: 0, 'not-relevant': 0, blocked: 0 } };
+  } else {
+    expansion = await runRecursivePageExpansion(services, baseline, {
+      producer: { kind: 'ai', id: 'expansion-worker-01' },
+    });
+  }
+
+  // Gate every phase artifact on real production facts before accepting it.
+  // The department may accept its own output ONLY when the artifact is
+  // genuinely produced: it exists with provenance AND carries an evidence
+  // anchor (on the artifact or the cluster's project record). Anything that
+  // lacks those is NOT stamped VERIFIED - it stays DRAFT and is reported as
+  // a gate failure, exactly like a Boss-reconstruction delta would be.
   const producedIds = [
     ...contentAdded,
     ...edgeStatesAdded,
@@ -519,19 +691,10 @@ export async function runFullDepartmentPasses(
     ...comparison.findings,
     ...redTeamFindings,
     ...contradictions.map((c) => c.findingId),
+    ...expansion.artifactIds,
   ];
   const bossActor: Actor = { kind: 'verifier', id: 'discovery-boss-01' };
-  for (const id of producedIds) {
-    const current = await services.store.require(id);
-    if (current.status === 'DRAFT') {
-      await recordStatusChange(services.store, id, 'IN_REVIEW', bossActor, {
-        note: 'Submitted for full-department verification.',
-      });
-      await recordStatusChange(services.store, id, 'VERIFIED', bossActor, {
-        note: 'Accepted by the full Discovery Department (Level 3).',
-      });
-    }
-  }
+  const gate = await submitProducedArtifactsToGate(services, baseline, producedIds, bossActor);
 
   // Auditor samples across clusters (every second artifact, min 6).
   const sampled: string[] = producedIds.filter((_, index) => index % 2 === 0);
@@ -548,8 +711,16 @@ export async function runFullDepartmentPasses(
     matchedCategory: comparison.matchedCategory ?? '(none)',
     redTeamFindings: redTeamFindings.length,
     contradictions: contradictions.length,
+    expansionPages: expansion.pages.length,
+    expansionArtifacts: expansion.artifactIds.length,
+    expansionTally: expansion.tally,
+    promoted: gate.promoted,
+    gateFailures: gate.failures.length,
     audited: audit.audited,
   });
+  if (gate.failures.length > 0) {
+    services.logger?.warn('discovery.level3.gate.blocked', { failures: gate.failures });
+  }
 
   return {
     contentAdded,
@@ -560,6 +731,7 @@ export async function runFullDepartmentPasses(
     matchedCategory: comparison.matchedCategory,
     redTeamFindings,
     contradictions,
+    expansion,
     audited: audit.audited,
     auditEvidenceId: audit.evidenceId,
     artifactIds: [...producedIds],

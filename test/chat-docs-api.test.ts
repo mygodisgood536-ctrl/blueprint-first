@@ -4,7 +4,7 @@ import { buildServer } from '../src/web/server.ts';
 import { DocumentStore, DEFAULT_DOCUMENT_MAX_CHARS } from '../src/chat/document.ts';
 import { ProviderManager } from '../src/ai/provider-manager.ts';
 import type { DemoResult } from '../src/demo/main.ts';
-import { signupCookie, tempDataDir } from './helpers.ts';
+import { signupEnrolledCookie, tempDataDir } from './helpers.ts';
 
 /** Builds the server with a real DocumentStore and NO demo pipeline/network. */
 async function buildDocServer(documentStore?: DocumentStore): Promise<{
@@ -34,7 +34,7 @@ describe('chat-first document API (short stays message, large becomes reference)
   it('short input returns an inline message (kind=message, no stored document)', async () => {
     const { url, close, store } = await buildDocServer();
     try {
-      const alice = await signupCookie(url, 'alice');
+      const alice = await signupEnrolledCookie(url, 'alice');
       const created = await fetch(`${url}/api/chat/ingest`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', cookie: alice },
@@ -53,7 +53,7 @@ describe('chat-first document API (short stays message, large becomes reference)
   it('large input becomes a document reference, retrievable by its owner', async () => {
     const { url, close, store } = await buildDocServer();
     try {
-      const alice = await signupCookie(url, 'alice');
+      const alice = await signupEnrolledCookie(url, 'alice');
       const markdown = `# Brief\n\n${'paragraph text. '.repeat(400)}`;
       assert.ok(markdown.length >= DEFAULT_DOCUMENT_MAX_CHARS);
       const created = await fetch(`${url}/api/chat/ingest`, {
@@ -84,7 +84,7 @@ describe('chat-first document API (short stays message, large becomes reference)
   it('default doc view excludes full content; full is opt-in', async () => {
     const { url, close } = await buildDocServer();
     try {
-      const alice = await signupCookie(url, 'alice');
+      const alice = await signupEnrolledCookie(url, 'alice');
       const markdown = 'a'.repeat(DEFAULT_DOCUMENT_MAX_CHARS + 50);
       const created = await fetch(`${url}/api/chat/ingest`, {
         method: 'POST',
@@ -105,8 +105,8 @@ describe('chat-first document API (short stays message, large becomes reference)
   it('enforces per-user isolation and 401 without a session cookie', async () => {
     const { url, close } = await buildDocServer();
     try {
-      const alice = await signupCookie(url, 'alice');
-      const bob = await signupCookie(url, 'bob');
+      const alice = await signupEnrolledCookie(url, 'alice');
+      const bob = await signupEnrolledCookie(url, 'bob');
       const markdown = 'b'.repeat(DEFAULT_DOCUMENT_MAX_CHARS + 10);
       const created = await fetch(`${url}/api/chat/ingest`, {
         method: 'POST',
@@ -133,7 +133,7 @@ describe('chat-first document API (short stays message, large becomes reference)
   it('deletes a document for its owner and rejects empty input', async () => {
     const { url, close, store } = await buildDocServer();
     try {
-      const alice = await signupCookie(url, 'alice');
+      const alice = await signupEnrolledCookie(url, 'alice');
       const created = await fetch(`${url}/api/chat/ingest`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', cookie: alice },

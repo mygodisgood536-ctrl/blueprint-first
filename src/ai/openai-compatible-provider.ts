@@ -75,6 +75,8 @@ export class OpenAiCompatibleProvider implements AiProvider {
     });
 
     const controller = new AbortController();
+    const onExternalAbort = (): void => controller.abort();
+    request.signal?.addEventListener('abort', onExternalAbort, { once: true });
     const timer = setTimeout(() => controller.abort(), this.settings.timeoutMs);
     let raw: Awaited<ReturnType<FetchFn>>;
     try {
@@ -89,6 +91,7 @@ export class OpenAiCompatibleProvider implements AiProvider {
       });
     } finally {
       clearTimeout(timer);
+      request.signal?.removeEventListener('abort', onExternalAbort);
     }
 
     if (!raw.ok) {

@@ -170,11 +170,59 @@ function deserializeStoreFile(parsed: unknown, filePath: string): Map<string, Ar
 }
 
 /**
+ * Serializes durable writes per destination file.
+ *
+ * Windows cannot rename over a file another writer has just created, so
+ * concurrent `rename` calls to the same path fail with `EPERM`/`EEXIST`. The
+ * unlink-then-rename fallback is not sufficient on its own: it opens a window in
+ * which the destination does not exist, and a second concurrent writer can fail
+ * again. Chaining the writes per path removes the race entirely while keeping
+ * each individual write atomic (temp sibling, then rename).
+ */
+const writeQueues = new Map<string, Promise<void>>();
+
+/**
  * Atomic text write: write to a uniquely named temp sibling, then rename over
- * the destination. On platforms where rename-over-existing can fail (some
- * Windows configurations), fall back to unlink-then-rename.
+ * the destination. Writes to the same path are serialized, and the rename is
+ * retried briefly because a concurrent reader or indexer can transiently hold
+ * the destination open on Windows.
  */
 export async function atomicWriteText(filePath: string, contents: string): Promise<void> {
+  const previous = writeQueues.get(filePath) ?? Promise.resolve();
+  const run = previous.then(
+    () => writeTextExclusive(filePath, contents),
+    () => writeTextExclusive(filePath, contents),
+  );
+  // Keep the queue alive but never let a rejection break subsequent writers.
+  const queued = run.catch(() => undefined);
+  writeQueues.set(filePath, queued);
+  try {
+    await run;
+  } finally {
+    if (writeQueues.get(filePath) === queued) writeQueues.delete(filePath);
+  }
+}
+
+async function renameWithRetry(from: string, to: string): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      await fs.rename(from, to);
+      return;
+    } catch (error) {
+      lastError = error;
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'EPERM' && code !== 'EEXIST' && code !== 'EACCES' && code !== 'EBUSY') throw error;
+      await new Promise((r) => setTimeout(r, 10 * (attempt + 1)));
+      if (code === 'EPERM' || code === 'EEXIST') {
+        await fs.rm(to, { force: true }).catch(() => undefined);
+      }
+    }
+  }
+  throw lastError;
+}
+
+async function writeTextExclusive(filePath: string, contents: string): Promise<void> {
   const dir = dirname(filePath);
   if (dir.length > 0) {
     await fs.mkdir(dir, { recursive: true });
@@ -182,18 +230,8 @@ export async function atomicWriteText(filePath: string, contents: string): Promi
   const tmp = `${filePath}.tmp-${randomBytes(6).toString('hex')}`;
   await fs.writeFile(tmp, contents, 'utf8');
   try {
-    await fs.rename(tmp, filePath);
+    await renameWithRetry(tmp, filePath);
   } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === 'EPERM' || code === 'EEXIST' || code === 'EISDIR') {
-      try {
-        await fs.rm(filePath, { force: true });
-        await fs.rename(tmp, filePath);
-        return;
-      } catch {
-        // fall through to cleanup + rethrow
-      }
-    }
     await fs.rm(tmp, { force: true }).catch(() => undefined);
     throw error;
   }

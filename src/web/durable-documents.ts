@@ -31,12 +31,12 @@ import { JsonFileStore } from './durable.ts';
 const SCHEMA_VERSION = 1;
 
 interface DocumentSnapshot {
-  documents: { id: string; ownerId: string; content: string }[];
+  documents: { id: string; ownerId: string; content: string; createdAt?: string }[];
 }
 
 export class DurableDocumentStore {
   private readonly maxChars: number;
-  private readonly byId = new Map<string, { ownerId: string; content: string }>();
+  private readonly byId = new Map<string, { ownerId: string; content: string; createdAt: string }>();
   private readonly file: JsonFileStore<DocumentSnapshot>;
   private loaded = false;
 
@@ -51,7 +51,7 @@ export class DurableDocumentStore {
     const snapshot = await this.file.load();
     if (snapshot !== null) {
       for (const doc of snapshot.documents) {
-        this.byId.set(doc.id, { ownerId: doc.ownerId, content: doc.content });
+        this.byId.set(doc.id, { ownerId: doc.ownerId, content: doc.content, createdAt: doc.createdAt ?? '' });
       }
     }
     this.loaded = true;
@@ -80,14 +80,15 @@ export class DurableDocumentStore {
       throw new ConfigurationError('Document ownerId must be a non-empty string.');
     }
     const id = `doc_${randomBytes(12).toString('hex')}`;
-    this.byId.set(id, { ownerId, content });
+    const createdAt = new Date().toISOString();
+    this.byId.set(id, { ownerId, content, createdAt });
     // Fire-and-forget persistence would risk silent loss; but addDocument is
     // sync by contract. The server layer awaits persistDocuments() explicitly
     // after mutating calls.
-    return this.refOf(id, ownerId, content);
+    return this.refOf(id, ownerId, content, createdAt);
   }
 
-  private refOf(id: string, ownerId: string, content: string): DocumentRef {
+  private refOf(id: string, ownerId: string, content: string, createdAt: string): DocumentRef {
     return {
       id,
       ownerId,
@@ -95,6 +96,7 @@ export class DurableDocumentStore {
       byteLength: Buffer.byteLength(content, 'utf8'),
       preview: truncatePreview(content),
       contentHash: sha256(content),
+      createdAt,
     };
   }
 
@@ -110,6 +112,7 @@ export class DurableDocumentStore {
       byteLength: Buffer.byteLength(record.content, 'utf8'),
       preview: truncatePreview(record.content),
       ...(options.full === true ? { content: record.content } : {}),
+      createdAt: record.createdAt ?? '',
     };
   }
 
@@ -130,6 +133,7 @@ export class DurableDocumentStore {
         charLength: r.content.length,
         byteLength: Buffer.byteLength(r.content, 'utf8'),
         preview: truncatePreview(r.content),
+        createdAt: r.createdAt ?? '',
       }));
   }
 
@@ -161,6 +165,7 @@ export class DurableDocumentStore {
       id,
       ownerId: r.ownerId,
       content: r.content,
+      ...(r.createdAt ? { createdAt: r.createdAt } : {}),
     }));
     await this.file.save({ documents });
   }

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Durable account registry.
  *
  * Wraps the in-memory AccountRegistry with atomic JSON-file persistence so
@@ -12,10 +12,13 @@ import { promises as fs } from 'node:fs';
 import { atomicWriteText } from '../core/json-file-store.ts';
 import {
   AccountRegistry,
+  AuthenticatorChallengeRequiredError,
   type AccountCreateInput,
   type AccountRecord,
   type AccountRegistryState,
+  type AccountSetupStage,
   type AccountView,
+  type RecoveryAnswerInput,
   type SecurityEventRecord,
   type Session,
 } from './accounts.ts';
@@ -58,7 +61,7 @@ export class DurableAccountRegistry {
     await atomicWriteText(this.filePath, JSON.stringify(this.inner.exportState(), null, 2));
   }
 
-  // ── Reads (no persistence needed) ─────────────────────────────────────────
+  // â”€â”€ Reads (no persistence needed) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   verifySession(token: string): AccountRecord {
     return this.inner.verifySession(token);
@@ -76,7 +79,7 @@ export class DurableAccountRegistry {
     return this.inner.actor(record);
   }
 
-  // ── Mutations (persisted) ─────────────────────────────────────────────────
+  // â”€â”€ Mutations (persisted) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   async createAccount(input: AccountCreateInput): Promise<AccountView> {
     const view = this.inner.createAccount(input);
@@ -84,9 +87,114 @@ export class DurableAccountRegistry {
     return view;
   }
 
-  /** Authenticates and persists the new session. */
+  // â”€â”€ Role-separated entry points â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+  /** First-time Platform Owner setup from the dedicated owner entry point. */
+  async createPlatformOwner(input: Omit<AccountCreateInput, 'role'>): Promise<AccountView> {
+    const view = this.inner.createPlatformOwner(input);
+    await this.persist();
+    return view;
+  }
+
+  /** First-time normal-user setup from the dedicated user entry point. */
+  async createNormalUser(input: Omit<AccountCreateInput, 'role'>): Promise<AccountView> {
+    const view = this.inner.createNormalUser(input);
+    await this.persist();
+    return view;
+  }
+
+  hasPlatformOwner(): boolean {
+    return this.inner.hasPlatformOwner();
+  }
+
+  // â”€â”€ Recovery questions and answers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+  needsRecoverySetup(accountId: string): boolean {
+    return this.inner.needsRecoverySetup(accountId);
+  }
+
+  needsSetup(accountId: string): boolean {
+    return this.inner.needsSetup(accountId);
+  }
+
+  setupStageOfAccount(accountId: string): AccountSetupStage {
+    return this.inner.setupStageOfAccount(accountId);
+  }
+
+  recoveryQuestionsOf(accountId: string): Array<{ id: string; question: string }> {
+    return this.inner.recoveryQuestionsOf(accountId);
+  }
+
+  /** Stores hashed recovery answers. Never returns or logs the plaintext. */
+  async configureRecoveryQuestions(
+    accountId: string,
+    answers: RecoveryAnswerInput[],
+  ): Promise<AccountView> {
+    const view = this.inner.configureRecoveryQuestions(accountId, answers);
+    await this.persist();
+    return view;
+  }
+
+  verifyRecoveryAnswers(accountId: string, answers: RecoveryAnswerInput[]): boolean {
+    return this.inner.verifyRecoveryAnswers(accountId, answers);
+  }
+
+  /** Recovery-authorized password change for an authenticated account. */
+  async changePasswordWithRecovery(
+    accountId: string,
+    answers: RecoveryAnswerInput[],
+    newPassword: string,
+  ): Promise<AccountView> {
+    const view = this.inner.changePasswordWithRecovery(accountId, answers, newPassword);
+    await this.persist();
+    return view;
+  }
+
+  /** CHANGE/RESET authenticator authorized by the account's recovery answers. */
+  async setupAuthenticatorWithRecovery(
+    accountId: string,
+    answers: RecoveryAnswerInput[],
+  ): Promise<{ secret: string; otpauth: string }> {
+    const result = this.inner.setupAuthenticatorWithRecovery(accountId, answers);
+    await this.persist();
+    return result;
+  }
+
+  /** Forgot password step 1: identify the account and open a challenge. */
+  async beginPasswordRecovery(username: string): Promise<
+    { challengeId: string; expiresAt: string; questions: Array<{ id: string; question: string }> } | null
+  > {
+    const challenge = this.inner.beginPasswordRecovery(username);
+    if (challenge !== null) await this.persist();
+    return challenge;
+  }
+
+  /** Forgot password step 2: verify the recovery answers, then issue a reset token. */
+  async answerRecoveryChallenge(
+    challengeId: string,
+    answers: RecoveryAnswerInput[],
+  ): Promise<{ resetToken: string; expiresAt: string }> {
+    const result = this.inner.answerRecoveryChallenge(challengeId, answers);
+    await this.persist();
+    return result;
+  }
+
+  /** Authenticates and persists the new session (or the pending sign-in challenge for TOTP accounts). */
   async authenticate(username: string, password: string): Promise<Session> {
-    const session = this.inner.authenticate(username, password);
+    try {
+      const session = this.inner.authenticate(username, password);
+      await this.persist();
+      return session;
+    } catch (error) {
+      if (error instanceof AuthenticatorChallengeRequiredError) {
+        await this.persist();
+      }
+      throw error;
+    }
+  }
+
+  async completeLoginChallenge(challengeId: string, code: string): Promise<Session> {
+    const session = this.inner.completeLoginChallenge(challengeId, code);
     await this.persist();
     return session;
   }
@@ -105,6 +213,16 @@ export class DurableAccountRegistry {
   async updateProfile(accountId: string, patch: { displayName?: string }): Promise<AccountView> {
     const view = this.inner.updateProfile(accountId, patch);
     await this.persist();
+    return view;
+  }
+
+  /**
+   * Designates an existing account as the platform owner and persists the role.
+   * Used by the backend at boot when the operator sets `BF_PLATFORM_OWNER`.
+   */
+  async promoteToPlatformOwner(username: string): Promise<AccountView | null> {
+    const view = this.inner.promoteToPlatformOwner(username);
+    if (view !== null) await this.persist();
     return view;
   }
 
@@ -140,7 +258,7 @@ export class DurableAccountRegistry {
     return view;
   }
 
-  // ── Authenticator, recovery, and security events ───────────────────────────
+  // â”€â”€ Authenticator, recovery, and security events â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
   getPreferences(accountId: string): Record<string, string | number | boolean> {
     return this.inner.getPreferences(accountId);
@@ -148,6 +266,10 @@ export class DurableAccountRegistry {
 
   hasAuthenticatorEnabled(accountId: string): boolean {
     return this.inner.hasAuthenticatorEnabled(accountId);
+  }
+
+  needsAuthenticatorSetup(accountId: string): boolean {
+    return this.inner.needsAuthenticatorSetup(accountId);
   }
 
   remainingRecoveryCodes(accountId: string): number {

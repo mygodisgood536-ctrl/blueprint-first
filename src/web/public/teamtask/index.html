@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en" data-density="comfortable">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TeamTask</title>
+  <link rel="stylesheet" href="/teamtask/css/tokens.css">
+  <link rel="stylesheet" href="/teamtask/css/styles.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <a href="#main-content" class="skip-link">Skip to main content</a>
+  <div id="app">
+    <header class="top-bar" role="banner">
+      <button class="top-bar__menu" id="btn-menu" aria-label="Toggle navigation menu" aria-expanded="false">
+        <span class="hamburger" aria-hidden="true"></span>
+      </button>
+      <div class="top-bar__brand">
+        <svg class="top-bar__logo" width="28" height="28" viewBox="0 0 28 28" aria-hidden="true">
+          <rect width="28" height="28" rx="6" fill="var(--color-primary)"/>
+          <path d="M8 14l4 4 8-8" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+        </svg>
+        <span class="top-bar__title">TeamTask</span>
+      </div>
+      <nav class="top-bar__nav" aria-label="Main navigation">
+        <button class="top-bar__btn" aria-label="Notifications">
+          <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2a6 6 0 00-6 6v3.586l-.707.707A1 1 0 004 14h12a1 1 0 00.707-1.707L16 11.586V8a6 6 0 00-6-6zm0 16a3 3 0 01-3-3h6a3 3 0 01-3 3z" fill="currentColor"/></svg>
+          <span class="top-bar__badge" aria-label="3 unread notifications">3</span>
+        </button>
+        <button class="top-bar__avatar" aria-label="User menu">
+          <span aria-hidden="true">JD</span>
+        </button>
+      </nav>
+    </header>
+
+    <main id="main-content" class="main" role="main">
+      <div class="sidebar__backdrop" id="sidebar-backdrop" aria-hidden="true"></div>
+      <div class="main__sidebar" id="sidebar" aria-label="Projects" aria-hidden="true">
+        <div class="sidebar__header">
+          <h2 class="sidebar__title">Projects</h2>
+          <button class="btn btn--icon" aria-label="Create new project" id="btn-new-project">
+            <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2v12M2 8h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+        <ul class="sidebar__list" id="project-list" role="list" aria-label="Project list"></ul>
+      </div>
+
+      <section class="workspace" id="workspace">
+        <div class="workspace__header">
+          <h1 class="workspace__title" id="page-title">TeamTask Demo</h1>
+          <div class="workspace__actions" id="page-actions"></div>
+        </div>
+        <div class="workspace__content" id="page-content" aria-live="polite">
+          <p class="loading" role="status">Loading...</p>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <div class="toast-container" id="toast-container" aria-live="assertive" aria-atomic="true"></div>
+
+  <script src="/teamtask/js/app.js" type="module"></script>
+</body>
+</html>

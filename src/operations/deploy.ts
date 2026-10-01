@@ -25,6 +25,13 @@ export interface DeployedUnit {
   readonly kind: 'functional' | 'render';
   /** sha256 over the certified inputs this unit's configuration came from. */
   readonly configHash: string;
+  /**
+   * Known-good configuration anchor: the certified config this unit was
+   * deployed from. Safe Change restores TO this value when the unit drifts.
+   */
+  readonly knownGoodConfigHash?: string;
+  /** Set when Safe Change restored this unit from a drifted config. */
+  readonly restoredFromHash?: string;
   /** Present only when the rollback probe was actually exercised. */
   readonly rollbackProbeHash?: string;
   /** Present only when a live monitor is attached. */
@@ -185,6 +192,7 @@ export async function deployRelease(
       baseId: exp.baseId,
       kind: exp.kind,
       configHash,
+      knownGoodConfigHash: truthfulConfig,
       ...(skipsRollback(exp, defects)
         ? {}
         : { rollbackProbeHash: sha256(['rollback-probe', configHash]) }),

@@ -1,0 +1,28 @@
+/* ============================================================
+   responsive.css — Breakpoints: mobile → tablet → laptop → desktop
+   ============================================================ */
+@media (max-width: 1279px) {
+  .grid-4 { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 1023px) {
+  .sidebar { width: var(--sidebar-collapsed-w); }
+  .sidebar .nav-label, .sidebar .brand-sub, .sidebar .sidebar-section, .sidebar .brand-name { display: none; }
+  .sidebar .nav-item { justify-content: center; padding: 10px; }
+  .main-area { margin-left: var(--sidebar-collapsed-w); }
+  .mode-cards { grid-template-columns: 1fr; }
+}
+@media (max-width: 767px) {
+  .sidebar { display: none; }
+  .main-area { margin-left: 0; }
+  .content { padding: 16px; padding-bottom: calc(var(--bottomnav-h) + 16px); }
+  .grid-4, .grid-3, .grid-2 { grid-template-columns: 1fr; }
+  .page-head h1 { font-size: 22px; }
+  h1 { font-size: 26px; }
+  .topbar-search { display: none; }
+  .bottom-nav { display: flex; }
+  .mode-cards { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+  .skeleton { animation: none; }
+}

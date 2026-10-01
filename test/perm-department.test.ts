@@ -34,6 +34,9 @@ import type { GuardianWatch, CandidateChange } from '../src/perm/types.ts';
 import type { DriftItem } from '../src/verification/live-engine.ts';
 import { certifiedLevel2Fixture } from './helpers/level2-fixture.ts';
 import { runSafeChangeDepartment } from '../src/change/department.ts';
+import { applyAuthorizedRemediation } from '../src/change/applier.ts';
+import type { DeployedUnit } from '../src/operations/deploy.ts';
+import type { RemediationProposal, RemediationDecision } from '../src/change/types.ts';
 import { runContinuousEngineeringDepartment } from '../src/continuous/department.ts';
 import type { CoreServices } from '../src/core/services.ts';
 
@@ -307,6 +310,69 @@ test('L5: Change History refuses duplicate entry IDs (append-only invariant)', a
 test('L5: Living Blueprint materializes a certified snapshot and currentLivingBlueprint() retrieves it', async () => {
   const fx = await fixture();
   const all = await fx.services.store.list({ projectId: fx.discovery.projectId });
+
+test('L5: config_restoration genuinely restores the unit to its known-good anchor', async () => {
+  const unit: DeployedUnit = {
+    baseId: 'APP-CORE',
+    kind: 'functional',
+    configHash: 'drifted-hash-after-bad-flag',
+    knownGoodConfigHash: 'known-good-anchor-hash',
+  };
+  const drift: DriftItem = {
+    artifactId: 'APP-CORE',
+    dimension: 'CONSISTENCY',
+    was: 'pass',
+    now: 'fail',
+    kind: 'REGRESSED',
+    source: 'telemetry',
+  };
+  const proposal: RemediationProposal = {
+    proposalId: 'CHG-PROP-1',
+    driftId: 'WATCH-1',
+    scope: {
+      baseId: 'APP-CORE',
+      summary: 'Restore drifted configuration to the known-good anchor.',
+      changeKind: 'config_restoration',
+    },
+    proposedBy: 'self-healing',
+    proposedAt: '2025-01-02T00:00:00.000Z',
+    proposalHash: 'hash',
+    drift,
+    rationale: 'Configuration drifted; restore to the certified anchor.',
+  };
+  const acceptedBoss: RemediationDecision = {
+    proposalId: 'CHG-PROP-1',
+    decidedBy: 'safe-change-boss-01',
+    decidedAt: '2025-01-02T00:00:00.000Z',
+    verdict: 'accepted',
+    rationale: 'within scope, drift confirmed',
+    withinAuthorizedScope: true,
+    driftConfirmed: true,
+    decisionHash: 'boss-hash',
+  };
+  const acceptedAuditor: RemediationDecision = {
+    proposalId: 'CHG-PROP-1',
+    decidedBy: 'safe-change-auditor-01',
+    decidedAt: '2025-01-02T00:00:00.000Z',
+    verdict: 'accepted',
+    rationale: 'confirm',
+    withinAuthorizedScope: true,
+    driftConfirmed: true,
+    decisionHash: 'auditor-hash',
+  };
+  const { application, updatedUnit } = applyAuthorizedRemediation(
+    { proposal, bossDecision: acceptedBoss, auditorDecision: acceptedAuditor },
+    { units: new Map([['APP-CORE', unit]]) },
+    '2025-01-02T00:00:00.000Z',
+  );
+  // A real restore: the drifted unit returns to the recorded known-good
+  // anchor, and the application hash captures the before->after transition.
+  assert.equal(updatedUnit.configHash, 'known-good-anchor-hash');
+  assert.equal(updatedUnit.restoredFromHash, 'drifted-hash-after-bad-flag');
+  assert.equal(application.beforeHash, 'drifted-hash-after-bad-flag');
+  assert.equal(application.afterHash, 'known-good-anchor-hash');
+  assert.notEqual(application.beforeHash, application.afterHash);
+});
 
 test('L5: L4 Safe Change Department is invoked unchanged by L5 — composition contract', async () => {
   const fx = await fixture();

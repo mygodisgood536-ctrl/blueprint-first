@@ -90,11 +90,33 @@ export class ProviderExhaustedError extends BlueprintError {
 }
 
 export class ProviderHttpError extends BlueprintError {
-  constructor(status: number, bodyPreview: string) {
+  /** HTTP status from the upstream endpoint; null for message-only construction. */
+  readonly status: number | null;
+  /** Bounded, redacted preview of the upstream response body (never the request secret). */
+  readonly bodyPreview: string;
+
+  /**
+   * Never lets an upstream body leak secrets into the message or the evidence
+   * trail: bounded length + scrubbing of common secret shapes.
+   */
+  private static redact(preview: string): string {
+    const bounded = preview.length > 200 ? `${preview.slice(0, 200)}…` : preview;
+    return bounded
+      .replace(/bearer\s+[A-Za-z0-9._~+/=-]+/gi, 'Bearer [REDACTED]')
+      .replace(/eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, '[JWT_REDACTED]')
+      .replace(/sk-[A-Za-z0-9_-]{8,}/g, 'sk-[REDACTED]');
+  }
+
+  constructor(statusOrMessage: number | string, bodyPreview = '') {
+    const hasStatus = typeof statusOrMessage === 'number';
     super(
       'PROVIDER_HTTP_ERROR',
-      `AI provider endpoint returned HTTP ${status}. Body preview: ${bodyPreview}`,
+      hasStatus
+        ? `AI provider endpoint returned HTTP ${statusOrMessage}. Body preview: ${ProviderHttpError.redact(bodyPreview)}`
+        : statusOrMessage,
     );
+    this.status = hasStatus ? statusOrMessage : null;
+    this.bodyPreview = hasStatus ? ProviderHttpError.redact(bodyPreview) : '';
   }
 }
 

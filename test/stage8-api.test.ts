@@ -1,5 +1,5 @@
-/**
- * Stage 8 — Blueprint-First Workspace: per-stage endpoint surface.
+﻿/**
+ * Stage 8 â€” Blueprint-First Workspace: per-stage endpoint surface.
  *
  * Exercises the real Blueprint-First engine-backed endpoints that back
  * the per-stage views in `views/project-stage.js`:
@@ -38,7 +38,7 @@ import { ProjectRegistry } from '../src/project/registry.ts';
 import { AiRouter } from '../src/ai/router.ts';
 import { ScriptedProvider } from '../src/ai/scripted-provider.ts';
 import type { CoreServices } from '../src/core/services.ts';
-import { tempDataDir, signupCookie } from './helpers.ts';
+import { tempDataDir, signupEnrolledCookie } from './helpers.ts';
 
 interface ServerHandle {
   url: string;
@@ -112,11 +112,11 @@ const STAGE_ENDPOINTS = [
   '/api/peo',
 ];
 
-describe('Stage 8 — Blueprint-First Workspace endpoints', () => {
+describe('Stage 8 â€” Blueprint-First Workspace endpoints', () => {
   it('every per-stage GET endpoint returns 200 for an authenticated user', async () => {
     const { url, close } = await buildStage8Server();
     try {
-      const cookie = await signupCookie(url, 'stage8_all');
+      const cookie = await signupEnrolledCookie(url, 'stage8_all');
       for (const path of STAGE_ENDPOINTS) {
         const r = await j(url, 'GET', path, cookie);
         assert.equal(r.status, 200, `${path} should return 200, got ${r.status}`);
@@ -142,7 +142,7 @@ describe('Stage 8 — Blueprint-First Workspace endpoints', () => {
   it('Discovery returns the expected shape (status, artifactIds, findingIds, baseline)', async () => {
     const { url, close } = await buildStage8Server();
     try {
-      const cookie = await signupCookie(url, 'stage8_discovery');
+      const cookie = await signupEnrolledCookie(url, 'stage8_discovery');
       const r = await j(url, 'GET', '/api/discovery', cookie);
       assert.equal(r.status, 200);
       const body = r.body as Record<string, unknown>;
@@ -159,7 +159,7 @@ describe('Stage 8 — Blueprint-First Workspace endpoints', () => {
   it('Design returns the expected shape (status, blueprintId, artifactIds, approval)', async () => {
     const { url, close } = await buildStage8Server();
     try {
-      const cookie = await signupCookie(url, 'stage8_design');
+      const cookie = await signupEnrolledCookie(url, 'stage8_design');
       const r = await j(url, 'GET', '/api/design', cookie);
       assert.equal(r.status, 200);
       const body = r.body as Record<string, unknown>;
@@ -175,7 +175,7 @@ describe('Stage 8 — Blueprint-First Workspace endpoints', () => {
   it('Verification returns the expected shape (masterPassed, subjectsAudited, blockingFails)', async () => {
     const { url, close } = await buildStage8Server();
     try {
-      const cookie = await signupCookie(url, 'stage8_verification');
+      const cookie = await signupEnrolledCookie(url, 'stage8_verification');
       const r = await j(url, 'GET', '/api/verification', cookie);
       assert.equal(r.status, 200);
       const body = r.body as Record<string, unknown>;
@@ -193,7 +193,7 @@ describe('Stage 8 — Blueprint-First Workspace endpoints', () => {
   it('Testing returns the expected shape (status, executed, testIds, advancedToTestVerified)', async () => {
     const { url, close } = await buildStage8Server();
     try {
-      const cookie = await signupCookie(url, 'stage8_testing');
+      const cookie = await signupEnrolledCookie(url, 'stage8_testing');
       const r = await j(url, 'GET', '/api/testing', cookie);
       assert.equal(r.status, 200);
       const body = r.body as Record<string, unknown>;
@@ -209,7 +209,7 @@ describe('Stage 8 — Blueprint-First Workspace endpoints', () => {
   it('Operations/Deployment returns the expected shape', async () => {
     const { url, close } = await buildStage8Server();
     try {
-      const cookie = await signupCookie(url, 'stage8_ops');
+      const cookie = await signupEnrolledCookie(url, 'stage8_ops');
       const r = await j(url, 'GET', '/api/deployment', cookie);
       assert.equal(r.status, 200);
       const body = r.body as Record<string, unknown>;
@@ -225,7 +225,7 @@ describe('Stage 8 — Blueprint-First Workspace endpoints', () => {
   it('Telemetry returns the expected shape (observation, sourceKind)', async () => {
     const { url, close } = await buildStage8Server();
     try {
-      const cookie = await signupCookie(url, 'stage8_telemetry');
+      const cookie = await signupEnrolledCookie(url, 'stage8_telemetry');
       const r = await j(url, 'GET', '/api/telemetry', cookie);
       assert.equal(r.status, 200);
       const body = r.body as Record<string, unknown>;
@@ -239,7 +239,7 @@ describe('Stage 8 — Blueprint-First Workspace endpoints', () => {
   it('Continuous returns the expected shape (finalVerdict, rationale, materialization)', async () => {
     const { url, close } = await buildStage8Server();
     try {
-      const cookie = await signupCookie(url, 'stage8_continuous');
+      const cookie = await signupEnrolledCookie(url, 'stage8_continuous');
       const r = await j(url, 'GET', '/api/continuous', cookie);
       assert.equal(r.status, 200);
       const body = r.body as Record<string, unknown>;
@@ -254,7 +254,7 @@ describe('Stage 8 — Blueprint-First Workspace endpoints', () => {
   it('Certification (used by Blueprint view) returns status', async () => {
     const { url, close } = await buildStage8Server();
     try {
-      const cookie = await signupCookie(url, 'stage8_cert');
+      const cookie = await signupEnrolledCookie(url, 'stage8_cert');
       const r = await j(url, 'GET', '/api/certification', cookie);
       assert.equal(r.status, 200);
       const body = r.body as Record<string, unknown>;
@@ -277,7 +277,7 @@ describe('Stage 8 — Blueprint-First Workspace endpoints', () => {
   it('POST /api/projects/:id/approve returns 404 for an unknown project', async () => {
     const { url, close } = await buildStage8Server();
     try {
-      const cookie = await signupCookie(url, 'stage8_approve_404');
+      const cookie = await signupEnrolledCookie(url, 'stage8_approve_404');
       const r = await j(url, 'POST', '/api/projects/prj_does_not_exist/approve', cookie);
       assert.equal(r.status, 404);
     } finally {
@@ -298,7 +298,7 @@ describe('Stage 8 — Blueprint-First Workspace endpoints', () => {
   it('POST /api/projects/:id/run/:stageId returns 404 for an unknown project', async () => {
     const { url, close } = await buildStage8Server();
     try {
-      const cookie = await signupCookie(url, 'stage8_run_404');
+      const cookie = await signupEnrolledCookie(url, 'stage8_run_404');
       const r = await j(url, 'POST', '/api/projects/prj_does_not_exist/run/discovery', cookie);
       assert.equal(r.status, 404);
     } finally {

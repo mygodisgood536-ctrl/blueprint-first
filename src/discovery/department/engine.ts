@@ -435,7 +435,10 @@ export class DiscoveryDepartment {
         error instanceof Error
           ? { code: (error as { code?: string }).code ?? 'UNCAUGHT_ERROR', message: error.message }
           : { code: 'UNCAUGHT_ERROR', message: String(error) };
-      services.logger?.warn('discovery.department.failed', { code: info.code });
+      services.logger?.warn('discovery.department.failed', {
+        code: info.code,
+        message: info.message,
+      });
       return { status: 'failed', error: info, artifactIds: [] };
     }
   }

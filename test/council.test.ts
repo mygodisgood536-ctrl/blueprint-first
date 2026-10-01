@@ -12,7 +12,7 @@ const INPUT = {
 };
 
 describe('multi-perspective reasoning council', () => {
-  it('deliberates through five independent attributable seats', async () => {
+  it('deliberates through independent attributable seats (§0.21 roster)', async () => {
     const services = makeServices();
     const deliberation = await new ReasoningCouncil(services).deliberate(INPUT);
 
@@ -32,8 +32,11 @@ describe('multi-perspective reasoning council', () => {
     const evidenceIds = new Set(deliberation.seats.map((s) => s.evidenceId));
     assert.equal(evidenceIds.size, deliberation.seats.length);
 
-    // Five genuinely separate execution paths hit the router.
-    assert.equal(services.router.completedSelections.filter((s) => s.taskType === 'REVIEW').length, 5);
+    // One genuinely separate execution path per seat on the router.
+    assert.equal(
+      services.router.completedSelections.filter((s) => s.taskType === 'REVIEW').length,
+      COUNCIL_SEATS.length,
+    );
   });
 
   it('reconciles objections deterministically instead of averaging them away', async () => {
@@ -53,7 +56,7 @@ describe('multi-perspective reasoning council', () => {
     });
     const deliberation = await new ReasoningCouncil(services).deliberate(INPUT);
     assert.equal(deliberation.verdict, 'objected');
-    // Every seat received the same subject independently; all five object.
+    // Every seat received the same subject independently; all roster seats object.
     assert.equal(deliberation.objections.length, COUNCIL_SEATS.length);
     assert.match(deliberation.objections[0]?.statement ?? '', /error path/);
   });
@@ -83,5 +86,40 @@ describe('multi-perspective reasoning council', () => {
         error instanceof DiscoveryParseError &&
         /council seat product-manager/.test(error.message),
     );
+  });
+
+  it('materializes artifact-scoping findings with department discipline (§0.21)', async () => {
+    const services = makeServices({
+      councilResponse: () =>
+        JSON.stringify({
+          stance: 'object',
+          findings: [
+            {
+              severity: 'objection',
+              statement: 'No error path is specified for deleting the last task.',
+              artifactIds: ['FEATURE-0001'],
+            },
+          ],
+          uncertainties: [],
+        }),
+    });
+    await new ReasoningCouncil(services).deliberate(INPUT);
+    const findings = (await services.store.list()).filter((a) => a.type === 'FINDING');
+    // One FINDING artifact per independent seat, each with the same discipline
+    // as a Boss delta / Red Team finding: artifact ID, target dependency,
+    // kind metadata, and an evidence anchor.
+    assert.equal(findings.length, COUNCIL_SEATS.length);
+    const first = findings[0]!;
+    assert.equal(first.attributes['findingKind'], 'council-finding');
+    assert.equal(first.attributes['severity'], 'objection');
+    assert.equal(first.attributes['seatId'], COUNCIL_SEATS[0]?.id);
+    assert.equal(first.attributes['subject'], INPUT.subject);
+    assert.deepEqual(first.dependencies, ['FEATURE-0001']);
+    assert.match(String(first.title), /Council Product Manager objection/);
+    // Each finding is anchored to its seat's independent response evidence.
+    for (const finding of findings) {
+      const evidenceId = finding.attributes['evidenceId'];
+      assert.ok(typeof evidenceId === 'string' && evidenceId.length > 0);
+    }
   });
 });

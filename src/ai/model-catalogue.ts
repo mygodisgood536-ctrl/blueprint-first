@@ -18,6 +18,7 @@
 
 import type { ModelInfo, ModelAccessCategory } from './provider-metadata.ts';
 import { ModelsDevSource } from './models-dev-source.ts';
+import { OpencodeCatalogueSource } from './opencode/opencode-catalogue-source.ts';
 import { OpenRouterProvider } from './openrouter-provider.ts';
 
 export interface ModelSearchQuery {
@@ -59,10 +60,22 @@ export interface ModelCatalogueSearchResult {
   readonly sources: readonly string[];
 }
 
+/**
+ * Honest per-provider catalogue facts, computed from the merged sources.
+ * `categories` lists every access category those models actually carry, so a
+ * caller can classify the provider into Free/Subscription truthfully.
+ */
+export interface CatalogueProviderSummary {
+  readonly name: string;
+  readonly modelCount: number;
+  readonly categories: readonly ModelAccessCategory[];
+}
+
 export interface ModelCatalogueStats {
   readonly totalModels: number;
   readonly byCategory: Record<ModelAccessCategory, number>;
   readonly byProvider: Record<string, number>;
+  readonly byProviderInfo: Readonly<Record<string, CatalogueProviderSummary>>;
   readonly verifiedCount: number;
   readonly sourceCount: number;
 }
@@ -70,6 +83,8 @@ export interface ModelCatalogueStats {
 export interface ModelCatalogueOptions {
   modelsDevSource?: ModelsDevSource;
   openRouterProvider?: OpenRouterProvider;
+  /** Live catalogue from the installed opencode runtime (provider/models/prices). */
+  opencodeSource?: OpencodeCatalogueSource;
   /**
    * Blueprint-First's own verified access overrides: models for which the
    * platform has PROVEN an access route (e.g. no-user-key). These override
@@ -165,11 +180,13 @@ function pickKnownPrice(a: number | null, b: number | null): number | null {
 export class ModelCatalogue {
   private readonly modelsDevSource?: ModelsDevSource;
   private readonly openRouterProvider?: OpenRouterProvider;
+  private readonly opencodeSource?: OpencodeCatalogueSource;
   private readonly accessOverrides: ReadonlyMap<string, ModelAccessCategory>;
 
   constructor(options: ModelCatalogueOptions = {}) {
     this.modelsDevSource = options.modelsDevSource;
     this.openRouterProvider = options.openRouterProvider;
+    this.opencodeSource = options.opencodeSource;
     this.accessOverrides = new Map(
       (options.accessOverrides ?? []).map((o) => [
         `${o.providerId}:${o.modelId}`,
@@ -232,6 +249,27 @@ export class ModelCatalogue {
       }
     }
 
+    if (this.opencodeSource !== undefined) {
+      attempted++;
+      try {
+        const models = await this.opencodeSource.fetchCatalog();
+        succeeded++;
+        // The runtime's own models are free-without-key ONLY once the provider
+        // holds a real connection test (free_no_api_key is a platform proof).
+        const verified = this.opencodeSource.verified;
+        for (const m of models) {
+          mergeInto(map, {
+            ...m,
+            key: ModelCatalogue.modelKey(m.providerId, m.modelId),
+            sources: ['opencode'],
+            verified,
+          });
+        }
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
     if (attempted > 0 && succeeded === 0) {
       throw lastError instanceof Error
         ? lastError
@@ -278,16 +316,28 @@ export class ModelCatalogue {
       Object.keys(CATEGORY_ORDER).map((k) => [k as ModelAccessCategory, 0]),
     ) as Record<ModelAccessCategory, number>;
     const byProvider: Record<string, number> = {};
+    const byProviderBuild: Record<string, { name: string; modelCount: number; categories: ModelAccessCategory[] }> = {};
     let verifiedCount = 0;
     for (const m of all) {
       byCategory[m.accessCategory] = (byCategory[m.accessCategory] ?? 0) + 1;
       byProvider[m.providerId] = (byProvider[m.providerId] ?? 0) + 1;
+      let info = byProviderBuild[m.providerId];
+      if (info === undefined) {
+        info = { name: m.providerName || m.providerId, modelCount: 0, categories: [] };
+        byProviderBuild[m.providerId] = info;
+      }
+      info.modelCount++;
+      if (!info.categories.includes(m.accessCategory)) {
+        info.categories.push(m.accessCategory);
+      }
       if (m.verified) verifiedCount++;
     }
+    const byProviderInfo: Readonly<Record<string, CatalogueProviderSummary>> = byProviderBuild;
     return {
       totalModels: all.length,
       byCategory,
       byProvider,
+      byProviderInfo,
       verifiedCount,
       sourceCount: new Set(all.flatMap((m) => m.sources)).size,
     };

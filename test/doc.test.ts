@@ -154,4 +154,20 @@ describe('definition-of-complete state machine (§0.17)', () => {
     const project = await services.store.require('PROJECT-0001');
     assert.equal(inferDocState(project), 'BOSS-VERIFIED');
   });
+
+  it('rejects a judge masquerading as the producer id (§0.4 identity)', async () => {
+    const services = makeServices();
+    const id = seed(services);
+    await recordDocGate(services.store, id, 'EXPANDED', WORKER, {});
+    // WORKER created the artifact; a judge wearing the producer's exact id
+    // is the producer relabeled and must not adjudicate the judgment gate.
+    const usurper = { kind: 'system' as const, id: WORKER.id };
+    await assert.rejects(
+      () =>
+        recordDocGate(services.store, id, 'SELF-VERIFIED', usurper, {
+          gate: 'self-check',
+        }),
+      /distinct from the producer/,
+    );
+  });
 });

@@ -131,9 +131,14 @@ export function assertDocTransition(from: DocState | undefined, to: DocState): v
 /**
  * The governor attempting an advance must be entitled to that gate: producers
  * cannot govern judgment gates, and judgment actors cannot govern production
- * steps. Enforced by actor-id equality against the expected governor role.
+ * steps. Judges are enforced at the identity level - the §0.4 independence
+ * principle, not merely a kind label:
+ *   - judgment gates require a verifier/system actor that is NOT the
+ *     artifact's producing actor (a producer rotating into a judge bucket
+ *     with the same id adjudicates its own work and changes nothing),
+ *   - production steps require the producing worker itself.
  */
-export function assertDocGovernor(to: DocState, actor: Actor): void {
+export function assertDocGovernor(to: DocState, actor: Actor, producer?: { readonly id: string }): void {
   const governor = DOC_GATE_GOVERNORS[to];
   const productionRoles = new Set(['worker', 'design-worker', 'build-worker', 'test-worker']);
   const judgmentRoles = new Set([
@@ -153,6 +158,13 @@ export function assertDocGovernor(to: DocState, actor: Actor): void {
     throw new DocStateError(
       `Gate "${governor}" for ${to} requires an independent judge (verifier/system), ` +
         `got actor kind "${actor.kind}:${actor.id}". A producer's own declaration changes nothing.`,
+    );
+  }
+  if (judgmentRoles.has(governor) && producer !== undefined && actor.id === producer.id) {
+    throw new DocStateError(
+      `Gate "${governor}" for ${to} must be adjudicated by a judge distinct from the ` +
+        `producer: "${actor.kind}:${actor.id}" is the producing actor and cannot ` +
+        `certify its own work.`,
     );
   }
 }
@@ -187,7 +199,9 @@ export async function recordDocGate(
   // is authoritative and must count).
   const from = docStateOf(current) ?? inferDocState(current);
   assertDocTransition(from, to);
-  assertDocGovernor(to, actor);
+  // Judges must be distinct from the producing actor (identity-level §0.4
+  // independence), not merely verifier/system labeled.
+  assertDocGovernor(to, actor, current.createdBy);
   const gate = options.gate ?? DOC_GATE_GOVERNORS[to];
   const at = new Date().toISOString();
   const entry = {
@@ -300,6 +314,7 @@ export async function advanceDocPath(
   store: ArtifactStore,
   id: string,
   target: DocState,
+  options?: { evidenceId?: string },
 ): Promise<DocWalkResult> {
   let current = await store.require(id);
   let state = docStateOf(current) ?? inferDocState(current);
@@ -322,7 +337,10 @@ export async function advanceDocPath(
     if (actor === undefined) {
       return { reachedTarget: false, state: DOC_STATES[index] ?? state, haltedAt: next };
     }
-    current = await recordDocGate(store, id, next, actor, {});
+    // Every stamped gate carries the evidence id that SUPPORTS it, so a DoC
+    // position is always auditable back to a real recorded fact, never a
+    // bookkeeping invention.
+    current = await recordDocGate(store, id, next, actor, { evidenceId: options?.evidenceId });
     state = next;
     index += 1;
   }

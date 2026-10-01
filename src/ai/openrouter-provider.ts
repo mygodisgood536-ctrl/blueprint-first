@@ -29,7 +29,7 @@ import type {
   ModelAccessCategory,
   ConnectionTestResult,
 } from './provider-metadata.ts';
-import { ProviderHttpError } from './models-dev-source.ts';
+import { ProviderHttpError } from '../core/errors.ts';
 
 const OPENROUTER_DEFAULT_BASE_URL = 'https://openrouter.ai/api/v1';
 const OPENROUTER_KEY_URL_PATH = '/key';
@@ -127,6 +127,8 @@ export class OpenRouterProvider {
       ...(request.maxTokens !== undefined ? { max_tokens: request.maxTokens } : {}),
     });
     const controller = new AbortController();
+    const onExternalAbort = (): void => controller.abort();
+    request.signal?.addEventListener('abort', onExternalAbort, { once: true });
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     let raw: Awaited<ReturnType<FetchFn>>;
     try {
@@ -143,6 +145,7 @@ export class OpenRouterProvider {
       });
     } finally {
       clearTimeout(timer);
+      request.signal?.removeEventListener('abort', onExternalAbort);
     }
     if (!raw.ok) {
       const text = await raw.text();
@@ -177,10 +180,18 @@ export class OpenRouterProvider {
               : undefined,
         }
       : undefined;
+    const requestedModel = request.model;
+    // OpenRouter may answer with a DIFFERENT model than requested (routing or
+    // substitution). The provenance stamp must reflect the model that ACTUALLY
+    // responded; when it differs from the requested one, both are recorded so
+    // no substitution is ever silent.
+    const servedModel =
+      typeof json['model'] === 'string' && json['model'] !== '' ? json['model'] : requestedModel;
     return {
       content,
       providerId: this.id,
-      modelId: request.model,
+      modelId: servedModel,
+      ...(requestedModel !== servedModel ? { requestedModelId: requestedModel } : {}),
       ...(finishReason !== undefined ? { finishReason } : {}),
       ...(usage !== undefined ? { usage } : {}),
       ...(request.requestId !== undefined ? { requestId: request.requestId } : {}),

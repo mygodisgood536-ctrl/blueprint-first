@@ -74,6 +74,32 @@ describe('Continuous Engineering Department (Stage 5) — worker', () => {
     assert.ok(report.driftFindings.some((d) => d.artifactId === target && d.kind === 'REGRESSED'));
   });
 
+  it('derives REGRESSED drift from a genuine live verification failure (no simulation)', async () => {
+    const ctx = await deployedReady();
+    const scope = await deriveDeployScope(ctx.services, ctx.discovery.projectId);
+    const target = scope[0]!.baseId;
+    const base = await ctx.services.store.require(target);
+    // Genuinely break live state: the certified record no longer verifies.
+    await ctx.services.store.update(target, base.version, () => ({
+      ...base,
+      status: 'BLOCKED',
+    }));
+    const report = await runContinuousWorker(ctx.services, ctx.discovery.projectId);
+    const obs = report.observations.find((o) => o.baseId === target);
+    assert.ok(obs);
+    assert.equal(obs!.driftKind, 'CHANGED');
+    assert.equal(obs!.liveVerdict, 'fail');
+    const finding = report.driftFindings.find(
+      (d) => d.artifactId === target && d.kind === 'REGRESSED',
+    );
+    assert.ok(finding, 'drift finding must be derived from the master report');
+    // A DERIVED drift carries the real failing dimension from the engine's
+    // own findings (COVERAGE), not the CONSISTENCY default that synthetic or
+    // telemetry layering would attach.
+    assert.equal(finding!.dimension, 'COVERAGE');
+    assert.equal(finding!.source, 'verification');
+  });
+
   it('sampleArtifacts is deterministic, evenly spaced and de-duplicating', () => {
     const items: { baseId: string }[] = Array.from({ length: 7 }, (_, i) => ({
       baseId: `PAGE-${String(i).padStart(4, '0')}`,

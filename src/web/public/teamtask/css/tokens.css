@@ -1,0 +1,337 @@
+/**
+ * TeamTask Design Tokens
+ * Derived from project-specific visual identity (Clarity tone, 210° hue)
+ * All values reference the design specification
+ */
+
+:root {
+  /* ============================================================
+     COLOR TOKENS (Project-specific, derived from visual identity)
+     Tone: Clarity | Seed Hue: 210° | Saturation: 50% | Lightness: 47%
+     ============================================================ */
+
+  /* Semantic Colors */
+  --color-primary: hsl(210 50% 47%);
+  --color-primary-hover: hsl(210 60% 42%);
+  --color-primary-pressed: hsl(210 64% 36%);
+  --color-primary-disabled: hsl(210 12% 80%);
+  --color-on-primary: #ffffff;
+
+  --color-accent: hsl(240 50% 51%);
+  --color-on-accent: #ffffff;
+
+  --color-secondary: hsl(210 32% 94%);
+
+  /* Surfaces */
+  --color-surface: #ffffff;
+  --color-surface-alt: hsl(210 14% 97%);
+  --color-surface-contrast: hsl(210 18% 93%);
+
+  /* Text */
+  --color-text: hsl(210 20% 18%);
+  --color-muted-text: hsl(210 14% 45%);
+
+  /* Borders */
+  --color-border: hsl(210 16% 84%);
+
+  /* State Colors */
+  --color-danger: #c02b1d;
+  --color-danger-hover: #9c2217;
+  --color-warning: #b25e09;
+  --color-success: #1c8a5a;
+  --color-info: hsl(170 55% 45%);
+
+  /* Focus & Selection */
+  --color-focus: hsl(210 85% 55%);
+  --color-selected: hsl(210 18% 92%);
+  --color-selected-text: hsl(210 45% 22%);
+
+  /* Disabled */
+  --color-disabled-bg: hsl(210 14% 97%);
+  --color-disabled-text: hsl(210 14% 62%);
+
+  /* ============================================================
+     TYPOGRAPHY TOKENS
+     ============================================================ */
+
+  --font-family: "Inter", "Segoe UI", system-ui, sans-serif;
+  --font-family-fallback: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-size-base: 16px;
+  --font-size-display: 2.25rem;   /* 36px */
+  --font-size-heading: 1.5rem;    /* 24px */
+  --font-size-body: 1rem;         /* 16px */
+  --font-size-caption: 0.8125rem; /* 13px */
+
+  --font-weight-display: 700;
+  --font-weight-heading: 600;
+  --font-weight-body: 400;
+  --font-weight-caption: 400;
+
+  --line-height-display: 1.1;
+  --line-height-heading: 1.25;
+  --line-height-body: 1.5;
+  --line-height-caption: 1.4;
+
+  --letter-spacing-display: -0.02em;
+  --letter-spacing-heading: -0.01em;
+  --letter-spacing-body: 0;
+  --letter-spacing-caption: 0.01em;
+
+  /* ============================================================
+     SPACING TOKENS
+     ============================================================ */
+
+  --space-unit: 4px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  --space-page-margin: 24px;
+  --space-control-gap: 12px;
+  --space-section-gap: 48px;
+  --space-component-gap: 16px;
+
+  /* Density modes */
+  --density-multiplier: 1;
+
+  /* ============================================================
+     RADIUS TOKENS
+     ============================================================ */
+
+  --radius-unit: 6px;
+  --radius-control: 8px;
+  --radius-card: 12px;
+  --radius-modal: 16px;
+  --radius-surface: 4px;
+
+  /* ============================================================
+     ELEVATION TOKENS
+     ============================================================ */
+
+  --elevation-0: none;
+  --elevation-1: 0 1px 2px rgba(17, 24, 39, 0.06), 0 1px 3px rgba(17, 24, 39, 0.08);
+  --elevation-2: 0 2px 6px rgba(17, 24, 39, 0.10), 0 4px 12px rgba(17, 24, 39, 0.08);
+  --elevation-3: 0 8px 24px rgba(17, 24, 39, 0.14), 0 4px 8px rgba(17, 24, 39, 0.08);
+
+  /* ============================================================
+     LAYOUT TOKENS
+     ============================================================ */
+
+  --layout-columns: 12;
+  --layout-column-gap: 24px;
+  --layout-row-gap: 24px;
+  --layout-max-width: 1280px;
+  --layout-container: 1120px;
+
+  /* ============================================================
+     MOTION TOKENS
+     ============================================================ */
+
+  --motion-quick: 150ms;
+  --motion-standard: 220ms;
+  --motion-slow: 360ms;
+
+  --easing-standard: cubic-bezier(0.2, 0, 0, 1);
+  --easing-enter: cubic-bezier(0.16, 1, 0.3, 1);
+  --easing-exit: cubic-bezier(0.4, 0, 1, 1);
+
+  /* ============================================================
+     Z-INDEX TOKENS
+     ============================================================ */
+
+  --z-dropdown: 100;
+  --z-tooltip: 200;
+  --z-modal-backdrop: 300;
+  --z-modal: 400;
+  --z-drawer: 500;
+  --z-toast: 600;
+
+  /* ============================================================
+     COMPONENT-SPECIFIC TOKENS
+     ============================================================ */
+
+  /* Button */
+  --btn-height-sm: 32px;
+  --btn-height-md: 40px;
+  --btn-height-lg: 48px;
+  --btn-padding-sm: 8px 12px;
+  --btn-padding-md: 10px 16px;
+  --btn-padding-lg: 12px 20px;
+
+  /* Input */
+  --input-height-sm: 32px;
+  --input-height-md: 40px;
+  --input-padding: 8px 12px;
+
+  /* Card */
+  --card-padding: 16px;
+
+  /* Modal */
+  --modal-max-width: 560px;
+  --modal-padding: 24px;
+
+  /* Board */
+  --board-column-width: 280px;
+  --board-column-gap: 24px;
+  --board-header-height: 56px;
+  --board-toolbar-height: 56px;
+}
+
+/* ============================================================
+   DENSITY MODES
+   ============================================================ */
+
+html[data-density="compact"] {
+  --density-multiplier: 0.75;
+  --space-unit: 3px;
+  --space-control-gap: 9px;
+  --space-component-gap: 12px;
+  --space-section-gap: 36px;
+  --font-size-body: 0.875rem;
+  --radius-control: 6px;
+  --radius-card: 9px;
+  --btn-height-md: 36px;
+  --input-height-md: 36px;
+}
+
+html[data-density="comfortable"] {
+  --density-multiplier: 1;
+  --space-unit: 4px;
+  --space-control-gap: 12px;
+  --space-component-gap: 16px;
+  --space-section-gap: 48px;
+  --font-size-body: 1rem;
+  --radius-control: 8px;
+  --radius-card: 12px;
+  --btn-height-md: 40px;
+  --input-height-md: 40px;
+}
+
+html[data-density="relaxed"] {
+  --density-multiplier: 1.25;
+  --space-unit: 5px;
+  --space-control-gap: 15px;
+  --space-component-gap: 20px;
+  --space-section-gap: 60px;
+  --font-size-body: 1.125rem;
+  --radius-control: 10px;
+  --radius-card: 15px;
+  --btn-height-md: 44px;
+  --input-height-md: 44px;
+}
+
+/* ============================================================
+   REDUCED MOTION
+   ============================================================ */
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion-quick: 0ms;
+    --motion-standard: 0ms;
+    --motion-slow: 0ms;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  /* Keep essential feedback instant */
+  :focus-visible {
+    transition-duration: 0ms !important;
+  }
+
+  .spinner,
+  .skeleton {
+    animation: none !important;
+  }
+
+  .skeleton {
+    background: var(--color-surface-alt);
+  }
+}
+
+/* ============================================================
+   BASE STYLES
+   ============================================================ */
+
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+  font-size: var(--font-size-base);
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-family);
+  font-size: var(--font-size-body);
+  line-height: var(--line-height-body);
+  color: var(--color-text);
+  background: var(--color-surface);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Focus visible for all interactive elements */
+:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-control);
+}
+
+/* Skip link */
+.skip-link {
+  position: absolute;
+  top: -100%;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: var(--space-2) var(--space-4);
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  border-radius: var(--radius-control);
+  z-index: var(--z-toast);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.skip-link:focus {
+  top: var(--space-4);
+}
+
+/* Selection */
+::selection {
+  background: var(--color-selected);
+  color: var(--color-selected-text);
+}
+
+/* Scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--color-surface);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-muted-text);
+}

@@ -27,6 +27,9 @@
  */
 
 import type { ModelInfo, ModelCapabilities, ModelAccessCategory } from './provider-metadata.ts';
+import { ProviderHttpError } from '../core/errors.ts';
+
+export { ProviderHttpError } from '../core/errors.ts';
 
 const MODELS_DEV_API_URL = 'https://models.dev/api.json';
 
@@ -46,13 +49,6 @@ export interface FetchFn {
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-export class ProviderHttpError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'ProviderHttpError';
-  }
 }
 
 interface ModelsDevModel {

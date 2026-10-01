@@ -38,6 +38,7 @@ export class ScriptedProvider implements AiProvider {
   }
 
   async complete(request: AiCompletionRequest): Promise<AiCompletionResponse> {
+    if (request.signal?.aborted === true) throw new Error('aborted');
     this.calls.push({ taskType: request.taskType, messageCount: request.messages.length });
     const rule = this.rules.find((r) => r.match(request));
     let content: string | undefined;

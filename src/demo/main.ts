@@ -10,8 +10,13 @@
  *        specialists -> independent boss           confidence scored (§0.13)
  *        reconstruction on pages/features/
  *        workflows
+ *     -> Full Discovery Department (Level 3)      clusters C/D/E passes plus
+ *        after acceptance                          §0.6 Recursive Page Expansion
+ *                                                  (14 layers per page), gated
  *     -> AI Design Studio                        BLUEPRINT-n + PAGE/FEATURE-n-
  *        (deterministic derivation)               DESIGN with evidence anchors
+ *     -> Interactive Digital Twin (§1.4)          twin pages/elements bound to
+ *        after design                              design -> discovery -> evidence
  *     -> Blueprint approval gate                 real gate over stored state;
  *        (human product-owner approver)           blueprint APPROVED
  *     -> AI Build Studio                         PAGE/FEATURE-n-IMPL plus a
@@ -36,7 +41,7 @@ import { consoleSink, createLogger, type Logger } from '../core/logging.ts';
 import { ArtifactIdAllocator } from '../core/id-allocator.ts';
 import { JsonFileArtifactStore } from '../core/json-file-store.ts';
 import { KnowledgeGraph } from '../core/graph.ts';
-import { MemoryEvidenceLog } from '../verification/evidence.ts';
+import { MemoryEvidenceLog, type EvidenceLog } from '../verification/evidence.ts';
 import { AiRouter } from '../ai/router.ts';
 import { ScriptedProvider } from '../ai/scripted-provider.ts';
 import type { CoreServices } from '../core/services.ts';
@@ -74,6 +79,7 @@ import { runTestDepartment } from '../testing/department.ts';
 import { runOperationsDepartment } from '../operations/department.ts';
 import { runContinuousEngineeringDepartment } from '../continuous/department.ts';
 import { runSafeChangeDepartment } from '../change/department.ts';
+import { evaluateChangeReopenRequest } from '../change/reopening.ts';
 import { runRecursionDepartment } from '../recursion/department.ts';
 import { runPermanentEngineeringOrganization, candidateFromDrift } from '../perm/department.ts';
 import { emptyGuardianMemory, classifySignal } from '../perm/guardian.ts';
@@ -92,6 +98,8 @@ import { lineageStatus, coverageSummary, requirementsTraceability } from '../tra
 import { buildDesignCodeTrace, type DesignCodeTraceReport } from '../traceability/design-code-trace.ts';
 import { DocumentProjectBinder, type ProjectBindingReport } from '../chat/project-binding.ts';
 import { exportProjectBundle, transferProject, type ImportResult } from '../portability/bundle.ts';
+import { runFullDepartmentPasses, type FullDepartmentResult } from '../discovery/department/level3.ts';
+import { materializeDigitalTwin, type DigitalTwin } from '../twin/materialize.ts';
 import { AccountRegistry } from '../account/accounts.ts';
 import { AccountIsolation } from '../account/isolation.ts';
 import type { Artifact } from '../core/artifact.ts';
@@ -200,7 +208,7 @@ export interface DemoResult {
   providerCalls: number;
   scripted: ScriptedProvider;
   graph: KnowledgeGraph;
-  evidence: MemoryEvidenceLog;
+  evidence: EvidenceLog;
   store: JsonFileArtifactStore;
   allocator: ArtifactIdAllocator;
   /** The adopted PROJECT artifact (identity + mode + scope as structured state). */
@@ -211,6 +219,10 @@ export interface DemoResult {
   registry: ProjectRegistry;
   /** Design-coverage assessment across the produced page designs (expansion §10). */
   designCoverage: DesignCoverageAssessment;
+  /** Full Level-3 department passes incl. the §0.6 Recursive Page Expansion. */
+  fullDepartment: FullDepartmentResult;
+  /** §1.4 interactive Digital Twin bound to the design package. */
+  twin: DigitalTwin;
   /** Business capability model derived from discovery artifacts (expansion §10). */
   businessModel: BusinessModel;
   /** Security threat model and requirements derived from business model (expansion §10). */
@@ -248,6 +260,12 @@ export interface AccountReport {
 export interface RunDemoOptions {
   readonly mode?: ProjectMode;
   readonly owner?: ProjectOwner;
+  /**
+   * Durable evidence log injected by the product layer so the certification
+   * trail survives restarts (server passes a DurableEvidenceLog). When omitted
+   * the demo uses its deterministic in-memory log.
+   */
+  readonly evidence?: EvidenceLog;
 }
 
 export async function runDemoPipeline(
@@ -270,7 +288,7 @@ export async function runDemoPipeline(
   await fs.rm(storePath, { force: true }); // deterministic scenario: reset own file
   const store = new JsonFileArtifactStore({ filePath: storePath, allocator });
   const graph = new KnowledgeGraph();
-  const evidence = new MemoryEvidenceLog();
+  const evidence = options?.evidence ?? new MemoryEvidenceLog();
   const scripted = new ScriptedProvider({
     rules: [
       // Level-1b department calls are routed by prompt markers and MUST
@@ -312,12 +330,44 @@ export async function runDemoPipeline(
       },
       {
         match: (req) => req.messages.some((m) => m.content.includes('[COUNCIL]')),
-        respond: () =>
-          JSON.stringify({
+        respond: (req) => {
+          // Scripted council: each seat answers INDEPENDENTLY through its own
+          // lens (the engine issues a separate call per seat and already
+          // anchors every seat's own evidence id). The script reproduces that
+          // independence as distinct, per-seat statements derived from the
+          // shared subject facts - never an echo of another seat.
+          const system = req.messages.find((m) => m.role === 'system')?.content ?? '';
+          const seat = system.match(/\[COUNCIL\]\[([^\]]+)\]/)?.[1] ?? 'unknown';
+          const lenses: Record<string, string> = {
+            'product-manager': 'product intent and scope',
+            'business-analyst': 'requirements completeness and traceability',
+            'software-architect': 'structural coherence and dependency shape',
+            'ux-designer': 'user journeys and interaction consistency',
+            'ui-designer': 'visual and design-system consistency',
+            'backend-engineer': 'service and API implementation coherence',
+            'frontend-engineer': 'client implementation coherence',
+            'database-architect': 'data model coherence',
+            'security-architect': 'permission-model coherence and abuse paths',
+            'performance-engineer': 'scalability and performance',
+            'devops-engineer': 'delivery and operations coherence',
+            'qa-engineer': 'verification gaps and missing error/success paths',
+            'accessibility-specialist': 'accessibility completeness',
+            'compliance-specialist': 'regulatory and compliance coverage',
+            'domain-expert': 'domain fidelity and business-rule semantics',
+          };
+          const lens = lenses[seat] ?? 'independent perspective';
+          return JSON.stringify({
             stance: 'endorse',
-            findings: [],
+            findings: [
+              {
+                severity: 'note',
+                statement: `Reviewed the shared subject facts through the lens of ${lens}; could not justify an objection or concern against them.`,
+                artifactIds: [],
+              },
+            ],
             uncertainties: [],
-          }),
+          });
+        },
       },
     ],
   });
@@ -376,6 +426,37 @@ export async function runDemoPipeline(
     `  project ${project.id} adopted (mode=${mode} / ${PROJECT_MODE_LABELS[mode]}); ` +
       `${baseline.totalArtifacts} artifact(s) linked`,
   );
+
+  // --- Full Discovery Department (Level 3) -----------------------------------
+  // The accepted Level-1b inventory now runs the complete Level-3 pass set:
+  // Cluster C content, DW-D1 edge cases, Risk & Assumption Register,
+  // Negative-Space, Industry Comparison, Red Team, Contradiction Engine, and
+  // Pass 10 - the §0.6 Recursive Page Expansion of every page through all 14
+  // layers. Everything produced is promoted through the evidence+provenance
+  // gate the department owns.
+  console.log('  full Discovery Department (Level 3): clusters C/D/E + Recursive Page Expansion');
+  const fullDepartment = await runFullDepartmentPasses(services, baseline, {
+    categoryHint: 'team-productivity',
+  });
+  const layerTally = fullDepartment.expansion.tally;
+  console.log(
+    `  level3 passes: ${fullDepartment.contentAdded.length} content, ` +
+      `${fullDepartment.edgeStatesAdded.length} edge states, ` +
+      `${fullDepartment.risks.length} risks, ` +
+      `${fullDepartment.comparisonFindings.length} comparison findings, ` +
+      `${fullDepartment.redTeamFindings.length} red-team findings, ` +
+      `${fullDepartment.contradictions.length} contradictions; ` +
+      `expansion: ${fullDepartment.expansion.pages.length} page(s) x 14 layers ` +
+      `(covered=${layerTally.covered}, added=${layerTally.added}, ` +
+      `not-relevant=${layerTally['not-relevant']}, blocked=${layerTally.blocked})`,
+  );
+  const expansionOmissions = fullDepartment.expansion.pages.flatMap((p) =>
+    p.omissions.map((note) => `${p.pageKey}: ${note}`),
+  );
+  if (expansionOmissions.length > 0) {
+    console.log(`  expansion omissions (routed, not invented): ${expansionOmissions.length}`);
+    for (const omission of expansionOmissions.slice(0, 8)) console.log(`    - ${omission}`);
+  }
 
   // --- Business model derivation (expansion §10) ----------------------------------
   const businessModel = await deriveBusinessModel(services, baseline);
@@ -462,6 +543,20 @@ export async function runDemoPipeline(
       `(identity ${(designQuality.identitySpecificity * 100).toFixed(0)}%, component ${(designQuality.componentConsistency * 100).toFixed(0)}%, a11y ${(designQuality.accessibility * 100).toFixed(0)}%); ` +
       `consistency: ${(designConsistency.overallConsistency * 100).toFixed(0)}% ` +
       `(${designQuality.findings.length} quality finding(s), ${designConsistency.exceptions.length} exception(s))`,
+  );
+
+  // --- Interactive Digital Twin (§1.4) -----------------------------------------
+  // Every page of the twin is a simulation node bound to its PAGE-*-DESIGN
+  // artifact and, from there, to the discovery artifacts and evidence that
+  // produced it. Derived from certified state - never invented.
+  console.log('  Digital Twin (§1.4): binding design surfaces to discovery + evidence');
+  const twin = await materializeDigitalTwin(services, baseline, design.blueprintId, {
+    producer: { kind: 'system', id: 'demo-digital-twin' },
+  });
+  console.log(
+    `  twin ${twin.twinArtifactId}: ${twin.pages.length} page(s), ` +
+      `${twin.elementCount} element(s), ${twin.boundElementCount} design-bound, ` +
+      `${twin.gapCount} gap(s), ${twin.evidenceCount} evidence record(s)`,
   );
 
   // --- Stage 3: approval gate ----------------------------------------------------
@@ -700,6 +795,17 @@ export async function runDemoPipeline(
   const changeEnv = createDeploymentEnvironment('production');
   await deployRelease(services, opsRun.scope, changeEnv);
   for (const exp of opsRun.scope) await verifyDeployedUnit(services, exp, changeEnv);
+  // Model the telemetry-observed drift in the environment itself: the unit
+  // that breached now carries the observation's evidence hash as its config,
+  // so the Safe Change restoration below is a real before/after - the applier
+  // returns the unit to its known-good certified anchor.
+  const telemetryUnit = changeEnv.units.get(telemetryBase);
+  if (telemetryUnit !== undefined) {
+    changeEnv.units.set(telemetryBase, {
+      ...telemetryUnit,
+      configHash: telemetryObservation.evidenceHash,
+    });
+  }
   const beforeHash = changeEnv.units.get(telemetryBase)?.configHash;
   const changeResult = await runSafeChangeDepartment(services, {
     drift: firstChange.drift,
@@ -829,6 +935,29 @@ export async function runDemoPipeline(
   if (peoResult.watch.classifiedAs !== 'RECURRING') {
     log.warn('demo.peo.unexpectedClassification', { classifiedAs: peoResult.watch.classifiedAs });
   }
+
+  // --- §2.4 Change/Reopening gate: exercise once on the PEO path ---------
+  // The pre-launch Change/Reopen Request gate admits a discovering stage's
+  // request only if the discovering stage is a producer (a Build worker here)
+  // and computes the Dependency-Map affected set. It NEVER certifies - only
+  // the Design Boss certifies re-evaluated scope. A verifier opening the same
+  // request fails closed on self-adjudication.
+  const reopenDecision = evaluateChangeReopenRequest(graph, {
+    requestId: 'CR-9001',
+    discoveredBy: { kind: 'ai', id: 'build-worker-01' },
+    namedArtifacts: [firstChange.drift.artifactId],
+    reason: 'PEO demo: §2.4 gate exercised with the Stage 11 drift subject.',
+  });
+  const selfAdjudicating = evaluateChangeReopenRequest(graph, {
+    requestId: 'CR-9002',
+    discoveredBy: { kind: 'ai', id: 'safe-change-boss-01' },
+    namedArtifacts: [firstChange.drift.artifactId],
+    reason: 'A certifier must never open its own change request.',
+  });
+  console.log(
+    `  §2.4 gate: ${reopenDecision.verdict} (${reopenDecision.affected.length} affected) ` +
+      `; certifier request ${selfAdjudicating.verdict} (fail-closed)`,
+  );
 
   // --- Honest reporting: lineage, certification and confidence as facts ------
 
@@ -980,6 +1109,8 @@ export async function runDemoPipeline(
     projectMode: mode,
     registry,
     designCoverage,
+    fullDepartment,
+    twin,
     businessModel,
     threatModel,
     uxVerification,

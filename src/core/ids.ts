@@ -32,6 +32,7 @@ export const ARTIFACT_TYPES = [
   'UX_VERIFICATION', 'UX_FINDING',
   'TRACE_REPORT',
   'DOC',
+  'A11Y', 'PERF', 'TWIN',
 ] as const;
 
 export type ArtifactType = (typeof ARTIFACT_TYPES)[number];

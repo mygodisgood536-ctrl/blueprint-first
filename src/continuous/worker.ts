@@ -169,16 +169,32 @@ export async function runContinuousWorker(
     });
   }
 
-  // Build driftFindings list. We trust the master engine's per-artifact drift
-  // and add the defect markers. Synthetic drift (defects) is attributed to
-  // the CONSISTENCY dimension because that is the architectural dimension
-  // for "live state diverged from certified baseline" (the live engine's
-  // authoritative source already uses it for the same reason).
-  const liveDrift = (masterNow as { drift?: readonly DriftItem[] }).drift ?? [];
+  // Build driftFindings list. Drift is grounded in the master engine's real
+  // per-artifact verdicts (re-engaging the Live Engine): any artifact the
+  // engine no longer passes is surfaced here, attributed to the failing
+  // dimension from its own findings. The verified baseline was all-pass, so
+  // `was` is 'pass' and any non-pass verdict becomes drift. Synthetic drift
+  // (defects) is layered on top and attributed to CONSISTENCY - the live
+  // engine's own convention for "live state diverged from certified baseline".
+  const liveDrift: DriftItem[] = [];
+  for (const exp of scope) {
+    const report = masterNow.reports[exp.baseId];
+    const verdict = verdictFor(report);
+    if (verdict === 'pass' || verdict === 'absent') continue;
+    const triggered = (report?.findings ?? []).find((f) => f.verdict === 'fail' || f.verdict === 'inconclusive');
+    liveDrift.push({
+      artifactId: exp.baseId,
+      dimension: triggered?.dimension ?? 'CONSISTENCY',
+      was: 'pass',
+      now: verdict === 'fail' ? 'fail' : 'inconclusive',
+      kind: verdict === 'fail' ? ('REGRESSED' as const) : ('DEGRADED' as const),
+      source: 'verification' as const,
+    });
+  }
   const driftFindings: DriftItem[] = liveDrift.map((d) => {
     if (simReg.has(d.artifactId)) return { ...d, was: 'pass', now: 'fail', kind: 'REGRESSED' as const, source: 'verification' as const };
     if (simDeg.has(d.artifactId)) return { ...d, was: 'pass', now: 'inconclusive', kind: 'DEGRADED' as const, source: 'verification' as const };
-    return d.source === undefined ? { ...d, source: 'verification' as const } : d;
+    return d;
   });
   for (const baseId of simReg) {
     if (!driftFindings.some((d) => d.artifactId === baseId)) {

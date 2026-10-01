@@ -116,13 +116,24 @@ export async function runTestDepartment(
     auditorRationale: auditor.rationale,
   });
 
+  // The evidence is created BEFORE the DoC advancement so every stamped gate
+  // is linked to the real test-run record that supports it.
+  const evidence = await services.evidence.append({
+    kind: 'test-run',
+    summary:
+      `Acceptance suite: ${executed.length}/${executed.length} checks passed; ` +
+      `boss accepted (${boss.rationale}); auditor confirmed ${auditor.sampledIds.length} sample(s).`,
+    artifactIds: [mat.reportId, ...mat.testIds],
+    producer: { kind: 'verifier', id: 'test-boss-01' },
+  });
+
   // Governed Definition-of-Complete advancement on the real phase artifacts.
   const advancedToTestVerified: string[] = [];
   const docHalts: { id: string; haltedAt: string }[] = [];
   for (const exp of expected) {
     const designId = `${exp.baseId}-DESIGN`;
     if ((await services.store.get(designId)) !== null) {
-      const walk = await advanceDocPath(services.store, designId, 'DESIGN-VERIFIED');
+      const walk = await advanceDocPath(services.store, designId, 'DESIGN-VERIFIED', { evidenceId: evidence.id });
       if (!walk.reachedTarget && walk.haltedAt !== undefined) {
         docHalts.push({ id: designId, haltedAt: walk.haltedAt });
       }
@@ -130,21 +141,12 @@ export async function runTestDepartment(
     if (exp.kind === 'functional') {
       const implId = `${exp.baseId}-IMPL`;
       if ((await services.store.get(implId)) !== null) {
-        const walk = await advanceDocPath(services.store, implId, 'TEST-VERIFIED');
+        const walk = await advanceDocPath(services.store, implId, 'TEST-VERIFIED', { evidenceId: evidence.id });
         if (walk.reachedTarget) advancedToTestVerified.push(implId);
         else if (walk.haltedAt !== undefined) docHalts.push({ id: implId, haltedAt: walk.haltedAt });
       }
     }
   }
-
-  const evidence = await services.evidence.append({
-    kind: 'test-run',
-    summary:
-      `Acceptance suite: ${executed.length}/${executed.length} checks passed; ` +
-      `boss accepted (${boss.rationale}); auditor confirmed ${auditor.sampledIds.length} sample(s).`,
-    artifactIds: [mat.reportId, ...advancedToTestVerified],
-    producer: { kind: 'verifier', id: 'test-boss-01' },
-  });
 
   return {
     status: 'passed',

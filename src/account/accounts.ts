@@ -31,8 +31,15 @@ export interface AccountRecord {
   passwordSalt: string;
   /** Per-account UI/behavior preferences (theme, density, ...). */
   preferences?: Record<string, string | number | boolean>;
+  /** True when the platform REQUIRES an enabled authenticator before product use. */
+  authenticatorRequired?: boolean;
   /** TOTP authenticator. Present only after setup; `enabled` gates enforcement. */
   authenticator?: { secret: string; enabled: boolean };
+  /**
+   * Recovery question/answers. Present only after first-time setup stores them.
+   * Answers are scrypt hashes and can never be read back.
+   */
+  recoveryQuestions?: RecoveryQuestionRecord[];
   /** Hashed one-time recovery codes, issued when the authenticator is enabled. */
   recoveryCodes?: RecoveryCodeRecord[];
 }
@@ -52,6 +59,8 @@ export interface AccountCreateInput {
   role?: AccountRole;
   /** Optional explicit account id (used when seeding accounts tied to owners). */
   id?: string;
+  /** Mandatory-enrollment policy: true forces authenticator setup before product use. */
+  authenticatorRequired?: boolean;
 }
 
 export interface AccountView {
@@ -60,11 +69,33 @@ export interface AccountView {
   displayName: string;
   role: AccountRole;
   createdAt: string;
+  /** True while the account must still enable its authenticator (product access gated). */
+  authenticatorRequired: boolean;
+  /**
+   * True while the account has not yet stored recovery question/answers.
+   * Product access stays gated until this is false.
+   */
+  recoveryRequired: boolean;
+  /** Where the account stands in the mandatory first-time setup. */
+  setupStage: AccountSetupStage;
+  /** True only when BOTH recovery questions and the authenticator are complete. */
+  setupComplete: boolean;
 }
 
 export class AuthenticationError extends BlueprintError {
   constructor(message: string) {
     super('AUTHENTICATION_FAILED', message);
+  }
+}
+
+/**
+ * Raised when recovery questions/answers are missing, malformed, or answered
+ * incorrectly. Callers present a uniform message so a wrong answer never
+ * reveals whether a question or the account exists.
+ */
+export class RecoveryError extends BlueprintError {
+  constructor(message: string) {
+    super('RECOVERY_FAILED', message);
   }
 }
 
@@ -86,6 +117,39 @@ export class AuthenticatorError extends BlueprintError {
   }
 }
 
+/**
+ * Thrown by `authenticate` when the password is correct but the account has an
+ * enabled authenticator, so a password alone must NEVER issue a session. The
+ * error carries the server-side sign-in challenge that the caller completes
+ * with a TOTP or recovery code via `completeLoginChallenge`.
+ */
+export class AuthenticatorChallengeRequiredError extends BlueprintError {
+  readonly challengeId: string;
+  readonly expiresAt: string;
+  constructor(challengeId: string, expiresAt: string) {
+    super('AUTHENTICATOR_CHALLENGE_REQUIRED', 'An authenticator code is required to complete sign-in.');
+    this.challengeId = challengeId;
+    this.expiresAt = expiresAt;
+  }
+}
+
+/**
+ * Server-side two-step sign-in state created when a password succeeds but the
+ * account requires its authenticator. Bound to the already-verified account,
+ * single-use, and capacity-limited against brute force.
+ */
+export interface LoginChallenge {
+  accountId: string;
+  createdAt: string;
+  expiresAt: string;
+  attempts: number;
+}
+
+/** How long a two-step sign-in challenge stays usable. */
+export const LOGIN_CHALLENGE_TTL_MS = 5 * 60 * 1000;
+/** Bad-code attempts allowed on one sign-in challenge before it is destroyed. */
+export const LOGIN_CHALLENGE_MAX_ATTEMPTS = 5;
+
 /** One hashed single-use recovery code for authenticator-loss recovery. */
 export interface RecoveryCodeRecord {
   hash: string;
@@ -96,6 +160,12 @@ export interface RecoveryCodeRecord {
 export interface RecoveryChallenge {
   accountId: string;
   expiresAt: string;
+  /**
+   * True once the recovery questions have been answered correctly. A challenge
+   * is only usable for password reset after this flips, so the answer step
+   * cannot be skipped.
+   */
+  answered: boolean;
 }
 
 /** Append-only account security event (login, logout, password, authenticator...). */
@@ -110,6 +180,64 @@ export interface SecurityEventRecord {
 export const RECOVERY_CODE_COUNT = 8;
 /** Maximum retained security events per account. */
 export const SECURITY_EVENT_LIMIT = 200;
+
+/**
+ * RECOVERY QUESTIONS AND ANSWERS
+ *
+ * A recovery question/answer pair is the account-recovery and
+ * sensitive-change proof. It is deliberately NOT a login credential: the
+ * authenticator remains the mandatory second factor for ordinary sign-in, and a
+ * recovery answer can never produce a session.
+ *
+ * Answers are NEVER stored in plaintext and are never returned by any read
+ * path. Each answer is hashed with scrypt under its own random salt, exactly
+ * like a password, so a stolen `accounts.json` yields nothing usable.
+ */
+export interface RecoveryQuestionCatalogEntry {
+  id: string;
+  question: string;
+}
+
+/** Fixed catalog offered at first-time setup. The text is not secret. */
+export const RECOVERY_QUESTION_CATALOG: readonly RecoveryQuestionCatalogEntry[] = [
+  { id: 'first_school', question: 'What was the name of the first school you attended?' },
+  { id: 'childhood_nickname', question: 'What was your childhood nickname?' },
+  { id: 'first_pet', question: 'What was the name of your first pet?' },
+  { id: 'mother_maiden', question: "What is your mother's maiden name?" },
+  { id: 'favourite_teacher', question: 'What was the name of your favourite teacher?' },
+  { id: 'first_car', question: 'What was the make of your first car?' },
+  { id: 'favourite_movie', question: 'What is the title of your favourite movie?' },
+  { id: 'birth_city', question: 'In what city were you born?' },
+  { id: 'favourite_book', question: 'What is the title of your favourite book?' },
+  { id: 'childhood_street', question: 'What was the name of the street you grew up on?' },
+] as const;
+
+/** Minimum number of distinct recovery questions an account must configure. */
+export const MIN_RECOVERY_QUESTIONS = 1;
+/** Maximum number of recovery questions an account may configure. */
+export const MAX_RECOVERY_QUESTIONS = 3;
+
+export interface RecoveryQuestionRecord {
+  id: string;
+  question: string;
+  /** scrypt hash of the normalized answer. Never reversible. */
+  answerHash: string;
+  /** Per-answer random salt. */
+  answerSalt: string;
+  createdAt: string;
+}
+
+export interface RecoveryAnswerInput {
+  questionId: string;
+  answer: string;
+}
+
+/** Where an account currently stands in the mandatory first-time setup. */
+export type AccountSetupStage = 'recovery' | 'authenticator' | 'complete';
+
+function normalizeRecoveryAnswer(raw: string): string {
+  return raw.trim().toLowerCase().replace(/\s+/g, ' ');
+}
 
 export interface AccountRegistryOptions {
   /** Session lifetime in milliseconds (default 1 hour). */
@@ -132,6 +260,8 @@ export interface AccountRegistryState {
   resetTokens: { hash: string; accountId: string; expiresAt: string }[];
   /** In-flight authenticator recovery challenges (persisted so restarts don't break recovery). */
   recoveryChallenges?: { id: string; challenge: RecoveryChallenge }[];
+  /** In-flight two-step (password + authenticator) sign-in challenges. */
+  loginChallenges?: { id: string; challenge: LoginChallenge }[];
   /** Append-only security events, capped at SECURITY_EVENT_LIMIT per account. */
   securityEvents?: SecurityEventRecord[];
 }
@@ -162,6 +292,13 @@ export class AccountRegistry {
   /**
    * Registers a new account, hashing the password with a freshly generated
    * per-user salt. Returns a hash-free view suitable for display.
+   *
+   * PLATFORM OWNER BOOTSTRAP: when the registry holds no accounts at all, the
+   * FIRST account created becomes the platform owner (`admin`). Every later
+   * signup is a plain `developer`. This is decided in the BACKEND from durable
+   * state, never from a client-supplied role, so signup can never be used for
+   * privilege escalation - and the owner-only infrastructure area is reachable
+   * on a genuinely fresh installation.
    */
   createAccount(input: AccountCreateInput): AccountView {
     const username = input.username.trim();
@@ -172,9 +309,17 @@ export class AccountRegistry {
     if (input.password.length < 8) {
       throw new AuthenticationError('Password must be at least 8 characters.');
     }
-    const role: AccountRole = input.role ?? 'developer';
+    const isFirstAccount = this.accounts.size === 0;
+    const role: AccountRole = input.role ?? (isFirstAccount ? 'admin' : 'developer');
     if (!ACCOUNT_ROLES.includes(role)) {
       throw new AuthenticationError(`Unknown role "${role}".`);
+    }
+    // A platform owner is singular. Once one exists, nothing may create another
+    // through any path, so the role boundary cannot be widened by signup.
+    if (role === 'admin' && this.platformOwnerId() !== null) {
+      throw new AuthenticationError(
+        'A Platform Owner already exists. Only one Platform Owner account is permitted.',
+      );
     }
     this.counter += 1;
     const id = input.id?.trim() && input.id.trim().length > 0
@@ -192,13 +337,72 @@ export class AccountRegistry {
       createdAt: new Date().toISOString(),
       passwordSalt: saltHex,
       passwordHash: hashPassword(input.password, saltHex),
+      authenticatorRequired: input.authenticatorRequired ?? false,
     };
     this.accounts.set(id, record);
     this.byUsername.set(username, id);
     return this.view(record);
   }
 
-  /** Authenticates a username/password and returns a fresh opaque session. */
+  /** The id of the platform owner, or null when no owner exists yet. */
+  platformOwnerId(): string | null {
+    for (const record of this.accounts.values()) {
+      if (record.role === 'admin') return record.id;
+    }
+    return null;
+  }
+
+  /** True when a Platform Owner account has already been created. */
+  hasPlatformOwner(): boolean {
+    return this.platformOwnerId() !== null;
+  }
+
+  /**
+   * FIRST-TIME PLATFORM OWNER SETUP.
+   *
+   * Creates the single Platform Owner account from the dedicated owner entry
+   * point. The role is fixed to `admin` here in the backend and can never be
+   * supplied by the client. It is refused once an owner already exists, so the
+   * owner entry point cannot be used to mint a second owner or to escalate a
+   * normal account.
+   *
+   * The returned account is NOT usable yet: `authenticatorRequired` is forced
+   * on, so the account is gated out of the product until it has created its
+   * recovery question/answers and enabled its authenticator.
+   */
+  createPlatformOwner(input: Omit<AccountCreateInput, 'role'>): AccountView {
+    if (this.hasPlatformOwner()) {
+      throw new AuthenticationError(
+        'A Platform Owner already exists. Sign in with the existing owner account instead of creating another.',
+      );
+    }
+    const view = this.createAccount({ ...input, role: 'admin', authenticatorRequired: true });
+    this.recordSecurityEvent(view.id, 'platform_owner.created', 'via owner entry point');
+    return view;
+  }
+
+  /**
+   * FIRST-TIME NORMAL USER SETUP.
+   *
+   * Creates a normal user account from the dedicated user entry point. The role
+   * is fixed to `developer` in the backend; a normal user can never become the
+   * owner through this path, whatever the client sends. Like the owner, the
+   * account is gated out of the product until recovery questions and the
+   * authenticator are complete.
+   */
+  createNormalUser(input: Omit<AccountCreateInput, 'role'>): AccountView {
+    const view = this.createAccount({ ...input, role: 'developer', authenticatorRequired: true });
+    this.recordSecurityEvent(view.id, 'account.created', 'via user entry point');
+    return view;
+  }
+
+  /**
+   * Authenticates a username/password. When the account has NO enabled
+   * authenticator a session is returned directly. When an authenticator IS
+   * enabled, a session is never created: `authenticate` raises
+   * AuthenticatorChallengeRequiredError carrying a server-side challenge that
+   * must be completed with a TOTP or recovery code.
+   */
   authenticate(username: string, password: string): Session {
     const id = this.byUsername.get(username.trim());
     if (id === undefined) {
@@ -208,11 +412,55 @@ export class AccountRegistry {
     if (!verifyPassword(password, record.passwordSalt, record.passwordHash)) {
       throw new AuthenticationError('Unknown username or invalid password.');
     }
+    if (record.authenticator?.enabled === true) {
+      const now = Date.now();
+      const challengeId = randomBytes(24).toString('hex');
+      const expiresAt = new Date(now + LOGIN_CHALLENGE_TTL_MS).toISOString();
+      this.loginChallenges.set(challengeId, {
+        accountId: record.id,
+        createdAt: new Date(now).toISOString(),
+        expiresAt,
+        attempts: 0,
+      });
+      throw new AuthenticatorChallengeRequiredError(challengeId, expiresAt);
+    }
+    return this.issueSession(record.id);
+  }
+
+  /**
+   * Completes a two-step sign-in by verifying a TOTP or recovery code against
+   * the pending challenge. Adds nothing to the session store until verified;
+   * the challenge is single-use and expires after LOGIN_CHALLENGE_TTL_MS.
+   */
+  completeLoginChallenge(challengeId: string, code: string): Session {
+    const challenge = this.loginChallenges.get(challengeId);
+    if (challenge === undefined || Date.now() > Date.parse(challenge.expiresAt)) {
+      this.loginChallenges.delete(challengeId);
+      throw new AuthenticationError('Sign-in challenge is invalid or has expired. Sign in again.');
+    }
+    if (!this.verifyAuthenticator(challenge.accountId, code)) {
+      challenge.attempts += 1;
+      if (challenge.attempts >= LOGIN_CHALLENGE_MAX_ATTEMPTS) {
+        this.loginChallenges.delete(challengeId);
+        this.recordSecurityEvent(
+          challenge.accountId,
+          'session.login_failed',
+          'Too many authenticator attempts.',
+        );
+        throw new AuthenticationError('Too many failed verification attempts. Sign in again.');
+      }
+      throw new AuthenticatorError('INVALID_CODE', 'That code is not valid. Try again.');
+    }
+    this.loginChallenges.delete(challengeId);
+    return this.issueSession(challenge.accountId);
+  }
+
+  private issueSession(accountId: string): Session {
     const now = Date.now();
     const token = randomBytes(32).toString('hex');
     const session: Session = {
       token,
-      accountId: record.id,
+      accountId,
       createdAt: new Date(now).toISOString(),
       expiresAt: new Date(now + this.sessionTtlMs).toISOString(),
     };
@@ -315,6 +563,36 @@ export class AccountRegistry {
   }
 
   /**
+   * CHANGE PASSWORD, recovery-authorized.
+   *
+   * Changes the password of an authenticated account after the account has
+   * correctly answered its recovery questions. The recovery answers are the
+   * authority for this sensitive change, so the current password is not
+   * required. Fails closed: a wrong or incomplete answer set changes nothing.
+   */
+  changePasswordWithRecovery(
+    accountId: string,
+    answers: RecoveryAnswerInput[],
+    newPassword: string,
+  ): AccountView {
+    const record = this.accounts.get(accountId);
+    if (record === undefined) throw new AuthenticationError('Unknown account.');
+    if (newPassword.length < 8) {
+      throw new AuthenticationError('New password must be at least 8 characters.');
+    }
+    if (!this.verifyRecoveryAnswers(accountId, answers)) {
+      this.recordSecurityEvent(accountId, 'password.change_rejected', 'recovery answers incorrect');
+      throw new RecoveryError('The recovery answers are not correct.');
+    }
+    const saltHex = randomBytes(16).toString('hex');
+    record.passwordSalt = saltHex;
+    record.passwordHash = hashPassword(newPassword, saltHex);
+    this.revokeAllOtherSessions(accountId, '');
+    this.recordSecurityEvent(accountId, 'password.changed', 'authorized by recovery answers');
+    return this.view(record);
+  }
+
+  /**
    * Issues a single-use password-reset token for an existing account.
    * Returns null for unknown usernames (callers decide enumeration posture).
    * The token is stored hashed with a short TTL; no email is involved.
@@ -357,6 +635,7 @@ export class AccountRegistry {
   // ── Authenticator (TOTP), recovery, and security events ────────────────────
 
   private readonly recoveryChallenges = new Map<string, RecoveryChallenge>();
+  private readonly loginChallenges = new Map<string, LoginChallenge>();
   private securityEvents: SecurityEventRecord[] = [];
 
   /** Records an account security event, capped per account (newest first). */
@@ -402,22 +681,100 @@ export class AccountRegistry {
   }
 
   /**
+   * Operator-controlled platform-owner designation.
+   *
+   * The first account on a fresh installation becomes the owner, but "first
+   * account" is only reachable while the registry is empty. Once durable state
+   * exists (an upgraded install, restored backup, or a data directory that
+   * already holds accounts) the owner-only infrastructure area would otherwise
+   * be unreachable, with no supported way to recover it.
+   *
+   * This is the supported recovery path: the platform operator sets
+   * `BF_PLATFORM_OWNER` to a username and the BACKEND promotes that account at
+   * boot. It is decided in the backend from the operator's environment, never
+   * from a client request, so it cannot be used for privilege escalation. The
+   * promotion is durable and is recorded as a security event.
+   */
+  promoteToPlatformOwner(username: string): AccountView | null {
+    const wanted = username.trim();
+    if (wanted.length === 0) return null;
+    const record = this.accounts.get(wanted);
+    if (record === undefined) return null;
+    if (record.role === 'admin') return this.view(record);
+    record.role = 'admin';
+    this.recordSecurityEvent(record.id, 'platform_owner_promoted', 'designated via BF_PLATFORM_OWNER');
+    return this.view(record);
+  }
+
+  /**
+   * True while the platform still requires this account to enroll its
+   * authenticator. The web layer answers 403 with `authenticator_setup_required`
+   * for every product route while this holds, so access cannot be bypassed by
+   * the SPA or direct API calls.
+   */
+  needsAuthenticatorSetup(accountId: string): boolean {
+    const record = this.accounts.get(accountId);
+    if (record === undefined) return false;
+    return record.authenticatorRequired === true && record.authenticator?.enabled !== true;
+  }
+
+  /**
    * Starts authenticator enrollment: generates the secret and provisioning URI.
    * Stays disabled until `enableAuthenticator` verifies a live code.
+   *
+   * Two callers exist and both are legitimate:
+   *  - FIRST-TIME SETUP: the account has no ENABLED authenticator yet, so it is
+   *    still inside its own setup wizard and the session is the authority. This
+   *    holds both before and after the recovery questions are created, because
+   *    recovery is an earlier step of the same wizard.
+   *  - CHANGE / RESET: the account already has an active authenticator, so
+   *    replacing it is a sensitive change and MUST be authorized by the
+   *    account's recovery answers (`setupAuthenticatorWithRecovery`).
+   * A direct call for an account with an active authenticator is refused, so
+   * the recovery-answer requirement cannot be skipped by calling the
+   * underlying method.
    */
   setupAuthenticator(accountId: string): { secret: string; otpauth: string } {
     const record = this.accounts.get(accountId);
     if (record === undefined) throw new AuthenticationError('Unknown account.');
     if (record.authenticator?.enabled === true) {
-      throw new AuthenticatorError(
-        'AUTHENTICATOR_ALREADY_ENABLED',
-        'Disable the current authenticator before enrolling a new one.',
+      throw new RecoveryError(
+        'Changing your authenticator requires answering your recovery questions.',
       );
+    }
+    return this.beginAuthenticatorSetup(record);
+  }
+
+  /**
+   * CHANGE / RESET AUTHENTICATOR, recovery-authorized.
+   *
+   * Starts a new authenticator enrollment for a fully set-up account after it
+   * correctly answers its recovery questions. The new authenticator only
+   * becomes active once `enableAuthenticator` verifies a live 6-digit code, so
+   * a mistyped code cannot lock the account out.
+   */
+  setupAuthenticatorWithRecovery(
+    accountId: string,
+    answers: RecoveryAnswerInput[],
+  ): { secret: string; otpauth: string } {
+    const record = this.accounts.get(accountId);
+    if (record === undefined) throw new AuthenticationError('Unknown account.');
+    if (!this.verifyRecoveryAnswers(accountId, answers)) {
+      this.recordSecurityEvent(accountId, 'authenticator.change_rejected', 'recovery answers incorrect');
+      throw new RecoveryError('The recovery answers are not correct.');
+    }
+    return this.beginAuthenticatorSetup(record);
+  }
+
+  private beginAuthenticatorSetup(record: AccountRecord): { secret: string; otpauth: string } {
+    if (record.authenticator?.enabled === true) {
+      record.authenticator = undefined;
+      this.recordSecurityEvent(record.id, 'authenticator.replaced', 'previous authenticator deactivated');
     }
     const secret = generateTotpSecret();
     record.authenticator = { secret, enabled: false };
     record.recoveryCodes = [];
-    this.recordSecurityEvent(accountId, 'authenticator.setup_started');
+    this.recordSecurityEvent(record.id, 'authenticator.setup_started');
     return { secret, otpauth: otpauthUrl(secret, record.username) };
   }
 
@@ -501,9 +858,65 @@ export class AccountRegistry {
     if (record === undefined || record.authenticator?.enabled !== true) return null;
     const challengeId = randomBytes(24).toString('hex');
     const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MS).toISOString();
-    this.recoveryChallenges.set(challengeId, { accountId: record.id, expiresAt });
+    this.recoveryChallenges.set(challengeId, { accountId: record.id, expiresAt, answered: false });
     this.recordSecurityEvent(record.id, 'authenticator.recovery_started');
     return { challengeId, expiresAt };
+  }
+
+  /**
+   * FORGOT PASSWORD, step 1: identifies the account and opens a recovery
+   * challenge. Returns a challenge for any real account that has recovery
+   * questions configured, and null for an unknown username. The caller must
+   * present a uniform response either way so the endpoint cannot be used to
+   * enumerate accounts.
+   */
+  beginPasswordRecovery(username: string): {
+    challengeId: string;
+    expiresAt: string;
+    questions: Array<{ id: string; question: string }>;
+  } | null {
+    const id = this.byUsername.get(username.trim().toLowerCase());
+    if (id === undefined) return null;
+    const record = this.accounts.get(id);
+    if (record === undefined) return null;
+    if ((record.recoveryQuestions ?? []).length < MIN_RECOVERY_QUESTIONS) return null;
+    const challengeId = randomBytes(24).toString('hex');
+    const expiresAt = new Date(Date.now() + RESET_TOKEN_TTL_MS).toISOString();
+    this.recoveryChallenges.set(challengeId, { accountId: record.id, expiresAt, answered: false });
+    this.recordSecurityEvent(record.id, 'password.recovery_started');
+    // The questions are a public catalog entry, not a secret, so they can be
+    // returned with the unguessable challenge. The ANSWERS never leave the server.
+    return { challengeId, expiresAt, questions: this.recoveryQuestionsOf(record.id) };
+  }
+
+  /**
+   * FORGOT PASSWORD, step 2: verifies the recovery answers for the challenge's
+   * account. On success the challenge is marked answered and a one-time reset
+   * token is issued, which is the only thing `resetPassword` will accept. A
+   * wrong answer leaves the challenge unanswered and issues nothing.
+   */
+  answerRecoveryChallenge(
+    challengeId: string,
+    answers: RecoveryAnswerInput[],
+  ): { resetToken: string; expiresAt: string } {
+    const challenge = this.recoveryChallenges.get(challengeId);
+    if (challenge === undefined || Date.now() > Date.parse(challenge.expiresAt)) {
+      this.recoveryChallenges.delete(challengeId);
+      throw new RecoveryError('This recovery request is invalid or has expired. Start again.');
+    }
+    if (challenge.answered) {
+      throw new RecoveryError('This recovery request has already been completed. Start again.');
+    }
+    if (!this.verifyRecoveryAnswers(challenge.accountId, answers)) {
+      this.recordSecurityEvent(challenge.accountId, 'password.recovery_answer_rejected');
+      // Uniform: never say whether the question or the answer was wrong.
+      throw new RecoveryError('The recovery answers are not correct.');
+    }
+    challenge.answered = true;
+    const token = this.requestPasswordReset(this.accounts.get(challenge.accountId)!.username);
+    if (token === null) throw new RecoveryError('Recovery failed. Start again.');
+    this.recordSecurityEvent(challenge.accountId, 'password.recovery_answers_accepted');
+    return { resetToken: token, expiresAt: challenge.expiresAt };
   }
 
   /**
@@ -538,6 +951,9 @@ export class AccountRegistry {
     for (const [hash, entry] of this.resetTokens) {
       if (now > Date.parse(entry.expiresAt)) this.resetTokens.delete(hash);
     }
+    for (const [id, challenge] of this.loginChallenges) {
+      if (now > Date.parse(challenge.expiresAt)) this.loginChallenges.delete(id);
+    }
   }
 
   /** Exports full registry state for durable persistence (hashes included). */
@@ -548,6 +964,7 @@ export class AccountRegistry {
       sessions: [...this.sessions.values()],
       resetTokens: [...this.resetTokens.entries()].map(([hash, entry]) => ({ hash, ...entry })),
       recoveryChallenges: [...this.recoveryChallenges.entries()].map(([id, challenge]) => ({ id, challenge })),
+      loginChallenges: [...this.loginChallenges.entries()].map(([id, challenge]) => ({ id, challenge })),
       securityEvents: [...this.securityEvents],
     };
   }
@@ -560,6 +977,7 @@ export class AccountRegistry {
     this.resetTokens.clear();
     this.counter = state.counter ?? 0;
     for (const record of state.accounts) {
+      record.authenticatorRequired = record.authenticatorRequired === true;
       this.accounts.set(record.id, record);
       this.byUsername.set(record.username, record.id);
     }
@@ -573,6 +991,10 @@ export class AccountRegistry {
     for (const { id, challenge } of state.recoveryChallenges ?? []) {
       if (Date.now() <= Date.parse(challenge.expiresAt)) this.recoveryChallenges.set(id, challenge);
     }
+    this.loginChallenges.clear();
+    for (const { id, challenge } of state.loginChallenges ?? []) {
+      if (Date.now() <= Date.parse(challenge.expiresAt)) this.loginChallenges.set(id, challenge);
+    }
     this.securityEvents = [...(state.securityEvents ?? [])];
   }
 
@@ -583,13 +1005,146 @@ export class AccountRegistry {
 
   /** Returns the account view for a record. */
   view(record: AccountRecord): AccountView {
+    const stage = this.setupStageOf(record);
     return {
       id: record.id,
       username: record.username,
       displayName: record.displayName,
       role: record.role,
       createdAt: record.createdAt,
+      authenticatorRequired: record.authenticatorRequired === true,
+      recoveryRequired: stage !== 'complete' && stage === 'recovery',
+      setupStage: stage,
+      setupComplete: stage === 'complete',
     };
+  }
+
+  /**
+   * Where the account stands in the mandatory first-time setup. The order is
+   * fixed and enforced: recovery questions first, then the authenticator. An
+   * account is only `complete` - and therefore only allowed into the product -
+   * when BOTH are done.
+   */
+  private setupStageOf(record: AccountRecord): AccountSetupStage {
+    if ((record.recoveryQuestions ?? []).length < MIN_RECOVERY_QUESTIONS) return 'recovery';
+    if (record.authenticatorRequired === true && record.authenticator?.enabled !== true) {
+      return 'authenticator';
+    }
+    return 'complete';
+  }
+
+  /** True while the account must still create its recovery question/answers. */
+  needsRecoverySetup(accountId: string): boolean {
+    const record = this.accounts.get(accountId);
+    if (record === undefined) return false;
+    return (record.recoveryQuestions ?? []).length < MIN_RECOVERY_QUESTIONS;
+  }
+
+  /** True until recovery questions AND the authenticator are both complete. */
+  needsSetup(accountId: string): boolean {
+    const record = this.accounts.get(accountId);
+    if (record === undefined) return false;
+    return this.setupStageOf(record) !== 'complete';
+  }
+
+  /** The stage an account is currently in, for driving the setup wizard. */
+  setupStageOfAccount(accountId: string): AccountSetupStage {
+    const record = this.accounts.get(accountId);
+    if (record === undefined) throw new AuthenticationError('Unknown account.');
+    return this.setupStageOf(record);
+  }
+
+  /**
+   * The recovery questions this account has configured. Only the question text
+   * is returned - never an answer, hash, or salt. Used to render the answer
+   * prompts during account recovery and sensitive changes.
+   */
+  recoveryQuestionsOf(accountId: string): Array<{ id: string; question: string }> {
+    const record = this.accounts.get(accountId);
+    if (record === undefined) throw new AuthenticationError('Unknown account.');
+    return (record.recoveryQuestions ?? []).map((entry) => ({ id: entry.id, question: entry.question }));
+  }
+
+  /**
+   * Stores the account's recovery question/answers. Answers are normalized and
+   * hashed with scrypt under a fresh per-answer salt; the plaintext answer is
+   * never stored, logged, or returned. Re-running this replaces the previous
+   * set, which is how an account may rotate its recovery questions.
+   */
+  configureRecoveryQuestions(accountId: string, answers: RecoveryAnswerInput[]): AccountView {
+    const record = this.accounts.get(accountId);
+    if (record === undefined) throw new AuthenticationError('Unknown account.');
+    if (answers.length < MIN_RECOVERY_QUESTIONS) {
+      throw new RecoveryError(
+        `Choose at least ${MIN_RECOVERY_QUESTIONS} recovery question and answer it.`,
+      );
+    }
+    if (answers.length > MAX_RECOVERY_QUESTIONS) {
+      throw new RecoveryError(`Choose at most ${MAX_RECOVERY_QUESTIONS} recovery questions.`);
+    }
+    const byId = new Map(RECOVERY_QUESTION_CATALOG.map((entry) => [entry.id, entry]));
+    const seen = new Set<string>();
+    const stored: RecoveryQuestionRecord[] = [];
+    for (const entry of answers) {
+      const catalog = byId.get(entry.questionId);
+      if (catalog === undefined) {
+        throw new RecoveryError('That recovery question is not offered by the platform.');
+      }
+      if (seen.has(entry.questionId)) {
+        throw new RecoveryError('Each recovery question may only be chosen once.');
+      }
+      seen.add(entry.questionId);
+      const answer = normalizeRecoveryAnswer(entry.answer ?? '');
+      if (answer.length < 3) {
+        throw new RecoveryError('Each recovery answer must be at least 3 characters.');
+      }
+      if (answer.length > 200) {
+        throw new RecoveryError('Each recovery answer must be 200 characters or fewer.');
+      }
+      const saltHex = randomBytes(16).toString('hex');
+      stored.push({
+        id: catalog.id,
+        question: catalog.question,
+        answerHash: hashPassword(answer, saltHex),
+        answerSalt: saltHex,
+        createdAt: new Date().toISOString(),
+      });
+    }
+    record.recoveryQuestions = stored;
+    // Detail is deliberately a count, never the question text or any answer.
+    this.recordSecurityEvent(record.id, 'recovery.questions_configured', `${stored.length} question(s)`);
+    return this.view(record);
+  }
+
+  /**
+   * Verifies a full set of recovery answers against the stored hashes in
+   * constant time per answer. Returns false - never throws - on any mismatch,
+   * a missing question, an unknown question id, or an account with no recovery
+   * questions configured. A wrong answer is indistinguishable from an unknown
+   * account to the caller.
+   */
+  verifyRecoveryAnswers(accountId: string, answers: RecoveryAnswerInput[]): boolean {
+    const record = this.accounts.get(accountId);
+    if (record === undefined) return false;
+    const stored = record.recoveryQuestions ?? [];
+    if (stored.length === 0) return false;
+    if (answers.length !== stored.length) return false;
+    let allMatched = true;
+    for (const expected of stored) {
+      const supplied = answers.find((a) => a.questionId === expected.id);
+      if (supplied === undefined) {
+        allMatched = false;
+        continue;
+      }
+      const actual = scryptSync(
+        normalizeRecoveryAnswer(supplied.answer ?? ''),
+        Buffer.from(expected.answerSalt, 'hex'),
+        64,
+      );
+      const wanted = Buffer.from(expected.answerHash, 'hex');
+      if (actual.length !== wanted.length || !timingSafeEqual(actual, wanted)) allMatched = false;
+    }
+    return allMatched;
   }
 }
 

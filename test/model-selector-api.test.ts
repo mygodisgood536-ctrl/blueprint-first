@@ -1,13 +1,16 @@
-import { describe, it } from 'node:test';
+﻿import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { writeFile } from 'node:fs/promises';
 import type { Express } from 'express';
 import { buildServer } from '../src/web/server.ts';
 import { ModelCatalogue } from '../src/ai/model-catalogue.ts';
 import { ModelsDevSource } from '../src/ai/models-dev-source.ts';
 import { OpenRouterProvider } from '../src/ai/openrouter-provider.ts';
 import { ProviderManager } from '../src/ai/provider-manager.ts';
+import { OpenCodeProvider } from '../src/ai/opencode/opencode-provider.ts';
+import { OpenCodeRuntime } from '../src/ai/opencode/opencode-runtime.ts';
 import type { DemoResult } from '../src/demo/main.ts';
-import { signupCookie, tempDataDir } from './helpers.ts';
+import { signupEnrolledCookie, tempDataDir } from './helpers.ts';
 
 /** Minimal fetch mock returning canned responses per URL. */
 function mockFetch(
@@ -84,17 +87,22 @@ describe('model selector API (honest surface, per-user isolation)', () => {
   it('serves the catalogue over GET /api/models with filters', async () => {
     const { url, close } = await buildTestServer();
     try {
-      const all = (await (await fetch(`${url}/api/models`)).json()) as { total: number };
+      const viewer = await signupEnrolledCookie(url, 'catalog_v');
+
+      const headers = { cookie: viewer };
+      const all = (await (await fetch(`${url}/api/models`, { headers })).json()) as { total: number };
       assert.equal(all.total, 3);
       const filtered = (await (
-        await fetch(`${url}/api/models?q=claude&accessCategory=paid`)
+        await fetch(`${url}/api/models?q=claude&accessCategory=paid`, { headers })
       ).json()) as { total: number };
       assert.equal(filtered.total, 1);
       const local = (await (
-        await fetch(`${url}/api/models?accessCategory=local`)
+        await fetch(`${url}/api/models?accessCategory=local`, { headers })
       ).json()) as { total: number };
       assert.equal(local.total, 0); // local models come from the runtime, not these sources
-      const stats = (await (await fetch(`${url}/api/models/stats`)).json()) as { totalModels: number };
+      const stats = (await (await fetch(`${url}/api/models/stats`, { headers })).json()) as {
+        totalModels: number;
+      };
       assert.equal(stats.totalModels, 3);
     } finally {
       await close();
@@ -119,7 +127,10 @@ describe('model selector API (honest surface, per-user isolation)', () => {
     const address = server.address();
     const port = typeof address === 'object' && address !== null ? address.port : 0;
     try {
-      const response = await fetch(`http://127.0.0.1:${port}/api/models`);
+      const viewer = await signupEnrolledCookie(`http://127.0.0.1:${port}`, 'catalog_fail_v');
+      const response = await fetch(`http://127.0.0.1:${port}/api/models`, {
+        headers: { cookie: viewer },
+      });
       assert.equal(response.status, 502);
       const body = (await response.json()) as { error: string };
       assert.ok(body.error.length > 0);
@@ -131,7 +142,7 @@ describe('model selector API (honest surface, per-user isolation)', () => {
   it('returns 404 for an unknown model and 401 without a session cookie on selection', async () => {
     const { url, close } = await buildTestServer();
     try {
-      const alice = await signupCookie(url, 'alice');
+      const alice = await signupEnrolledCookie(url, 'alice');
       const missing = await fetch(`${url}/api/models/anthropic/nope`);
       assert.equal(missing.status, 404);
       const noUser = await fetch(`${url}/api/models/selection`);
@@ -149,8 +160,8 @@ describe('model selector API (honest surface, per-user isolation)', () => {
   it('adds a credential without ever echoing the secret; isolates users', async () => {
     const { url, close } = await buildTestServer();
     try {
-      const alice = await signupCookie(url, 'alice');
-      const bob = await signupCookie(url, 'bob');
+      const alice = await signupEnrolledCookie(url, 'alice');
+      const bob = await signupEnrolledCookie(url, 'bob');
       const created = await fetch(`${url}/api/credentials`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', cookie: alice },
@@ -180,7 +191,7 @@ describe('model selector API (honest surface, per-user isolation)', () => {
   it('verifies a credential via a REAL key check and records the outcome', async () => {
     const { url, close } = await buildTestServer({ status: 200, body: { data: { label: 'k' } } });
     try {
-      const alice = await signupCookie(url, 'alice');
+      const alice = await signupEnrolledCookie(url, 'alice');
       const created = await fetch(`${url}/api/credentials`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', cookie: alice },
@@ -204,7 +215,7 @@ describe('model selector API (honest surface, per-user isolation)', () => {
   it('verify reports failure honestly on 401 (verified stays false)', async () => {
     const { url, close } = await buildTestServer({ status: 401, body: { message: 'No auth' } });
     try {
-      const dave = await signupCookie(url, 'dave');
+      const dave = await signupEnrolledCookie(url, 'dave');
       const created = await fetch(`${url}/api/credentials`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', cookie: dave },
@@ -231,8 +242,8 @@ describe('model selector API (honest surface, per-user isolation)', () => {
   it('selects a local model only via the real verification path', async () => {
     const { url, close } = await buildTestServer();
     try {
-      const alice = await signupCookie(url, 'alice');
-      const bob = await signupCookie(url, 'bob');
+      const alice = await signupEnrolledCookie(url, 'alice');
+      const bob = await signupEnrolledCookie(url, 'bob');
       const missing = await fetch(`${url}/api/models/select`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', cookie: alice },
@@ -266,7 +277,7 @@ describe('model selector API (honest surface, per-user isolation)', () => {
   it('select with openrouter without a credential returns 409 (CONFIGURED != AVAILABLE)', async () => {
     const { url, close } = await buildTestServer();
     try {
-      const erin = await signupCookie(url, 'erin');
+      const erin = await signupEnrolledCookie(url, 'erin');
       const response = await fetch(`${url}/api/models/select`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', cookie: erin },
@@ -282,10 +293,90 @@ describe('model selector API (honest surface, per-user isolation)', () => {
     }
   });
 
+  it(
+    'selects a REAL free OpenCode model with no user credential, and refuses any model the runtime does not expose',
+    async () => {
+      // Regression: `opencode` models are served by the installed runtime itself
+      // and need no per-user API key. Routing selection through the credential
+      // path made every genuinely free model unreachable (409 "no credential"),
+      // which blocked real AI execution entirely.
+      const catalogueJson = JSON.stringify({
+        opencode: {
+          id: 'opencode',
+          name: 'opencode',
+          models: {
+            'space-bunny-free': {
+              id: 'space-bunny-free',
+              name: 'Space Bunny (free)',
+              cost: { input: 0, output: 0 },
+              limit: { context: 1_048_576, output: 65_536 },
+              modalities: { input: ['text'], output: ['text'] },
+            },
+          },
+        },
+      });
+      const dir = await tempDataDir();
+      const cachePath = `${dir}/opencode-models.json`;
+      // `listModels` reads the runtime's persisted catalogue cache, so the double
+      // seeds it exactly as `opencode models --refresh` would have.
+      await writeFile(cachePath, catalogueJson, 'utf8');
+      const runtime = new OpenCodeRuntime({
+        executablePath: 'opencode',
+        disableFallback: true,
+        cachePath,
+        runner: async () => ({ stdout: catalogueJson, stderr: '', exitCode: 0 }),
+      });
+      const { url, close } = await buildTestServer(undefined, new OpenCodeProvider({ runtime }));
+      try {
+        const gina = await signupEnrolledCookie(url, 'gina');
+        const ok = await fetch(`${url}/api/models/select`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', cookie: gina },
+          body: JSON.stringify({ providerId: 'opencode', modelId: 'space-bunny-free' }),
+        });
+        const okText = await ok.text();
+        assert.equal(ok.status, 200, `unexpected failure: ${okText}`);
+        const state = JSON.parse(okText) as {
+          status: string;
+          providerId: string;
+          modelId: string;
+          connectionVerified: boolean;
+        };
+        assert.equal(state.status, 'connected');
+        assert.equal(state.providerId, 'opencode');
+        assert.equal(state.modelId, 'space-bunny-free');
+        assert.equal(state.connectionVerified, true);
+
+        // The exact selected model must be what is recorded: no silent switch.
+        const selection = await fetch(`${url}/api/models/selection`, {
+          headers: { cookie: gina },
+        });
+        assert.equal(
+          ((await selection.json()) as { selection: { modelId: string } | null }).selection?.modelId,
+          'space-bunny-free',
+        );
+
+        // A model the runtime does not actually expose must fail, not be substituted.
+        const bogus = await fetch(`${url}/api/models/select`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', cookie: gina },
+          body: JSON.stringify({ providerId: 'opencode', modelId: 'totally-not-a-real-model' }),
+        });
+        assert.equal(bogus.status, 409);
+        assert.match(
+          ((await bogus.json()) as { error: string }).error,
+          /not present in the real OpenCode catalogue/,
+        );
+      } finally {
+        await close();
+      }
+    },
+  );
+
   it('select for an unimplemented provider reports 501 honestly (no fake success)', async () => {
     const { url, close } = await buildTestServer();
     try {
-      const frank = await signupCookie(url, 'frank');
+      const frank = await signupEnrolledCookie(url, 'frank');
       const response = await fetch(`${url}/api/models/select`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', cookie: frank },
@@ -299,7 +390,10 @@ describe('model selector API (honest surface, per-user isolation)', () => {
   });
 });
 /** Builds the server with injected doubles (no live pipeline, no network). */
-async function buildTestServer(openRouterKeyFetch?: { status: number; body: unknown }): Promise<{
+async function buildTestServer(
+  openRouterKeyFetch?: { status: number; body: unknown },
+  opencodeProvider?: OpenCodeProvider,
+): Promise<{
   app: Express;
   close: () => Promise<void>;
   url: string;
@@ -312,6 +406,7 @@ async function buildTestServer(openRouterKeyFetch?: { status: number; body: unkn
     openRouterProvider: new OpenRouterProvider({ apiKey: 'sk-or-test-key-xyz', fetchImpl: or.fetch as never }),
   });
   const manager = new ProviderManager();
+  if (opencodeProvider !== undefined) manager.enableOpenCode(opencodeProvider);
   const localUp = mockFetch((url) =>
     url.endsWith('/models')
       ? { status: 200, body: localModelsPayload() }

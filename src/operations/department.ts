@@ -136,17 +136,8 @@ export async function runOperationsDepartment(
     auditorRationale: auditor.rationale,
   });
 
-  const advancedToDeployedVerified: string[] = [];
-  const docHalts: { id: string; haltedAt: string }[] = [];
-  for (const exp of scope) {
-    const implId = `${exp.baseId}-IMPL`;
-    if ((await services.store.get(implId)) !== null) {
-      const walk = await advanceDocPath(services.store, implId, 'DEPLOYED-VERIFIED');
-      if (walk.reachedTarget) advancedToDeployedVerified.push(implId);
-      else if (walk.haltedAt !== undefined) docHalts.push({ id: implId, haltedAt: walk.haltedAt });
-    }
-  }
-
+  // Evidence precedes the DoC advancement so every stamped gate is linked to
+  // the real deployment record that supports it.
   const evidence = await services.evidence.append({
     kind: 'inspection',
     summary:
@@ -155,6 +146,17 @@ export async function runOperationsDepartment(
     artifactIds: [mat.manifestId, ...mat.deployIds],
     producer: { kind: 'verifier', id: 'deploy-boss-01' },
   });
+
+  const advancedToDeployedVerified: string[] = [];
+  const docHalts: { id: string; haltedAt: string }[] = [];
+  for (const exp of scope) {
+    const implId = `${exp.baseId}-IMPL`;
+    if ((await services.store.get(implId)) !== null) {
+      const walk = await advanceDocPath(services.store, implId, 'DEPLOYED-VERIFIED', { evidenceId: evidence.id });
+      if (walk.reachedTarget) advancedToDeployedVerified.push(implId);
+      else if (walk.haltedAt !== undefined) docHalts.push({ id: implId, haltedAt: walk.haltedAt });
+    }
+  }
 
   return {
     status: 'passed',

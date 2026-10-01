@@ -18,6 +18,9 @@
 
 import { createHash } from 'node:crypto';
 import type { CoreServices } from '../core/services.ts';
+import type { Actor } from '../core/artifact.ts';
+import { createArtifact } from '../core/artifact.ts';
+import { syncArtifactToGraph } from '../core/graph.ts';
 import { DiscoveryParseError } from '../discovery/errors.ts';
 import { isObj } from '../discovery/parse-util.ts';
 import { extractJson } from '../discovery/prompt.ts';
@@ -29,7 +32,9 @@ export interface CouncilSeatDef {
   readonly lens: string;
 }
 
-/** Level-2 seat roster (subset of the §0.21 roster relevant at this level). */
+/** §0.21 roster: all fifteen specialist perspectives specified by the
+ *  authority, each with a distinct analytical lens. Every seat is a separate
+ *  AI call; no seat ever sees another seat's response. */
 export const COUNCIL_SEATS: readonly CouncilSeatDef[] = [
   {
     id: 'product-manager',
@@ -37,6 +42,13 @@ export const COUNCIL_SEATS: readonly CouncilSeatDef[] = [
     lens:
       'product intent and scope: does the subject serve the stated users and ' +
       'vision without inventing or dropping scope?',
+  },
+  {
+    id: 'business-analyst',
+    title: 'Business Analyst',
+    lens:
+      'requirements completeness and traceability: are functional and ' +
+      'non-functional requirements stated, bound to design, and conflict-free?',
   },
   {
     id: 'software-architect',
@@ -53,6 +65,34 @@ export const COUNCIL_SEATS: readonly CouncilSeatDef[] = [
       'state handling, usability gaps',
   },
   {
+    id: 'ui-designer',
+    title: 'UI Designer',
+    lens:
+      'visual and design-system consistency: component reuse, wireframe-to-visual ' +
+      'fidelity, accessibility-safe styling',
+  },
+  {
+    id: 'backend-engineer',
+    title: 'Backend Engineer',
+    lens:
+      'service and API implementation coherence: data flow, error handling, ' +
+      'transaction boundaries, contracts',
+  },
+  {
+    id: 'frontend-engineer',
+    title: 'Frontend Engineer',
+    lens:
+      'client implementation coherence: component wiring, state management, ' +
+      'loading/empty/error states',
+  },
+  {
+    id: 'database-architect',
+    title: 'Database Architect',
+    lens:
+      'data model coherence: entities, relationships, migrations, integrity ' +
+      'constraints, query feasibility',
+  },
+  {
     id: 'security-architect',
     title: 'Security Architect',
     lens:
@@ -60,11 +100,46 @@ export const COUNCIL_SEATS: readonly CouncilSeatDef[] = [
       'and abuse paths',
   },
   {
+    id: 'performance-engineer',
+    title: 'Performance Engineer',
+    lens:
+      'scalability and performance: caching, virtualization, async/background ' +
+      'work, failure under load',
+  },
+  {
+    id: 'devops-engineer',
+    title: 'DevOps Engineer',
+    lens:
+      'delivery and operations coherence: deployment units, monitoring, ' +
+      'rollback paths, environment parity',
+  },
+  {
     id: 'qa-engineer',
     title: 'QA Engineer',
     lens:
       'verification gaps: what is untestable, unspecified, or missing an ' +
       'error/success path',
+  },
+  {
+    id: 'accessibility-specialist',
+    title: 'Accessibility Specialist',
+    lens:
+      'accessibility completeness: keyboard, screen-reader, contrast, ' +
+      'focus management, reduced-motion',
+  },
+  {
+    id: 'compliance-specialist',
+    title: 'Compliance Specialist',
+    lens:
+      'regulatory and compliance coverage: records, retention, privacy, ' +
+      'data-handling obligations',
+  },
+  {
+    id: 'domain-expert',
+    title: 'Domain Expert',
+    lens:
+      'domain fidelity: business rules, terminology, real-world semantics of ' +
+      'the product, edge cases a generalist would miss',
   },
 ];
 
@@ -207,6 +282,63 @@ export interface DeliberationInput {
   readonly contextSummary: string;
   /** Artifact IDs the deliberation concerns (evidence anchoring). */
   readonly artifactIds?: readonly string[];
+  /** Project context. Omitted/deduced from the first artifactId when absent. */
+  readonly projectId?: string;
+}
+
+/**
+ * Materializes a Council finding that identifies a missing or incorrect
+ * artifact as an addressable FINDING artifact (spec §0.21: same artifact-ID
+ * and metadata discipline as a Red Team finding or Boss-reconstruction delta).
+ * Findings without an artifact target remain anchored in the seat evidence
+ * log only - they name no artifact and have nothing to materialize.
+ */
+async function materializeCouncilFinding(
+  services: CoreServices,
+  input: { readonly subject: string; readonly projectId?: string },
+  seat: SeatRecord,
+  finding: CouncilFinding,
+): Promise<void> {
+  const targets = [...new Set(finding.artifactIds.filter((id) => id !== seat.seatId))];
+  if (targets.length === 0) return;
+  let projectId = input.projectId;
+  if (projectId === undefined) {
+    const firstId = targets[0];
+    if (firstId !== undefined) {
+      const first = await services.store.get(firstId);
+      if (first?.projectId !== null && first?.projectId !== undefined) projectId = first.projectId;
+    }
+  }
+  const producer: Actor = { kind: 'ai', id: seat.providerId, modelId: seat.modelId };
+  const id = services.allocator.nextId('FINDING');
+  const findingArtifact = createArtifact({
+    id,
+    type: 'FINDING',
+    title: `Council ${seat.title} ${finding.severity}: ${finding.statement.slice(0, 72)}`,
+    description: finding.statement,
+    projectId,
+    actor: producer,
+    dependencies: targets,
+    attributes: {
+      findingKind: 'council-finding',
+      seatId: seat.seatId,
+      severity: finding.severity,
+      subject: input.subject,
+      statement: finding.statement,
+      artifactIds: targets,
+      evidenceId: seat.evidenceId,
+    },
+  });
+  await services.store.append(findingArtifact);
+  await services.evidence.append({
+    kind: 'inspection',
+    summary:
+      `Council seat ${seat.seatId} materialized finding ${id} ` +
+      `(${finding.severity}) over ${targets.join(', ')}.`,
+    artifactIds: [id],
+    producer,
+  });
+  syncArtifactToGraph(services.graph, findingArtifact);
 }
 
 export class ReasoningCouncil {
@@ -262,7 +394,7 @@ export class ReasoningCouncil {
         payloadRef: `sha256:${responseSha256}`,
         producer: { kind: 'ai', id: response.providerId, modelId: response.modelId },
       });
-      seats.push({
+      const record: SeatRecord = {
         seatId: seat.id,
         title: seat.title,
         stance: parsed.stance,
@@ -272,7 +404,19 @@ export class ReasoningCouncil {
         modelId: response.modelId,
         responseSha256,
         evidenceId: evidence.id,
-      });
+      };
+      seats.push(record);
+      // §0.21: findings naming specific artifacts are materialized with the
+      // same artifact-ID/metadata discipline as every other department finding.
+      for (const finding of record.findings) {
+        if (finding.artifactIds.length === 0) continue;
+        await materializeCouncilFinding(
+          this.services,
+          { subject: input.subject, projectId: input.projectId },
+          record,
+          finding,
+        );
+      }
       this.services.logger?.info('council.seat', {
         seatId: seat.id,
         stance: parsed.stance,

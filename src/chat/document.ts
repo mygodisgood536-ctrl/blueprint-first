@@ -35,6 +35,7 @@ export interface DocumentRef {
   readonly byteLength: number;
   readonly preview: string;
   readonly contentHash: string;
+  readonly createdAt: string;
 }
 
 /** Bounded view of a stored document (default for any list/preview endpoint). */
@@ -46,6 +47,7 @@ export interface DocumentView {
   readonly preview: string;
   /** Full content - present only when explicitly requested with `full=true`. */
   readonly content?: string;
+  readonly createdAt: string;
 }
 
 /** Result of classifying an incoming chat input. */
@@ -86,7 +88,7 @@ export interface DocumentStoreOptions {
 export class DocumentStore {
   private readonly maxChars: number;
   /** id -> { owner, content } (content held in backside memory; resolved lazily). */
-  private readonly byId = new Map<string, { ownerId: string; content: string }>();
+  private readonly byId = new Map<string, { ownerId: string; content: string; createdAt: string }>();
 
   constructor(options: DocumentStoreOptions = {}) {
     this.maxChars = options.maxChars ?? DEFAULT_DOCUMENT_MAX_CHARS;
@@ -112,11 +114,12 @@ export class DocumentStore {
       throw new ConfigurationError('Document ownerId must be a non-empty string.');
     }
     const id = newDocumentId();
-    this.byId.set(id, { ownerId, content });
-    return this.refOf(id, ownerId, content);
+    const createdAt = new Date().toISOString();
+    this.byId.set(id, { ownerId, content, createdAt });
+    return this.refOf(id, ownerId, content, createdAt);
   }
 
-  private refOf(id: string, ownerId: string, content: string): DocumentRef {
+  private refOf(id: string, ownerId: string, content: string, createdAt: string): DocumentRef {
     return {
       id,
       ownerId,
@@ -124,6 +127,7 @@ export class DocumentStore {
       byteLength: Buffer.byteLength(content, 'utf8'),
       preview: truncatePreview(content),
       contentHash: sha256(content),
+      createdAt,
     };
   }
 
@@ -149,6 +153,7 @@ export class DocumentStore {
       byteLength: Buffer.byteLength(record.content, 'utf8'),
       preview: truncatePreview(record.content),
       ...(options.full === true ? { content: record.content } : {}),
+      createdAt: record.createdAt ?? '',
     };
   }
 
@@ -170,6 +175,7 @@ export class DocumentStore {
         charLength: r.content.length,
         byteLength: Buffer.byteLength(r.content, 'utf8'),
         preview: truncatePreview(r.content),
+        createdAt: r.createdAt ?? '',
       }));
   }
 

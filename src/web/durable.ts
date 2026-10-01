@@ -47,6 +47,15 @@ export class JsonFileStore<T> {
     try {
       parsed = JSON.parse(raw);
     } catch (error) {
+      // A store whose bytes are entirely NUL or whitespace is unambiguously a
+      // write that never completed - not meaningful state. Windows can leave a
+      // pre-allocated, zero-filled file when a process is terminated mid-write.
+      // Treating that as "first run" lets the platform start and immediately
+      // rewrite a valid store. Any file with real content that fails to parse
+      // still fails closed, so genuine corruption is never silently ignored.
+      if (raw.length > 0 && /^[\0\s]+$/.test(raw)) {
+        return null;
+      }
       throw new BlueprintError(
         'STORE_CORRUPT',
         `Durable store file ${this.filePath} is not valid JSON: ${(error as Error).message}`,

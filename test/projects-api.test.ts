@@ -1,5 +1,5 @@
-/**
- * Stage 6 — Projects: list API, create, workspace detail, settings (PUT),
+﻿/**
+ * Stage 6 â€” Projects: list API, create, workspace detail, settings (PUT),
  * stage run, isolation, delete, and iteration persistence.
  *
  * Exercises the REAL web layer over a durable artifact store + a real
@@ -24,7 +24,8 @@ import { ProjectRegistry } from '../src/project/registry.ts';
 import { AiRouter } from '../src/ai/router.ts';
 import { ScriptedProvider } from '../src/ai/scripted-provider.ts';
 import type { CoreServices } from '../src/core/services.ts';
-import { tempDataDir, signupCookie, loginCookie } from './helpers.ts';
+import { tempDataDir, signupCookie, signupEnrolledCookie, loginTOTPCookie, completeSetup } from './helpers.ts';
+import { totpNow } from '../src/account/totp.ts';
 
 interface ServerHandle {
   app: Express;
@@ -35,6 +36,48 @@ interface ServerHandle {
 async function buildProjectServer(dataDir: string): Promise<ServerHandle> {
   const allocator = new ArtifactIdAllocator();
   const store = new JsonFileArtifactStore({ filePath: join(dataDir, 'artifacts.json'), allocator });
+  await store.init();
+  const graph = new KnowledgeGraph();
+  const evidence = new MemoryEvidenceLog();
+  const router = new AiRouter();
+  const scripted = new ScriptedProvider({ rules: [] });
+  router.register(scripted).setDefaultProvider('scripted');
+  const services: CoreServices = { store, allocator, graph, evidence, router };
+  const registry = new ProjectRegistry(services);
+  const result = {
+    baseline: { projectId: 'demo-project', totalArtifacts: 0 },
+    registry,
+    services,
+    evidence,
+    store,
+    projectMode: 'full-product',
+  } as unknown as DemoResult;
+
+  const { app } = await buildServer({
+    result,
+    providerManager: new ProviderManager(),
+    dataDir,
+  });
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise<void>((resolve) => server.once('listening', () => resolve()));
+  const address = server.address();
+  const port = typeof address === 'object' && address !== null ? address.port : 0;
+  return {
+    app,
+    url: `http://127.0.0.1:${port}`,
+    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
+  };
+}
+
+/**
+ * Builds a server whose artifact store is FRESH (a brand-new file), simulating
+ * the real deployment where runDemoPipeline rebuilds the store from scratch on
+ * boot. Only the durable project snapshot (dataDir/web-projects.json) can bring
+ * web-created projects back into existence after a restart.
+ */
+async function buildProjectServerFreshStore(dataDir: string, artifactFile: string): Promise<ServerHandle> {
+  const allocator = new ArtifactIdAllocator();
+  const store = new JsonFileArtifactStore({ filePath: join(dataDir, artifactFile), allocator });
   await store.init();
   const graph = new KnowledgeGraph();
   const evidence = new MemoryEvidenceLog();
@@ -84,9 +127,9 @@ async function j(url: string, method: string, path: string, cookie?: string | nu
 }
 
 async function newUser(url: string, username: string): Promise<string> {
-  return await signupCookie(url, username);
+  return await signupEnrolledCookie(url, username);
 }
-describe('Stage 6 — Projects API (real registry + durable store)', () => {
+describe('Stage 6 â€” Projects API (real registry + durable store)', () => {
   it('full lifecycle: create, list, detail, update, run stage, delete', async () => {
     const dataDir = await tempDataDir();
     const s = await buildProjectServer(dataDir);
@@ -118,7 +161,7 @@ describe('Stage 6 — Projects API (real registry + durable store)', () => {
       assert.ok(Array.isArray(stages) && stages.length > 0);
       assert.ok(stages.some((st) => st.stageId === 'discovery' && st.inScope === true));
 
-      // Update title + mode (PUT — the 6.4 backend gap fix)
+      // Update title + mode (PUT â€” the 6.4 backend gap fix)
       const upd = await j(s.url, 'PUT', `/api/projects/${id}`, cookie, {
         title: 'Alpha Renamed',
         mode: 'design-plus-code',
@@ -238,10 +281,14 @@ describe('Stage 6 — Projects API (real registry + durable store)', () => {
 
   it('iteration persistence: project survives a server restart on the same data dir', async () => {
     const dataDir = mkdtempSync(join(tmpdir(), 'nexona-s6-persist-'));
+    // Servers are closed in a finally so an assertion failure can never leak a
+    // listener and hang the test process instead of reporting the failure.
+    let s1: Awaited<ReturnType<typeof buildProjectServer>> | null = null;
     try {
-      const s1 = await buildProjectServer(dataDir);
-      const alice = await newUser(s1.url, 'alice_persist');
-      const created = await j(s1.url, 'POST', '/api/projects', alice, {
+      s1 = await buildProjectServer(dataDir);
+      const aliceCookie = await signupCookie(s1.url, 'alice_persist');
+      const { secret } = await completeSetup(s1.url, aliceCookie);
+      const created = await j(s1.url, 'POST', '/api/projects', aliceCookie, {
         name: 'Persistent Project',
         vision: 'A vision that will survive a restart for validation purposes.',
         mode: 'design-plus-code',
@@ -249,11 +296,12 @@ describe('Stage 6 — Projects API (real registry + durable store)', () => {
       assert.equal(created.status, 201, JSON.stringify(created.body));
       const id = (created.body.project as unknown as { id: string }).id;
       await s1.close();
+      s1 = null;
 
       // Fresh server instance on the SAME data dir.
       const s2 = await buildProjectServer(dataDir);
       try {
-        const amBack = await loginCookie(s2.url, 'alice_persist');
+        const amBack = await loginTOTPCookie(s2.url, 'alice_persist', 'test-password-1', totpNow(secret)!);
         const list = await j(s2.url, 'GET', '/api/projects', amBack);
         const projects = (list.body.projects ?? []) as { id: string; title: string }[];
         assert.ok(projects.some((p) => p.id === id), JSON.stringify(list.body));
@@ -264,7 +312,54 @@ describe('Stage 6 — Projects API (real registry + durable store)', () => {
         await s2.close();
       }
     } finally {
+      if (s1 !== null) await s1.close();
+      rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+
+  it('real-boot persistence: web projects replay into a freshly rebuilt store', async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), 'nexona-s6-replay-'));
+    let s1: Awaited<ReturnType<typeof buildProjectServer>> | null = null;
+    try {
+      s1 = await buildProjectServer(dataDir);
+      const aliceCookie = await signupCookie(s1.url, 'alice_replay');
+      const { secret } = await completeSetup(s1.url, aliceCookie);
+      const created = await j(s1.url, 'POST', '/api/projects', aliceCookie, {
+        name: 'Replay Project',
+        vision: 'A vision that must survive a store-rebuild for validation purposes.',
+        mode: 'design-plus-code',
+      });
+      assert.equal(created.status, 201, JSON.stringify(created.body));
+      const id = (created.body.project as unknown as { id: string }).id;
+      await s1.close();
+      s1 = null;
+
+      // Restart with a BRAND-NEW artifact store (simulating runDemoPipeline
+      // rebuilding blueprint-store.json from scratch). Only the durable
+      // snapshot can restore the project.
+      const s2 = await buildProjectServerFreshStore(dataDir, 'rebuilt-artifacts.json');
+      try {
+        const amBack = await loginTOTPCookie(s2.url, 'alice_replay', 'test-password-1', totpNow(secret)!);
+        const list = await j(s2.url, 'GET', '/api/projects', amBack);
+        const projects = (list.body.projects ?? []) as { id: string; title: string }[];
+        assert.ok(projects.some((p) => p.id === id), JSON.stringify(list.body));
+
+        // The replayed artifact must still be mutable (update + stage run + delete).
+        const upd = await j(s2.url, 'PUT', `/api/projects/${id}`, amBack, { title: 'Replay Renamed' });
+        assert.equal(upd.status, 200, JSON.stringify(upd.body));
+        const detail = await j(s2.url, 'GET', `/api/projects/${id}`, amBack);
+        assert.equal((detail.body as unknown as { title: string }).title, 'Replay Renamed');
+        const run = await j(s2.url, 'POST', `/api/projects/${id}/run/discovery`, amBack);
+        assert.equal(run.status, 200, JSON.stringify(run.body));
+        const del = await j(s2.url, 'DELETE', `/api/projects/${id}`, amBack);
+        assert.equal(del.status, 204, `status=${del.status}`);
+      } finally {
+        await s2.close();
+      }
+    } finally {
+      if (s1 !== null) await s1.close();
       rmSync(dataDir, { recursive: true, force: true });
     }
   });
 });
+

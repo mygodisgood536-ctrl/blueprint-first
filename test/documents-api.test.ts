@@ -1,10 +1,11 @@
-import { describe, it } from 'node:test';
+﻿import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildServer } from '../src/web/server.ts';
 import { DocumentStore, DEFAULT_DOCUMENT_MAX_CHARS } from '../src/chat/document.ts';
 import { ProviderManager } from '../src/ai/provider-manager.ts';
 import type { DemoResult } from '../src/demo/main.ts';
 import { signupCookie, tempDataDir } from './helpers.ts';
+import { completeSetup } from './helpers.ts';
 import { join } from 'node:path';
 import { ArtifactIdAllocator } from '../src/core/id-allocator.ts';
 import { KnowledgeGraph } from '../src/core/graph.ts';
@@ -56,6 +57,7 @@ describe('documents API (Stage 7 frontend surface)', () => {
     const { url, close } = await buildDocServer();
     try {
       const alice = await signupCookie(url, 'alice');
+      await completeSetup(url, alice);
       const text = 'Hello, brief!'.repeat(50);
       const expected = text.length;
       const { body, contentType } = makeMultipart('file', 'brief.txt', text);
@@ -91,6 +93,7 @@ describe('documents API (Stage 7 frontend surface)', () => {
     const { url, close } = await buildDocServer();
     try {
       const alice = await signupCookie(url, 'alice');
+      await completeSetup(url, alice);
       const { body, contentType } = makeMultipart('file', 'empty.txt', '   \n  ');
       const up = await fetch(`${url}/api/documents/upload`, { method: 'POST', headers: { cookie: alice, 'content-type': contentType, 'content-length': String(body.length) }, body });
       assert.equal(up.status, 400);
@@ -104,6 +107,8 @@ describe('documents API (Stage 7 frontend surface)', () => {
     try {
       const alice = await signupCookie(url, 'alice');
       const bob = await signupCookie(url, 'bob');
+      await completeSetup(url, alice);
+      await completeSetup(url, bob);
       const longText = 'x'.repeat(DEFAULT_DOCUMENT_MAX_CHARS + 10);
       const ingest = await fetch(`${url}/api/chat/ingest`, { method: 'POST', headers: { 'content-type': 'application/json', cookie: alice }, body: JSON.stringify({ text: longText }) });
       const { documentRef } = (await ingest.json()) as { documentRef: { id: string } };
@@ -122,6 +127,7 @@ describe('documents API (Stage 7 frontend surface)', () => {
     const { url, close } = await buildDocServer();
     try {
       const alice = await signupCookie(url, 'alice');
+      await completeSetup(url, alice);
       const longVision = 'A long, deliberate vision describing the system. '.repeat(200);
       assert.ok(longVision.length >= DEFAULT_DOCUMENT_MAX_CHARS);
       const ingest = await fetch(`${url}/api/chat/ingest`, { method: 'POST', headers: { 'content-type': 'application/json', cookie: alice }, body: JSON.stringify({ text: longVision }) });
@@ -141,10 +147,12 @@ describe('documents API (Stage 7 frontend surface)', () => {
     const { url, close } = await buildDocServer();
     try {
       const alice = await signupCookie(url, 'alice');
+      await completeSetup(url, alice);
       const longVision = 'y'.repeat(DEFAULT_DOCUMENT_MAX_CHARS + 10);
       const ingest = await fetch(`${url}/api/chat/ingest`, { method: 'POST', headers: { 'content-type': 'application/json', cookie: alice }, body: JSON.stringify({ text: longVision }) });
       const { documentRef } = (await ingest.json()) as { documentRef: { id: string } };
       const bob = await signupCookie(url, 'bob');
+      await completeSetup(url, bob);
       const created = await fetch(`${url}/api/projects`, { method: 'POST', headers: { 'content-type': 'application/json', cookie: bob }, body: JSON.stringify({ name: 'Borrowed', vision: longVision, mode: 'design-only', visionDocumentId: documentRef.id }) });
       assert.equal(created.status, 400);
     } finally {
@@ -152,3 +160,5 @@ describe('documents API (Stage 7 frontend surface)', () => {
     }
   });
 });
+
+

@@ -27,7 +27,7 @@ import type {
   ModelCapabilities,
   ConnectionTestResult,
 } from './provider-metadata.ts';
-import { ProviderHttpError } from './models-dev-source.ts';
+import { ProviderHttpError } from '../core/errors.ts';
 
 export const LOCAL_PROVIDER_ID = 'local';
 /** Runtimes known to serve the OpenAI-compatible surface this module speaks. */
@@ -141,6 +141,8 @@ export class LocalProvider {
       ...(request.maxTokens !== undefined ? { max_tokens: request.maxTokens } : {}),
     });
     const controller = new AbortController();
+    const onExternalAbort = (): void => controller.abort();
+    request.signal?.addEventListener('abort', onExternalAbort, { once: true });
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     let raw: Awaited<ReturnType<FetchFn>>;
     try {
@@ -152,6 +154,7 @@ export class LocalProvider {
       });
     } finally {
       clearTimeout(timer);
+      request.signal?.removeEventListener('abort', onExternalAbort);
     }
     if (!raw.ok) {
       const text = await raw.text();
@@ -186,10 +189,15 @@ export class LocalProvider {
               : undefined,
         }
       : undefined;
+    // The local runtime reports which model actually served the request; when
+    // it differs from the requested model, both identities are recorded.
+    const servedModel =
+      typeof json['model'] === 'string' && json['model'] !== '' ? json['model'] : model;
     return {
       content,
       providerId: this.id,
-      modelId: model,
+      modelId: servedModel,
+      ...(model !== servedModel ? { requestedModelId: model } : {}),
       ...(finishReason !== undefined ? { finishReason } : {}),
       ...(usage !== undefined ? { usage } : {}),
       ...(request.requestId !== undefined ? { requestId: request.requestId } : {}),

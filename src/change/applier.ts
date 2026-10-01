@@ -77,10 +77,21 @@ function performChange(unit: DeployedUnit, scope: RemediationScope): DeployedUni
   // any future re-verifier can re-derive the same hash.
   switch (scope.changeKind) {
     case 'config_restoration': {
-      // Restoration returns the unit to a known-good configuration by
-      // appending a config-restored anchor to the existing configHash.
-      const newConfigHash = createHash('sha256').update(unit.configHash + '\u0000config-restored').digest('hex');
-      return { ...unit, configHash: newConfigHash };
+      // Restoration returns the unit to its known-good configuration. The
+      // deploy worker records the certified config anchor (knownGoodConfigHash),
+      // so a drifted unit is genuinely restored to that anchor and the
+      // application hash captures a real before/after. Units constructed
+      // without the anchor (test fixtures) fall back to a deterministic
+      // hash weld so the change is still attributable.
+      if (unit.knownGoodConfigHash === undefined) {
+        const newConfigHash = createHash('sha256').update(unit.configHash + '\u0000config-restored').digest('hex');
+        return { ...unit, configHash: newConfigHash };
+      }
+      return {
+        ...unit,
+        configHash: unit.knownGoodConfigHash,
+        restoredFromHash: unit.configHash,
+      };
     }
     case 'cache_invalidation': {
       const newConfigHash = createHash('sha256').update(unit.configHash + '\u0000cache-invalidated').digest('hex');

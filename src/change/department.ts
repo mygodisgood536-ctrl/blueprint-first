@@ -32,7 +32,7 @@ export type ChangeDepartmentResult =
     }
   | {
       readonly status: 'REJECTED';
-      readonly reason: 'OUT_OF_AUTHORIZED_SCOPE' | 'BUDGET_EXHAUSTED' | 'INDEPENDENCE_VIOLATION' | 'AUDIT_HASH_MISMATCH' | 'INVALID_INPUT';
+      readonly reason: 'OUT_OF_AUTHORIZED_SCOPE' | 'DRIFT_NOT_CONFIRMED' | 'SCOPE_MISMATCH' | 'INDEPENDENCE_VIOLATION' | 'AUDIT_HASH_MISMATCH' | 'INVALID_INPUT';
       readonly trail: RemediationAuditTrail;
     };
 
@@ -72,13 +72,25 @@ export async function runSafeChangeDepartment(
     return { status: 'REJECTED', reason: 'INDEPENDENCE_VIOLATION', trail: { ...trailBase, finalStatus: 'REJECTED' } };
   }
   if (boss.verdict === 'rejected') {
-    return { status: 'REJECTED', reason: boss.withinAuthorizedScope ? 'BUDGET_EXHAUSTED' : 'OUT_OF_AUTHORIZED_SCOPE', trail: { ...trailBase, finalStatus: 'REJECTED' } };
+    return {
+      status: 'REJECTED',
+      reason: boss.withinAuthorizedScope
+        ? (boss.driftConfirmed ? 'SCOPE_MISMATCH' : 'DRIFT_NOT_CONFIRMED')
+        : 'OUT_OF_AUTHORIZED_SCOPE',
+      trail: { ...trailBase, finalStatus: 'REJECTED' },
+    };
   }
   if (!auditor.hashMatch) {
     return { status: 'REJECTED', reason: 'AUDIT_HASH_MISMATCH', trail: { ...trailBase, finalStatus: 'REJECTED' } };
   }
   if (auditor.decision.verdict === 'rejected') {
-    return { status: 'REJECTED', reason: auditor.decision.withinAuthorizedScope ? 'BUDGET_EXHAUSTED' : 'OUT_OF_AUTHORIZED_SCOPE', trail: { ...trailBase, finalStatus: 'REJECTED' } };
+    return {
+      status: 'REJECTED',
+      reason: auditor.decision.withinAuthorizedScope
+        ? (auditor.decision.driftConfirmed ? 'SCOPE_MISMATCH' : 'DRIFT_NOT_CONFIRMED')
+        : 'OUT_OF_AUTHORIZED_SCOPE',
+      trail: { ...trailBase, finalStatus: 'REJECTED' },
+    };
   }
   // The trail to materialize depends on whether we are applying: if so, we
   // want the CHANGE artifact in the chain, so we materialize ONCE at the

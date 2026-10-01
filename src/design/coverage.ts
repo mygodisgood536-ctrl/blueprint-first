@@ -113,12 +113,17 @@ export function assessDesignCoverage(input: ProjectDesignCoverageInput): DesignC
   const required = requiredDesignDimensionsFor(input.mode);
   const coveredList: DesignCoverageDimension[] = allDimensions.filter((d) => covered.has(d));
   const missing: DesignCoverageDimension[] = required.filter((d) => !covered.has(d));
-  const content = allDimensions.join('|');
+  // The assessment hash covers the ACTUAL facts of the assessment (which
+  // dimensions are covered vs missing), not the static dimension list, so a
+  // change in coverage always changes the hash.
+  const facts = allDimensions
+    .map((d) => `${d}:${covered.has(d) ? 'covered' : 'missing'}`)
+    .join('|');
   return {
     allDimensions,
     covered: coveredList,
     missing,
-    assessmentHash: `sha256:${sha256Hex(content)}`,
+    assessmentHash: `sha256:${sha256Hex(facts)}`,
   };
 }
 
