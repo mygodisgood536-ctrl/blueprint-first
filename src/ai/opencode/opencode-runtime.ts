@@ -39,12 +39,46 @@ export function defaultOpenCodeScratchDir(): string {
 }
 
 export class OpenCodeError extends Error {
-  readonly detail?: Readonly<{ exitCode?: number; stderrTail?: string }>;
-  constructor(message: string, detail?: Readonly<{ exitCode?: number; stderrTail?: string }>) {
+  readonly detail?: Readonly<{ exitCode?: number; stderrTail?: string; reportedError?: string }>;
+  constructor(message: string, detail?: Readonly<{ exitCode?: number; stderrTail?: string; reportedError?: string }>) {
     super(message);
     this.name = 'OpenCodeError';
     this.detail = detail;
   }
+}
+
+/**
+ * Extracts the REAL error opencode reported in its JSON event stream.
+ *
+ * Verified against the live stream: a failing model emits
+ *   {"type":"error", ...,"error":{"name":"UnknownError",
+ *     "data":{"message":"Unexpected server error. Check server logs for details.",
+ *     "ref":"err_60f91e46"}}}
+ * on STDOUT, and NOTHING on stderr. Returns null when the run reported no
+ * error event, so a clean run is never given a fabricated cause.
+ */
+export function parseRunError(stdout: string): string | null {
+  for (const rawLine of stdout.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (line === '') continue;
+    let event: unknown;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (!isRecord(event) || event['type'] !== 'error') continue;
+    const err = event['error'];
+    if (!isRecord(err)) return 'opencode reported an error event with no detail';
+    const name = typeof err['name'] === 'string' ? err['name'] : 'Error';
+    const data = err['data'];
+    const dataMsg = isRecord(data) && typeof data['message'] === 'string' ? data['message'] : null;
+    const ref = isRecord(data) && typeof data['ref'] === 'string' ? data['ref'] : null;
+    const parts = [`${name}${dataMsg !== null ? `: ${dataMsg}` : ''}`];
+    if (ref !== null) parts.push(`(ref ${ref})`);
+    return parts.join(' ');
+  }
+  return null;
 }
 
 /** Token bill reported by a real step_finish event. */
@@ -319,16 +353,35 @@ export class OpenCodeRuntime {
     const output = await this.execute(args, `${options.providerId}/${options.modelId}`, prompt, options.signal, options.onProgress);
     const parsed = parseRunJson(output.stdout);
     const durationMs = Date.now() - started;
+    // `opencode run --format json` reports provider/runtime failures as a
+    // STRUCTURED EVENT ON STDOUT ({"type":"error", ...}), while stderr stays
+    // EMPTY. Reading only stderr reported a bare "exited 1" with no cause,
+    // which is unusable for failure classification (§114) and made a genuine
+    // upstream error indistinguishable from "model unavailable".
+    //
+    // The real reported error is therefore extracted from the stream and
+    // surfaced verbatim - never invented, never re-labelled.
+    const reportedError = parseRunError(output.stdout);
     if (output.exitCode !== 0) {
+      const cause = reportedError ?? lastStderrLine(output.stderr);
       throw new OpenCodeError(
-        `opencode run exited ${output.exitCode}${lastStderrLine(output.stderr) ? `: ${lastStderrLine(output.stderr)}` : ''}.`,
-        { exitCode: output.exitCode, stderrTail: tail(output.stderr, 500) },
+        `opencode run ${model} exited ${output.exitCode}${cause ? `: ${cause}` : '.'}`,
+        {
+          exitCode: output.exitCode,
+          stderrTail: tail(output.stderr, 500),
+          ...(reportedError !== null ? { reportedError } : {}),
+        },
       );
     }
     if (parsed.text.join('').trim() === '') {
+      const cause = reportedError ?? lastStderrLine(output.stderr);
       throw new OpenCodeError(
-        `opencode run ${model} completed with no assistant text${parsed.finishReason ? ` (finishReason: ${parsed.finishReason})` : ''}${lastStderrLine(output.stderr) ? `; ${lastStderrLine(output.stderr)}` : ''}.`,
-        { exitCode: output.exitCode, stderrTail: tail(output.stderr, 500) },
+        `opencode run ${model} completed with no assistant text${parsed.finishReason ? ` (finishReason: ${parsed.finishReason})` : ''}${cause ? `; ${cause}` : ''}.`,
+        {
+          exitCode: output.exitCode,
+          stderrTail: tail(output.stderr, 500),
+          ...(reportedError !== null ? { reportedError } : {}),
+        },
       );
     }
     return {
@@ -392,6 +445,30 @@ export class OpenCodeRuntime {
         cwd: this.scratchDir,
         env: { ...process.env, PATH: process.env['PATH'] ?? '', ...this.extraEnv },
         windowsHide: true,
+        // STDIN MUST BE CLOSED - THIS IS THE FIX.
+        //
+        // `spawn()` without an explicit `stdio` gives the child a stdin PIPE.
+        // The platform never writes to it and never ends it, so the pipe stays
+        // open forever. opencode reads stdin during startup, blocks on it, and
+        // therefore NEVER issues the model request: no stdout, no stderr, no
+        // exit - the process simply hangs until the no-progress rule kills it.
+        //
+        // This was proven by an isolated A/B against the same executable,
+        // model and prompt, changing ONLY this spawn option:
+        //   stdin = open pipe (platform's previous behaviour)
+        //       -> first output: never; total: 120000ms; killed; no text
+        //   stdin = 'ignore'
+        //       -> first output: 20905ms; total: 21570ms; exit 0;
+        //          text "PLATFORM_TEST_OK"
+        //
+        // An interactive manual session appears to work precisely because the
+        // console supplies stdin instead of an unended pipe, which is why this
+        // looked like a model/provider/network problem for so long.
+        //
+        // 'ignore' (not 'inherit') is deliberate: the run must never be able to
+        // block on, or consume, the platform server's own console/stdin, which
+        // would be a cross-run interference hazard in a long-lived server.
+        stdio: ['ignore', 'pipe', 'pipe'],
       });
       let stdout = '';
       let stderr = '';

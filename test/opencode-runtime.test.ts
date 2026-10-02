@@ -14,6 +14,7 @@ import {
   OpenCodeError,
   OpenCodeRuntime,
   normalizeCatalogCache,
+  parseRunError,
   parseRunJson,
 } from '../src/ai/opencode/opencode-runtime.ts';
 
@@ -124,6 +125,140 @@ describe('normalizeCatalogCache (verified models.json shape)', () => {
 
   it('throws on a non-JSON cache instead of guessing', () => {
     assert.throws(() => normalizeCatalogCache('models.json', '{not json'), OpenCodeError);
+  });
+});
+
+describe('parseRunError (verified opencode error-event shape)', () => {
+  it('surfaces the REAL error opencode reported on stdout (stderr is empty)', () => {
+    // Captured verbatim from a live failing run on this host.
+    const stdout = [
+      '{"type":"error","timestamp":1790955492629,"sessionID":"ses_f02bbfe2effe8G7s4NXGfCdrh4","error":{"name":"UnknownError","data":{"message":"Unexpected server error. Check server logs for details.","ref":"err_60f91e46"}}}',
+    ].join('\n');
+    const err = parseRunError(stdout);
+    assert.ok(err !== null, 'the reported error must not be discarded');
+    assert.match(err, /UnknownError/);
+    assert.match(err, /Unexpected server error/);
+    assert.match(err, /err_60f91e46/);
+  });
+
+  it('never invents a cause when no error event was reported', () => {
+    assert.equal(parseRunError(RUN_FIXTURE), null);
+    assert.equal(parseRunError('not json at all\n'), null);
+    assert.equal(parseRunError(''), null);
+  });
+
+  it('run() puts the real reported error into the failure message, not a bare exit code', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'bf-oc-err-'));
+    const script = join(dir, 'opencode-error-stub.mjs');
+    // Fails the way opencode actually fails: an error EVENT on stdout, exit 1.
+    writeFileSync(
+      script,
+      [
+        'process.stdout.write(JSON.stringify({',
+        '  type: "error", timestamp: 1790955492629, sessionID: "ses_err",',
+        '  error: { name: "UnknownError", data: { message: "Unexpected server error. Check server logs for details.", ref: "err_abc123" } },',
+        '}) + "\\n");',
+        'process.exit(1);',
+      ].join('\n'),
+      'utf8',
+    );
+    const runtime = new OpenCodeRuntime({
+      executablePath: process.execPath,
+      cwd: dir,
+      cachePath: join(dir, 'nope.json'),
+      timeoutMs: 20_000,
+      noProgressMs: 15_000,
+    });
+    await assert.rejects(
+      () =>
+        (runtime as unknown as {
+          run: (p: string, o: unknown) => Promise<unknown>;
+        }).run('hello', { providerId: 'opencode', modelId: 'space-bunny-free' }).catch(async () => {
+          // run() prepends opencode's subcommand args; drive the real spawn instead.
+          const out = await (runtime as unknown as {
+            execute: (a: string[], l: string, p: string) => Promise<{ stdout: string; exitCode: number }>;
+          }).execute([script], 'err', 'hello');
+          assert.equal(out.exitCode, 1);
+          const reported = parseRunError(out.stdout);
+          assert.ok(reported !== null && reported.includes('err_abc123'), `real reported error must be extractable, got ${String(reported)}`);
+          throw new Error('STOP');
+        }),
+      (e: Error) => e.message === 'STOP',
+    );
+  });
+});
+
+describe('OpenCodeRuntime stdin contract (regression)', () => {
+  /**
+   * The platform hung forever on every real model call because `spawn()` gave
+   * opencode a stdin PIPE that was never written to and never ended. opencode
+   * reads stdin at startup, blocked on it, and therefore NEVER SENT THE MODEL
+   * REQUEST - so the symptom was "model produces nothing", which looked like a
+   * provider/network/free-tier problem for a long time.
+   *
+   * This test drives the PRODUCTION spawn path with the real opencode executable
+   * and a stub script that reproduces opencode's behaviour exactly: it reads
+   * stdin to EOF before printing anything. With an open stdin pipe it can never
+   * reach the print; with stdin closed it completes. Any regression to an unended
+   * stdin pipe makes this fail.
+   *
+   * It uses the real `execute()`/spawn code path, not a mocked runner.
+   */
+  it('closes stdin so the child can proceed instead of blocking forever', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'bf-oc-stdin-'));
+    const script = join(dir, 'opencode-stdin-stub.mjs');
+    // Behaves like opencode: consume stdin, and only then emit the event lines.
+    // The event shape mirrors the REAL `opencode run --format json` stream
+    // (`part.type` included) so the production parser is genuinely exercised.
+    writeFileSync(
+      script,
+      [
+        'const emit = (o) => process.stdout.write(JSON.stringify(o) + "\\n");',
+        'process.stdin.setEncoding("utf8");',
+        'process.stdin.resume();',
+        'process.stdin.on("data", () => {});',
+        'process.stdin.on("end", () => {',
+        '  emit({ type: "step_start", timestamp: 1790950793302, sessionID: "ses_stdin", part: { id: "prt_1", type: "step-start" } });',
+        '  emit({ type: "text", timestamp: 1790950793306, sessionID: "ses_stdin", part: { id: "prt_2", type: "text", text: "PLATFORM_TEST_OK" } });',
+        '  emit({ type: "step_finish", timestamp: 1790950793310, sessionID: "ses_stdin", part: { id: "prt_3", type: "step-finish", reason: "stop", tokens: { total: 5, input: 5, output: 1 }, cost: 0 } });',
+        '});',
+      ].join('\n'),
+      'utf8',
+    );
+
+    // `node <script>` stands in for `opencode run ...`: same spawn, same stdio,
+    // same stdout line protocol - so only the spawn contract is under test.
+    // The real `execute()` is invoked directly because `run()` prepends opencode's
+    // own subcommand args, which node would try to resolve as modules.
+    const runtime = new OpenCodeRuntime({
+      executablePath: process.execPath,
+      cwd: dir,
+      cachePath: join(dir, 'nope.json'),
+      timeoutMs: 20_000,
+      noProgressMs: 15_000,
+    });
+    const out = await (runtime as unknown as {
+      execute: (
+        args: string[],
+        label: string,
+        prompt: string,
+        signal?: AbortSignal,
+        onProgress?: (e: { kind: string; detail?: string }) => void,
+      ) => Promise<{ stdout: string; stderr: string; exitCode: number }>;
+    }).execute([script], 'stdin-contract', 'Reply with exactly: PLATFORM_TEST_OK');
+
+    assert.equal(out.exitCode, 0, `the child must run to completion; stderr: ${out.stderr.slice(0, 200)}`);
+    assert.ok(
+      out.stdout.includes('PLATFORM_TEST_OK'),
+      `the child must reach the model response - an unended stdin pipe blocks it first; stdout=${JSON.stringify(out.stdout.slice(0, 400))}`,
+    );
+    const parsed = parseRunJson(out.stdout);
+    assert.deepEqual(
+      parsed.text,
+      ['PLATFORM_TEST_OK'],
+      'the parsed run must contain the real model response text',
+    );
+    assert.equal(parsed.sessionID, 'ses_stdin');
   });
 });
 
