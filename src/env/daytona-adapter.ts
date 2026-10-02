@@ -300,6 +300,21 @@ export class DaytonaWorkspaceAdapter implements EnvAdapter {
     await this.exec(`${cfg} add -A`);
     const commit = await this.exec(`${cfg} commit -m '${message.replace(/'/g, "'\\''")}'`);
     if (!commit.ok) throw new Error(`daytona git commit failed: ${redactTerminal(commit.stderr).trim().slice(0, 200)}`);
-    return { commit: /\[[A-Za-z]+ [0-9a-f]{7,}\]/.exec(commit.stdout)?.[0] ?? 'committed' };
+    // LAW - REALITY OVER DECLARATION (§91) / source-control provenance (§"Git"):
+    // the recorded commit identity must be the REAL sha of the commit that was
+    // just created. Scraping git's human-readable stdout is unreliable (the
+    // format varies by version/locale and the transport may truncate it), and
+    // the previous fallback silently reported the literal placeholder
+    // "committed" - a fabricated provenance value in a governance record.
+    // `git rev-parse HEAD` is the authoritative answer; if even that cannot be
+    // read the failure is surfaced instead of being papered over.
+    const head = await this.exec(`${cfg} rev-parse HEAD`);
+    const sha = /^\s*([0-9a-f]{7,40})\s*$/m.exec(head.stdout)?.[1];
+    if (sha === undefined) {
+      throw new Error(
+        `daytona git commit succeeded but the real commit id could not be read from git (rev-parse HEAD returned nothing); no provenance is claimed.`,
+      );
+    }
+    return { commit: sha };
   }
 }
