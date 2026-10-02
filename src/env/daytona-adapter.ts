@@ -126,6 +126,24 @@ export class DaytonaWorkspaceAdapter implements EnvAdapter {
           detail: `Daytona sandbox could not be created: ${redactTerminal(created.stderr).trim().slice(0, 300)}`,
         };
       }
+    } else if (String(existing.state ?? '').toLowerCase() !== 'started') {
+      // LAW - RECONCILIATION BEFORE RETRY / IDEMPOTENT RECOVERY (§65, §66).
+      //
+      // The sandbox named for this environment already exists but is NOT
+      // running (Daytona auto-stops idle sandboxes). Treating that as "absent"
+      // and creating a duplicate is wrong; treating it as "ready" is worse. The
+      // correct action is to RECONCILE with the real external state and start
+      // the sandbox that already exists. Without this, re-provisioning a project
+      // after any idle auto-stop permanently failed, which is exactly the
+      // "must not require manual recovery" the architecture forbids.
+      const started = await runDaytona(this.cli, ['start', this.name], { timeoutMs: 300_000 });
+      if (!started.ok) {
+        return {
+          ok: false,
+          checkedAt,
+          detail: `Daytona sandbox "${this.name}" exists in state "${String(existing.state)}" but could not be started: ${redactTerminal(started.stderr).trim().slice(0, 300)}`,
+        };
+      }
     }
     const health = await this.health();
     if (!health.ok) {
