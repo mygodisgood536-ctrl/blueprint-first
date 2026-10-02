@@ -7,7 +7,7 @@
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -138,13 +138,51 @@ describe('OpenCodeRuntime.run (injected runner)', () => {
       },
     });
     const result = await runtime.run('PING', { providerId: 'opencode', modelId: 'big-pickle' });
-    assert.equal(received.join(' '), 'run --pure --format json -m opencode/big-pickle PING');
+    // LAW - TENANT AND PROJECT ISOLATION (§121): the run MUST be scoped to the
+    // platform's own workspace with `--dir`. Without it opencode resolves its
+    // project by walking up from the spawn cwd and, on this host, landed on the
+    // USER'S HOME DIRECTORY (observed in its own log:
+    // `watcher backend directory="C:\Users\adede"`), which both leaked unrelated
+    // host files into a governed AI run and made startup take minutes.
+    //
+    // The exact model is still passed through verbatim - scoping the directory
+    // must never alter the selected provider/model (LAW - NO SILENT MODEL SWITCH).
+    assert.match(
+      received.join(' '),
+      /^run --pure --format json --dir \S+ -m opencode\/big-pickle PING$/,
+      `run must be directory-scoped and pass the exact model through; got: ${received.join(' ')}`,
+    );
     assert.equal(result.content, 'PING_OK');
     assert.equal(result.sessionID, SESSION_ID);
     assert.equal(result.usage.input, 6311);
     assert.equal(result.cost, 0);
     assert.equal(result.finishReason, 'stop');
     assert.equal(result.events, 2);
+  });
+
+  it('anchors the run directory as a self-contained project root', async () => {
+    // A bare temp dir lets opencode's project walk escape to an ancestor, so the
+    // runtime writes a project marker into the workspace it owns.
+    const cwd = mkdtempSync(join(tmpdir(), 'bf-oc-root-'));
+    let received: readonly string[] = [];
+    const runtime = new OpenCodeRuntime({
+      cwd,
+      cachePath: join(cwd, 'nope.json'),
+      runner: async (args) => {
+        received = [...args];
+        return { stdout: RUN_FIXTURE, stderr: '', exitCode: 0 };
+      },
+    });
+    await runtime.run('PING', { providerId: 'opencode', modelId: 'big-pickle' });
+    assert.ok(received.includes('--dir'), 'the run must be directory-scoped');
+    assert.ok(
+      received.includes(cwd),
+      `--dir must point at the platform-owned workspace, got: ${received.join(' ')}`,
+    );
+    assert.ok(
+      existsSync(join(cwd, 'opencode.json')),
+      'the workspace must be anchored as a project root so the walk cannot escape to an ancestor',
+    );
   });
 
   it('reports a genuine non-zero exit as an honest OpenCodeError', async () => {

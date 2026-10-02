@@ -24,7 +24,7 @@
  */
 
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -171,6 +171,39 @@ export class OpenCodeRuntime {
   }
 
   /**
+   * Materialises the run directory as a real, SELF-CONTAINED project root.
+   *
+   * opencode resolves its project by walking UP from the run directory. A bare
+   * temp/scratch directory has no project marker, so the walk escapes to an
+   * ancestor - on this host the user's home directory, which the runtime log
+   * confirmed verbatim (`watcher backend directory="C:\Users\adede"`,
+   * `project copy refresh started projectID=global`). Indexing a multi-gigabyte
+   * profile made startup take minutes with no output, and leaked unrelated host
+   * files into an AI run that is supposed to be tenant-scoped (§121).
+   *
+   * Writing a project marker makes the directory a root in its own right, so the
+   * walk stops here. This is a correctness guard for isolation as much as a
+   * performance one, and it is idempotent.
+   */
+  private ensureProjectRoot(): void {
+    if (!existsSync(this.scratchDir)) {
+      mkdirSync(this.scratchDir, { recursive: true });
+    }
+    const marker = join(this.scratchDir, 'opencode.json');
+    if (existsSync(marker)) return;
+    try {
+      writeFileSync(
+        marker,
+        `${JSON.stringify({ $schema: 'https://opencode.ai/config.json' }, null, 2)}\n`,
+        'utf8',
+      );
+    } catch {
+      // A read-only scratch location must not break execution; `--dir` is still
+      // passed, so the run remains scoped even without the marker.
+    }
+  }
+
+  /**
    * True only after a REAL `opencode --version` probe succeeded. The probe
    * runs once and is cached; an explicitly supplied path is probed too, so a
    * bogus executable reports unavailable instead of failing at run time.
@@ -250,7 +283,39 @@ export class OpenCodeRuntime {
       );
     }
     const started = Date.now();
-    const args = ['run', '--pure', '--format', 'json', '-m', model, ...(options.sessionID !== undefined ? ['--session', options.sessionID] : [])];
+    // `--dir` SCOPES the run to this platform's workspace (verified against the
+    // installed CLI's own `run --help`: "--dir directory to run in").
+    //
+    // Without it, opencode resolves its OWN project/location by walking up from
+    // the spawn cwd and, on a host where the scratch dir has no project marker,
+    // lands on the USER'S HOME DIRECTORY. Observed directly in the runtime log:
+    //   watcher backend directory="C:\Users\adede"
+    //   project copy refresh started projectID=global
+    //
+    // That is two defects at once:
+    //   * ISOLATION (§121 TENANT AND PROJECT ISOLATION) - a governed AI run must
+    //     be scoped to its own tenant/project workspace, never to the whole host
+    //     profile. Anchoring also stops unrelated files entering model context.
+    //   * PERFORMANCE - indexing/watching a multi-gigabyte home directory makes
+    //     startup take minutes and emit no output, which the no-progress rule
+    //     then correctly reads as a hang. The cost is paid per model call, so it
+    //     also multiplies across an agentic session.
+    //
+    // `--dir` is therefore REQUIRED, not an optimisation. The scratch directory
+    // is also materialised as a real project root so opencode cannot walk past
+    // it to an ancestor even if a future CLI ignores the flag.
+    this.ensureProjectRoot();
+    const args = [
+      'run',
+      '--pure',
+      '--format',
+      'json',
+      '--dir',
+      this.scratchDir,
+      '-m',
+      model,
+      ...(options.sessionID !== undefined ? ['--session', options.sessionID] : []),
+    ];
     const output = await this.execute(args, `${options.providerId}/${options.modelId}`, prompt, options.signal, options.onProgress);
     const parsed = parseRunJson(output.stdout);
     const durationMs = Date.now() - started;
