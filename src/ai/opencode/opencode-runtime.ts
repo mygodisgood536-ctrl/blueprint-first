@@ -342,6 +342,22 @@ export class OpenCodeRuntime {
     const args = [
       'run',
       '--pure',
+      // The Worker must be able to operate ITS OWN bound workspace.
+      //
+      // Without --auto, opencode auto-REJECTS every permission-gated tool call.
+      // A real run then died with:
+      //   "completed with no assistant text (finishReason: tool-calls);
+      //    ! permission requested: read (...); auto-rejecting."
+      // i.e. the worker was unable to read or write the project it is governed
+      // to build, so no assistant text was ever produced. That is the OpenCode
+      // equivalent of a Worker with no tool permission - not a model failure.
+      //
+      // This is safe and scoped: `--dir` already confines the run to the single
+      // workspace this environment owns, and `--pure` disables external plugins,
+      // so approval is confined to the platform's own project tree rather than
+      // the host. It mirrors the Cline path, which already runs with
+      // autoApprove: true for exactly the same reason.
+      '--auto',
       '--format',
       'json',
       '--dir',

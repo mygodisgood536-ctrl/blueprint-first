@@ -284,8 +284,8 @@ describe('OpenCodeRuntime.run (injected runner)', () => {
     // must never alter the selected provider/model (LAW - NO SILENT MODEL SWITCH).
     assert.match(
       received.join(' '),
-      /^run --pure --format json --dir \S+ -m opencode\/big-pickle PING$/,
-      `run must be directory-scoped and pass the exact model through; got: ${received.join(' ')}`,
+      /^run --pure --auto --format json --dir \S+ -m opencode\/big-pickle PING$/,
+      `run must be directory-scoped, auto-approved within its workspace, and pass the exact model through; got: ${received.join(' ')}`,
     );
     assert.equal(result.content, 'PING_OK');
     assert.equal(result.sessionID, SESSION_ID);
