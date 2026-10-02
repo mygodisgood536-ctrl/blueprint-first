@@ -37,6 +37,14 @@ interface EnvSnapshot {
 const MAX_ENVS_PER_PROJECT = 1;
 const MAX_ENVS_PER_OWNER = 8;
 
+/**
+ * Provisioning re-probe budget (§60/§132). A remote execution environment is
+ * reached over the network, so a single transient failure must not permanently
+ * fail it; a PERSISTENT failure still fails, after these bounded attempts.
+ */
+const PROVISION_ATTEMPTS = 4;
+const PROVISION_RETRY_DELAY_MS = 5_000;
+
 export interface EnvironmentManagerOptions {
   filePath: string;
   /** Root under which real workspace directories are materialized. */
@@ -257,15 +265,40 @@ export class EnvironmentManager {
       return; // already moved on (e.g. destroyed meanwhile)
     }
     const adapter = this.adapterOf(current);
-    let health: EnvHealth;
-    try {
-      health = await adapter.provision(current.spec);
-    } catch (error) {
-      health = {
-        ok: false,
-        checkedAt: new Date().toISOString(),
-        detail: `Provisioning failed: ${(error as Error).message}`,
-      };
+    // LAW - AUTOMATIC NETWORK RESUME / NO MANUAL CONTINUE FOR ORDINARY RECOVERY
+    // (§60, §132): provisioning talks to a REMOTE service (Daytona), so a single
+    // transient network blip - a DNS timeout, a TLS handshake reset - must not
+    // permanently FAIL the environment and leave every gated job BLOCKED with no
+    // way forward except a human creating a new environment.
+    //
+    // A failing health probe is therefore re-checked a bounded number of times
+    // with backoff while the record stays PROVISIONING. Only after the retries
+    // are exhausted does the environment become FAILED - a real, persistent
+    // failure. Nothing here claims readiness that was not actually proven: a
+    // retry only ever re-probes, and READY still requires a genuinely healthy
+    // answer.
+    let health: EnvHealth = { ok: false, checkedAt: new Date().toISOString(), detail: 'Provisioning was not attempted.' };
+    for (let attempt = 1; attempt <= PROVISION_ATTEMPTS; attempt++) {
+      try {
+        health = attempt === 1 ? await adapter.provision(current.spec) : await adapter.health();
+      } catch (error) {
+        health = {
+          ok: false,
+          checkedAt: new Date().toISOString(),
+          detail: `Provisioning attempt ${attempt} failed: ${(error as Error).message}`,
+        };
+      }
+      if (health.ok) break;
+      if (attempt < PROVISION_ATTEMPTS) {
+        await this.bus.publish({
+          type: 'env.provision_retry',
+          tenantId: current.ownerId,
+          projectId: current.projectId,
+          envId: current.id,
+          payload: { attempt, of: PROVISION_ATTEMPTS, detail: health.detail.slice(0, 300) },
+        });
+        await new Promise((r) => setTimeout(r, PROVISION_RETRY_DELAY_MS * attempt));
+      }
     }
     const withHealth: EnvironmentRecord = { ...current, lastHealth: health, updatedAt: new Date().toISOString() };
     this.records.set(withHealth.id, withHealth);
