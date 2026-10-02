@@ -19,6 +19,7 @@
  */
 
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { runShellCommand } from '../runtime/shell.ts';
 import { redactTerminal } from './local-workspace.ts';
 import type {
@@ -78,8 +79,24 @@ export class DaytonaWorkspaceAdapter implements EnvAdapter {
 
   constructor(workspaceRoot: string, options: DaytonaAdapterOptions = {}) {
     this.cli = options.cli ?? 'daytona';
-    // The environment record id is the stable identity for the Daytona sandbox.
-    this.name = path.basename(workspaceRoot);
+    // The sandbox name must be GLOBALLY unique within the Daytona account.
+    //
+    // Environment record ids ("ENV-000001") are only unique inside ONE data
+    // directory, so every project - and every platform instance sharing the
+    // Daytona account - produced the SAME sandbox name. That is a real
+    // §121 TENANT AND PROJECT ISOLATION defect: two projects' sandboxes
+    // collided in one account, so one project's reconcile/start could act on
+    // another project's workspace, and a stale sandbox left behind by any
+    // earlier run made an unrelated project resolve to the wrong environment
+    // ("sandbox ENV-000001 is not present in the real sandbox list").
+    //
+    // The readable record id is kept as a prefix and disambiguated with a
+    // short hash of the FULL absolute workspace path, which is unique per
+    // project/tenant on this host. Deterministic, so the same environment always
+    // resolves to the same sandbox (idempotent recovery is preserved).
+    const base = path.basename(workspaceRoot).replace(/[^A-Za-z0-9._-]/g, '-');
+    const digest = createHash('sha256').update(path.resolve(workspaceRoot)).digest('hex').slice(0, 8);
+    this.name = `${base}-${digest}`;
     this.snapshot = options.snapshot;
   }
 
