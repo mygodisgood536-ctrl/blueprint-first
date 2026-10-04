@@ -209,6 +209,9 @@ export interface IdentityRegistryState {
   readonly sessions: readonly IdentitySession[];
 }
 
+/** Session lifetime used when a caller does not choose one. */
+export const DEFAULT_SESSION_TTL_MS = 60 * 60 * 1000;
+
 /** Durable account store with database-equivalent uniqueness. */
 export class IdentityRegistry {
   private readonly byId = new Map<string, IdentityRecord>();
@@ -219,8 +222,16 @@ export class IdentityRegistry {
 
   private readonly sessionTtlMs: number;
 
-  constructor(sessionTtlMs: number) {
-    this.sessionTtlMs = sessionTtlMs;
+  /**
+   * `sessionTtlMs` is optional so an omitted value can never become NaN and
+   * produce an invalid `expiresAt`. A non-finite or non-positive value still
+   * falls back to the default; an explicitly negative TTL is honoured only
+   * because the expiry tests rely on it being able to expire a session at once.
+   */
+  constructor(sessionTtlMs?: number) {
+    this.sessionTtlMs = typeof sessionTtlMs === 'number' && Number.isFinite(sessionTtlMs)
+      ? sessionTtlMs
+      : DEFAULT_SESSION_TTL_MS;
   }
 
   private pad(): string {
@@ -369,6 +380,17 @@ export class IdentityRegistry {
     const r = id === undefined ? undefined : this.byId.get(id);
     if (r === undefined || r.role === 'administrator') return false;
     this.byId.set(r.id, { ...r, role: 'administrator' });
+    return true;
+  }
+
+  /**
+   * Updates the display name. The username, Gmail and security question are
+   * identity facts fixed at signup and are deliberately NOT editable here.
+   */
+  setFullName(id: string, fullName: string): boolean {
+    const record = this.byId.get(id);
+    if (record === undefined) return false;
+    this.byId.set(id, { ...record, fullName: validateFullName(fullName) });
     return true;
   }
 

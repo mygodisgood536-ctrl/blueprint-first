@@ -32,35 +32,9 @@ import {
 const SRC = join(process.cwd(), 'design-prototype', 'src');
 const routesTs = readFileSync(join(SRC, 'routes.ts'), 'utf8');
 
-const ANONYMOUS: AuthFacts = {
-  authenticated: false,
-  setupComplete: false,
-  recoveryPending: false,
-  totpPending: false,
-  isAdministrator: false,
-};
-const NEW_ACCOUNT: AuthFacts = {
-  authenticated: true,
-  setupComplete: false,
-  recoveryPending: true,
-  totpPending: false,
-  isAdministrator: false,
-};
-const RECOVERY_DONE: AuthFacts = {
-  authenticated: true,
-  setupComplete: false,
-  recoveryPending: false,
-  totpPending: true,
-  isAdministrator: false,
-};
-const READY: AuthFacts = {
-  authenticated: true,
-  setupComplete: true,
-  recoveryPending: false,
-  totpPending: false,
-  isAdministrator: false,
-};
-const ADMIN_READY: AuthFacts = { ...READY, isAdministrator: true };
+const ANONYMOUS: AuthFacts = { authenticated: false, isAdministrator: false };
+const READY: AuthFacts = { authenticated: true, isAdministrator: false };
+const ADMIN_READY: AuthFacts = { authenticated: true, isAdministrator: true };
 
 // ── 1. The public product entry ─────────────────────────────────────────────
 
@@ -121,7 +95,7 @@ test('every retired role-labelled route is a redirect and never renders a page',
     const d = resolveRoute(`#${roleRoute}`, ANONYMOUS);
     assert.equal(d.redirect !== undefined, true, `#${roleRoute} must redirect`);
     assert.ok(
-      ['signin', 'signinVerify', 'signinRecovery', 'welcome', 'splash'].includes(d.kind),
+      ['signin', 'welcome', 'splash'].includes(d.kind),
       `#${roleRoute} must not render ${d.kind}`,
     );
   }
@@ -134,12 +108,14 @@ test('every retired role-labelled route is a redirect and never renders a page',
 
 // ── 3. The private administration entry is private ───────────────────────────
 
-test('the administration entry is reachable but the product never advertises or routes into it', () => {
-  // Reachable by direct URL, with no session: that is the point of a private entry.
-  assert.equal(resolveRoute('#/owner', ANONYMOUS).kind, 'ownerAccess');
+test('the administration area is reachable but the product never advertises or routes into it', () => {
+  // There is no longer a dedicated administration ENTRY. `/owner` is retired and
+  // forwards to the one public sign-in screen like every other stale role URL.
+  assert.equal(resolveRoute('#/owner', ANONYMOUS).redirect, '#/signin');
+  assert.equal(resolveRoute('#/owner', READY).redirect, '#/signin');
 
   // No public or product route may redirect a visitor into the administration area.
-  const visitorRoutes = ['#/', '#/welcome', '#/signin', '#/signin/verify', '#/signin/recovery', '#/user'];
+  const visitorRoutes = ['#/', '#/welcome', '#/signin', '#/user'];
   for (const r of visitorRoutes) {
     const d = resolveRoute(r, ANONYMOUS);
     if (d.redirect !== undefined) {
@@ -154,26 +130,21 @@ test('the administration entry is reachable but the product never advertises or 
 });
 
 test('a non-administrator account cannot reach the administration area by URL', () => {
-  const attempt = resolveRoute('#/owner/settings', READY);
+  const INFRA = '#/settings/infrastructure';
+  const attempt = resolveRoute(INFRA, READY);
   // The area must not render, and the account must be returned to its own
   // workspace rather than left sitting on an administration URL it cannot use.
   assert.notEqual(attempt.kind, 'ownerSettings', 'a non-administrator must not render the administration area');
   assert.equal(attempt.redirect, '#/dashboard', 'a non-administrator is returned to their own workspace');
-  assert.ok(
-    (attempt.redirect ?? '').includes('#/dashboard'),
-    'and must not be redirected into the administration area',
-  );
-  // The same for the legacy path.
-  assert.equal(resolveRoute('#/owner/infrastructure', READY).redirect, '#/dashboard');
   // An administrator can.
-  assert.equal(resolveRoute('#/owner/settings', ADMIN_READY).kind, 'ownerSettings');
+  assert.equal(resolveRoute(INFRA, ADMIN_READY).kind, 'ownerSettings');
   // A signed-out visitor is sent to the welcome screen, never the admin area.
-  const anon = resolveRoute('#/owner/settings', ANONYMOUS);
+  const anon = resolveRoute(INFRA, ANONYMOUS);
   assert.equal(anon.kind, 'welcome');
   assert.equal(anon.redirect, '#/welcome');
   // No resolution of a non-administrator may ever name the administration route.
-  for (const facts of [ANONYMOUS, NEW_ACCOUNT, RECOVERY_DONE, READY]) {
-    for (const p of ['#/owner/settings', '#/owner/infrastructure']) {
+  for (const facts of [ANONYMOUS, READY]) {
+    for (const p of [INFRA, '#/owner', '#/owner/settings']) {
       const d = resolveRoute(p, facts);
       assert.notEqual(d.kind, 'ownerSettings', `${p} must not render for a non-administrator`);
       assert.ok(
@@ -184,25 +155,35 @@ test('a non-administrator account cannot reach the administration area by URL', 
   }
 });
 
-// ── 4. First-time setup cannot be bypassed ───────────────────────────────────
+// ── 4. There is exactly ONE authentication URL, and no second factor ────────
 
-test('first-time setup is enforced in order and cannot be skipped by typing a product URL', () => {
-  // A brand-new account typing the dashboard URL is sent to recovery setup.
-  const d1 = resolveRoute('#/dashboard', NEW_ACCOUNT);
-  assert.equal(d1.redirect, '#/setup/recovery');
-  // Even with recovery done, the authenticator comes next.
-  const d2 = resolveRoute('#/dashboard', RECOVERY_DONE);
-  assert.equal(d2.redirect, '#/setup/authenticator');
-  // Only a completed account reaches the product.
-  assert.equal(resolveRoute('#/dashboard', READY).kind, 'product');
-  // An administrator is gated identically.
-  const d3 = resolveRoute('#/owner/settings', { ...ADMIN_READY, setupComplete: false, recoveryPending: true });
-  assert.equal(d3.redirect, '#/setup/recovery');
+test('the retired authentication surfaces all resolve to the single sign-in screen', () => {
+  // These screens ceased to exist: there is no password reset, no two-step
+  // verification and no first-time setup any more. What matters now is that a
+  // stale deep link cannot resurrect any of them, and lands on the one screen
+  // that does exist.
+  for (const retired of [
+    '#/signin/verify', '#/signin/recovery', '#/forgot',
+    '#/setup', '#/setup/recovery', '#/setup/authenticator',
+    '#/settings/security', '#/settings/security/password',
+    '#/settings/security/authenticator', '#/settings/security/sessions',
+    '#/settings/security/events', '#/settings/authenticator',
+  ]) {
+    const d = resolveRoute(retired, ANONYMOUS);
+    assert.equal(d.redirect, '#/signin', `${retired} must forward to the one sign-in screen`);
+    assert.equal(d.kind, 'signin', `${retired} must resolve to the sign-in screen`);
+  }
+  // And the route table still knows they are retired, so they cannot drift back.
+  for (const p of ['/signin/verify', '/signin/recovery', '/setup/recovery', '/setup/authenticator']) {
+    assert.ok(RETIRED_ROUTES[p] !== undefined, `${p} must remain in the retired table`);
+  }
   // A signed-out visitor typing a product URL gets the welcome screen.
   assert.equal(resolveRoute('#/dashboard', ANONYMOUS).redirect, '#/welcome');
-  // Setup screens need a session.
-  assert.equal(resolveRoute('#/setup/recovery', ANONYMOUS).redirect, '#/signin');
-  assert.equal(resolveRoute('#/setup/authenticator', ANONYMOUS).redirect, '#/signin');
+  // An authenticated account goes straight to the product - there is no setup
+  // step to complete first.
+  assert.equal(resolveRoute('#/dashboard', READY).kind, 'product');
+  // Signing in with a live session is pointless; it lands in the product.
+  assert.equal(resolveRoute('#/signin', READY).redirect, '#/dashboard');
 });
 
 // ── 5. The product interface advertises nothing privileged ──────────────────
@@ -220,7 +201,7 @@ test('no product page links to the administration area or names a role', () => {
     );
   }
   // The welcome and sign-in screens carry no privileged reference at all.
-  for (const file of ['pages/Welcome.tsx', 'pages/SignIn.tsx', 'pages/Setup.tsx', 'pages/Auth2.tsx']) {
+  for (const file of ['pages/Welcome.tsx', 'pages/SignIn.tsx']) {
     const src = readFileSync(join(SRC, file), 'utf8');
     assert.ok(!src.includes('#/owner'), `${file} must never link the administration area`);
     assert.ok(!/Daytona/i.test(src), `${file} must never mention Daytona`);

@@ -149,6 +149,12 @@ export class DurableIdentityRegistry {
     return ok;
   }
 
+  async setFullName(id: string, fullName: string): Promise<boolean> {
+    const ok = this.inner.setFullName(id, fullName);
+    if (ok) await this.persist();
+    return ok;
+  }
+
   async setPreferences(id: string, prefs: Record<string, string | number | boolean>): Promise<boolean> {
     const ok = this.inner.setPreferences(id, prefs);
     if (ok) await this.persist();

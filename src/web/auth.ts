@@ -1,56 +1,58 @@
 /**
- * HTTP authentication middleware.
+ * HTTP session middleware for the identity system.
  *
- * Identity comes EXCLUSIVELY from the opaque session cookie, which resolves
- * through the durable AccountRegistry. The legacy self-asserted x-bf-user
- * header is gone: a client cannot claim an identity, only present a token the
- * server issued. Requests without a valid session are anonymous; protected
- * routes use requireAuth.
+ * Identity comes EXCLUSIVELY from the opaque session cookie, which the server
+ * resolves against the DurableIdentityRegistry on every request. A client cannot
+ * claim an identity, only present a token the server issued. There is no
+ * self-asserted header, no audit bypass and no legacy fallback.
  */
 
 import type { NextFunction, Request, Response } from 'express';
-import type { AccountRecord } from '../account/accounts.ts';
+import type { IdentityView } from '../account/identity.ts';
+import { SESSION_COOKIE } from './identity-api.ts';
 import { parseCookies } from './cookies.ts';
 
-export const SESSION_COOKIE = 'nexona_session';
+export { SESSION_COOKIE };
 
 declare module 'express-serve-static-core' {
   interface Request {
-    /** Set by attachAuth when the session cookie resolves; undefined otherwise. */
-    account?: AccountRecord;
+    /** Set when the session cookie resolves to a live account; undefined otherwise. */
+    identity?: IdentityView;
   }
 }
 
-/** Minimal structural surface attachAuth needs (DurableAccountRegistry satisfies it). */
-export interface SessionVerifier {
-  verifySession(token: string): AccountRecord;
+/** Minimal structural surface attachIdentity needs (DurableIdentityRegistry satisfies it). */
+export interface SessionResolver {
+  accountForToken(token: string): IdentityView | null;
 }
 
-/** Populates req.account for every request (null when anonymous). */
-export function attachAuth(accounts: SessionVerifier): (req: Request, _res: Response, next: NextFunction) => void {
+/**
+ * Populates req.identity for every request.
+ *
+ * An unknown, expired or revoked token resolves to anonymous — it is never an
+ * error, and never falls back to any other identity.
+ */
+export function attachIdentity(identities: SessionResolver): (req: Request, _res: Response, next: NextFunction) => void {
   return (req: Request, _res: Response, next: NextFunction): void => {
     const token = parseCookies(req.headers.cookie)[SESSION_COOKIE];
     if (token !== undefined) {
-      try {
-        req.account = accounts.verifySession(token);
-      } catch {
-        req.account = undefined; // expired/invalid token -> anonymous
-      }
+      const account = identities.accountForToken(token);
+      if (account !== null) req.identity = account;
     }
     next();
   };
 }
 
 /** Guards a route: 401 unless the request carries a valid session. */
-export function requireAuth(req: Request, res: Response, next: NextFunction): void {
-  if (req.account !== undefined) {
+export function requireIdentity(req: Request, res: Response, next: NextFunction): void {
+  if (req.identity !== undefined) {
     next();
     return;
   }
   res.status(401).json({ error: 'authentication required' });
 }
 
-/** The session token carried by this request, if any (used for logout/revoke). */
+/** The session token carried by this request, if any. */
 export function sessionTokenOf(req: Request): string | undefined {
   return parseCookies(req.headers.cookie)[SESSION_COOKIE];
 }

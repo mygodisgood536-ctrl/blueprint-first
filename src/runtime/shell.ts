@@ -9,7 +9,7 @@
  * of the process, never a simulation.
  */
 
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 
 export interface ShellOptions {
   /** Working directory for the process (default: process cwd). */
@@ -47,6 +47,46 @@ function truncate(text: string, maxChars: number): string {
   if (maxChars <= 0) return '';
   if (text.length <= maxChars) return text;
   return `${text.slice(0, maxChars)}\n…[output truncated]`;
+}
+
+/**
+ * Terminates the child AND everything it spawned.
+ *
+ * Why this exists
+ * ---------------
+ * The child is a shell. `cmd.exe /c cline --version` makes `cline` a
+ * GRANDCHILD, and a Node-based `cline` shim makes a great-grandchild. On
+ * win32, `child.kill('SIGKILL')` terminates only the direct child - the
+ * descendants are re-parented and keep running.
+ *
+ * That matters because a capability probe is run repeatedly. Every timeout
+ * therefore leaked a live `cline` (and its node host) which kept competing for
+ * CPU, making the NEXT probe more likely to time out as well. The failure was
+ * self-amplifying: a loaded machine leaked processes that loaded it further.
+ *
+ * On win32 we therefore ask the OS to kill the tree (`taskkill /T /F`), and on
+ * POSIX we run the child as a group leader so the whole group can be signalled.
+ */
+function killProcessTree(child: { pid?: number; kill: (signal?: NodeJS.Signals) => boolean }): void {
+  if (process.platform === 'win32' && child.pid !== undefined) {
+    try {
+      // /T = include descendants, /F = force. Best effort: a process that has
+      // already exited makes taskkill return non-zero, which is not an error.
+      spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], {
+        stdio: 'ignore',
+        windowsHide: true,
+        timeout: 10_000,
+      });
+      return;
+    } catch {
+      // fall through to the direct kill below
+    }
+  }
+  try {
+    child.kill('SIGKILL');
+  } catch {
+    // already exited
+  }
 }
 
 export function runShellCommand(command: string, options: ShellOptions = {}): Promise<ShellResult> {
@@ -101,7 +141,7 @@ export function runShellCommand(command: string, options: ShellOptions = {}): Pr
     const timer = setTimeout(() => {
       timedOut = true;
       try {
-        child.kill('SIGKILL');
+        killProcessTree(child);
       } catch {
         // already exited
       }
@@ -112,7 +152,7 @@ export function runShellCommand(command: string, options: ShellOptions = {}): Pr
       if (options.signal.aborted) {
         aborted = true;
         try {
-          child.kill('SIGKILL');
+          killProcessTree(child);
         } catch {
           // already exited
         }
@@ -123,7 +163,7 @@ export function runShellCommand(command: string, options: ShellOptions = {}): Pr
           () => {
             aborted = true;
             try {
-              child.kill('SIGKILL');
+              killProcessTree(child);
             } catch {
               // already exited
             }

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * FRONTEND NAVIGATION REGRESSION GUARD
  *
  * These tests lock in the real defects found by driving an actual browser, so
@@ -22,12 +22,15 @@ import { resolveRoute, type AuthFacts } from '../design-prototype/src/routes.ts'
 
 const SRC = join(process.cwd(), 'design-prototype', 'src');
 const read = (rel: string): string => readFileSync(join(SRC, rel), 'utf8');
+/** Source with comments stripped, so prose explaining what is ABSENT cannot
+ *  itself trip a guard that asserts the thing is absent. */
+const code = (rel: string): string => read(rel).replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '');
 
 const ANONYMOUS: AuthFacts = {
-  authenticated: false, setupComplete: false, recoveryPending: false, totpPending: false, isAdministrator: false,
+  authenticated: false, isAdministrator: false,
 };
 const READY: AuthFacts = {
-  authenticated: true, setupComplete: true, recoveryPending: false, totpPending: false, isAdministrator: false,
+  authenticated: true, isAdministrator: false,
 };
 const ADMIN: AuthFacts = { ...READY, isAdministrator: true };
 
@@ -53,10 +56,10 @@ test('the shared secret input forwards its id so every label stays associated', 
   assert.equal((control.match(/type=\{visible \? 'text' : 'password'\}/g) ?? []).length, 1);
 });
 
-test('every password field keeps the id its label points at', () => {
+test('every labelled field keeps the id its label points at', () => {
   // Each (label htmlFor, SecretField id) pair must match. This is the exact
   // regression that broke sign-in, account creation and the administration form.
-  const files = ['pages/SignIn.tsx', 'pages/OwnerAccess.tsx', 'modelPopup.tsx'];
+  const files = ['pages/SignIn.tsx', 'modelPopup.tsx'];
   for (const file of files) {
     const src = read(file);
     const labels = [...src.matchAll(/<label[^>]*htmlFor="([^"]+)"/g)].map((m) => m[1]!);
@@ -77,74 +80,81 @@ test('every password field keeps the id its label points at', () => {
   }
 });
 
-// â”€â”€ 2. Sign-in must not validate the hidden confirm field â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── 2. Sign-in must validate only what it actually shows ───────────────────
+//
+// The original bug: sign-in compared the typed password against a confirmation
+// field that only exists while creating an account, so EVERY returning user was
+// blocked. That class of defect still matters - a field that is validated but
+// not rendered (or rendered but not validated) breaks real people - so the
+// guard is restated against the fields that exist today.
 
-test('sign-in does not compare the password against the hidden confirm field', () => {
-  /**
-   * Walks the source from the `if (mode === 'create')` guard, tracking brace
-   * depth, and reports whether the confirm comparison is still inside that
-   * block. Comparing an entered password against a confirm field the user
-   * cannot see blocked EVERY returning user with "Passwords do not match".
-   */
-  const isGuarded = (src: string): boolean => {
-    const guardAt = src.indexOf("if (mode === 'create')");
-    if (guardAt < 0) return false;
-    const compareAt = src.indexOf('password !== confirm', guardAt);
-    if (compareAt < 0) return false;
-    let depth = 0;
-    for (let i = guardAt + "if (mode === 'create')".length; i < compareAt; i += 1) {
-      if (src[i] === '{') depth += 1;
-      else if (src[i] === '}') depth -= 1;
-    }
-    return depth > 0;
-  };
+test('sign-in renders exactly the three fields it validates', () => {
+  const src = code('pages/SignIn.tsx');
+  // The sign-in branch must carry Gmail, security question and security answer.
+  for (const field of ['gmail', 'signinQuestion', 'signinAnswer']) {
+    assert.ok(src.includes(field), `SignIn must carry the "${field}" sign-in field`);
+  }
+  // The create branch carries exactly five fields: full name, username, Gmail,
+  // security question and security answer. Nothing more.
+  for (const field of ['fullName', 'username', 'createGmail', 'createQuestion', 'createAnswer']) {
+    assert.ok(src.includes(field), `SignIn must carry the "${field}" sign-up field`);
+  }
+  // There must be no hidden confirmation or second-factor field that sign-in
+  // could accidentally compare against.
+  assert.ok(!/confirm/i.test(src), 'SignIn must not carry a confirmation field');
+  assert.ok(!/verification code|one-time-code|otp/i.test(src), 'SignIn must not carry a second-factor field');
+});
 
-  for (const file of ['pages/SignIn.tsx', 'pages/OwnerAccess.tsx']) {
-    const src = read(file);
-    assert.ok(src.includes('password !== confirm'), `${file}: expected a confirm comparison while creating`);
+test('the authentication screen offers no password, OTP or recovery surface', () => {
+  const src = code('pages/SignIn.tsx');
+  for (const banned of ['Password', 'password', 'Forgot', 'recovery', 'authenticator', 'Authenticator']) {
     assert.ok(
-      isGuarded(src),
-      `${file}: the confirm comparison must be inside the "mode === 'create'" guard (bug: sign-in was blocked by the hidden field)`,
+      !src.includes(banned),
+      `SignIn must not mention "${banned}": the product has no such credential`,
     );
+  }
+  // It must post to exactly the two credential routes, via the shared client.
+  const api = read('api.ts');
+  assert.ok(api.includes('/api/auth/signup'), 'the client must call the one signup route');
+  assert.ok(api.includes('/api/auth/login'), 'the client must call the one login route');
+  for (const banned of [
+    '/api/auth/owner-signup', '/api/user/signup', '/api/auth/forgot', '/api/auth/reset',
+    '/api/account/password', '/api/account/authenticator', '/api/auth/login/verify',
+    '/api/account/recovery', '/api/auth/owner-exists',
+  ]) {
+    assert.ok(!api.includes(banned), `the client must not call the retired route ${banned}`);
   }
 });
 
-// â”€â”€ 3. Setup must not navigate past the one-time recovery codes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── 3. Sign-up must not silently log the new account in ────────────────────
+//
+// The original bug: first-time setup auto-redirected past the one-time recovery
+// codes. The recovery codes are gone with the rest of the old credential model,
+// but the underlying intent - never navigate past a step the user must act on -
+// survives as: sign-up creates no session, so the app must not navigate into the
+// product as though the person were signed in.
 
-test('first-time setup does not auto-redirect past the one-time recovery codes', () => {
-  const setup = read('pages/Setup.tsx');
-  // The redirect helper must accept a suppression flag...
-  assert.match(
-    setup,
-    /function useSetupRedirect\(suppressComplete = false\)/,
-    'useSetupRedirect must support suppressing the completion redirect',
-  );
-  // ...and the authenticator step must enable it while the codes are shown.
-  assert.match(
-    setup,
-    /useSetupRedirect\(recoveryCodes !== null\)/,
-    'the authenticator step must suppress the redirect while recovery codes are displayed',
-  );
-  // The completion redirect must actually respect the flag.
-  assert.match(
-    setup,
-    /if \(!suppressComplete\) navigate\('#\/dashboard'\)/,
-    'the completion redirect must be conditional on the suppression flag',
-  );
-  // And the user must still be able to leave deliberately.
-  assert.match(setup, /Continue to workspace/, 'a deliberate continue action must exist');
+test('sign-up does not sign the new account in or navigate into the product', () => {
+  const store = read('store.tsx');
+  // Sign-up must not store an authenticated session.
+  const signupBody = store.slice(store.indexOf('const signup = useCallback'), store.indexOf('const login = useCallback'));
+  assert.ok(!signupBody.includes('setAuth(authFromAccount'), 'sign-up must not establish a session');
+  assert.ok(!signupBody.includes('navigate('), 'sign-up must not navigate anywhere');
+  // And it must say so to the user.
+  assert.match(signupBody, /sign in/i, 'sign-up must direct the user to sign in');
 });
 
 // â”€â”€ 4. A non-administrator must not be left on an administration URL â”€â”€â”€â”€â”€â”€
 
 test('a non-administrator is moved off an administration URL they cannot use', () => {
-  const decision = resolveRoute('#/owner/settings', READY);
+  const decision = resolveRoute('#/settings/infrastructure', READY);
   assert.equal(decision.redirect, '#/dashboard', 'a non-administrator must land in their own workspace');
   assert.notEqual(decision.redirect, '#/owner/settings', 'and must not remain on the administration route');
-  // The legacy administration path behaves identically.
-  assert.equal(resolveRoute('#/owner/infrastructure', READY).redirect, '#/dashboard');
+  // The retired administration paths behave identically.
+  assert.equal(resolveRoute('#/owner', READY).redirect, '#/signin');
+  assert.equal(resolveRoute('#/owner/settings', READY).redirect, '#/signin');
   // An administrator is still served.
-  assert.equal(resolveRoute('#/owner/settings', ADMIN).kind, 'ownerSettings');
+  assert.equal(resolveRoute('#/settings/infrastructure', ADMIN).kind, 'ownerSettings');
 });
 
 // â”€â”€ 5. The entry URL is a real, loadable page â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -157,7 +167,7 @@ test('the public entry is the application root and the built bundle ships it', (
   // The bundle must actually contain the entry surfaces, not just the route table.
   assert.ok(bundle.includes('Ship software from a blueprint'), 'the welcome screen must ship in the bundle');
   assert.ok(bundle.includes('Get started'), 'the entry action must ship in the bundle');
-  assert.ok(bundle.includes('secret-input'), 'the shared secret control must ship in the bundle');
+  assert.ok(bundle.includes('Security Answer'), 'the security-answer field must ship in the bundle');
   // The splash must hand off automatically to the welcome screen.
   assert.match(read('pages/Welcome.tsx'), /navigate\('#\/welcome'\)/);
 });
@@ -165,7 +175,7 @@ test('the public entry is the application root and the built bundle ships it', (
 // â”€â”€ 6. No shipped page may link to a retired route â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 test('no shipped page links to a retired route', () => {
-  const retired = ['#/user', '#/user/signin', '#/user/entry', '#/intro', '#/login', '#/signup', '#/forgot', '#/splash', '#/settings/authenticator'];
+  const retired = ['#/user', '#/user/signin', '#/user/entry', '#/intro', '#/login', '#/signup', '#/forgot', '#/splash', '#/signin/verify', '#/setup/authenticator', '#/settings/security'];
   const offenders: string[] = [];
   const walk = (dir: string): void => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -186,7 +196,7 @@ test('no shipped page links to a retired route', () => {
 // â”€â”€ 7. The public experience must not mention privileged concepts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 test('the public entry screens contain no privileged wording or link', () => {
-  for (const file of ['pages/Welcome.tsx', 'pages/SignIn.tsx', 'pages/Setup.tsx', 'pages/Auth2.tsx', 'router.ts']) {
+  for (const file of ['pages/Welcome.tsx', 'pages/SignIn.tsx', 'router.ts']) {
     const src = read(file);
     assert.ok(!src.includes('#/owner'), `${file} must not link the administration area`);
     assert.ok(!/Daytona/i.test(src), `${file} must not mention Daytona`);

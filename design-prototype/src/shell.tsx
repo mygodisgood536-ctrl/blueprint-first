@@ -28,7 +28,6 @@ const engineeringNav: NavItem[] = [
 
 const secondaryNav: NavItem[] = [
   { icon: 'info', label: 'About', route: '#/about' },
-  { icon: 'shield', label: 'Security', route: '#/settings/security' },
   { icon: 'settings', label: 'Preferences', route: '#/settings/preferences' },
   { icon: 'help', label: 'Help', route: '#/help' },
 ]
@@ -38,7 +37,7 @@ export function Shell({ children, breadcrumb }: { children: React.ReactNode; bre
   const [menuOpen, setMenuOpen] = useState(false)
   const [searchQ, setSearchQ] = useState('')
   const hash = window.location.hash || '#/dashboard'
-  const isOwner = auth.role === 'admin'
+  const isOwner = auth.canManagePlatform
 
   const isActive = (route: string) => hash === route || hash.startsWith(route + '/')
 
@@ -74,11 +73,18 @@ export function Shell({ children, breadcrumb }: { children: React.ReactNode; bre
           ))}
           {/* Platform configuration. Not rendered for accounts without the
               administrative role; the backend independently refuses the
-              /api/owner routes, so this is presentation, not the boundary. */}
+              /api/owner routes, so this is presentation, not the boundary.
+
+              The link must point at the CURRENT privileged route. `#/owner/settings`
+              is a retired path in the route table and would forward to sign-in,
+              so the privileged account would be bounced out of its own area. */}
           {isOwner && (
             <>
               <div className="sidebar-section">Administration</div>
-              <a href="#/owner/settings" className={`nav-item ${isActive('#/owner/settings') ? 'active' : ''}`}>
+              <a
+                href="#/settings/infrastructure"
+                className={`nav-item ${isActive('#/settings/infrastructure') ? 'active' : ''}`}
+              >
                 <I name="settings" /><span className="nav-label">Infrastructure</span>
               </a>
             </>
@@ -121,17 +127,17 @@ export function Shell({ children, breadcrumb }: { children: React.ReactNode; bre
           <div className="grow" />
           <div className="account-menu">
             <button className="account-menu-btn" onClick={() => setMenuOpen(!menuOpen)}>
-              <div className="avatar">{auth.displayName?.[0]?.toUpperCase() || 'U'}</div>
-              <span className="text-sm" style={{ fontWeight: 600 }}>{auth.displayName}</span>
+              <div className="avatar">{auth.fullName?.[0]?.toUpperCase() || 'U'}</div>
+              <span className="text-sm" style={{ fontWeight: 600 }}>{auth.fullName}</span>
               <I name="chevronDown" size={16} />
             </button>
             {menuOpen && (
               <>
                 <div style={{ position: 'fixed', inset: 0, zIndex: 99 }} onClick={() => setMenuOpen(false)} />
                 <div className="account-dropdown">
-                                <div className="dd-header"><div className="dd-name">{auth.displayName}</div><div className="dd-email">@{auth.username}</div></div>
+                                <div className="dd-header"><div className="dd-name">{auth.fullName}</div><div className="dd-email">@{auth.username}</div></div>
                   <a href="#/settings/profile" className="dd-item" onClick={() => setMenuOpen(false)}><I name="user" />Profile</a>
-                  <a href="#/settings/security" className="dd-item" onClick={() => setMenuOpen(false)}><I name="shield" />Security</a>
+                  
                   <a href="#/settings/preferences" className="dd-item" onClick={() => setMenuOpen(false)}><I name="settings" />Preferences</a>
                   <div className="dd-divider" />
                   <a href="#/help" className="dd-item" onClick={() => setMenuOpen(false)}><I name="help" />Help</a>

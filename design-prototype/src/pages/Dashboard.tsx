@@ -104,26 +104,13 @@ export function Dashboard() {
     }
   })
 
-  // Authenticator attention item
-  if (!auth.totpEnabled) {
-    attentionItems.push({
-      id: 'att_auth',
-      project: 'Account',
-      projectRoute: '#/settings/security/authenticator',
-      issue: 'Two-factor authentication is required',
-      action: 'Set up authenticator',
-      actionRoute: '#/settings/security/authenticator',
-      urgency: 'medium',
-    })
-  }
-
   const attentionWeight: Record<string, number> = { high: 0, medium: 1, low: 2 }
   attentionItems.sort((a, b) => attentionWeight[a.urgency] - attentionWeight[b.urgency])
 
   return (
     <Shell breadcrumb={[{ label: 'Dashboard' }]}>
       <div className="page-head">
-        <div><h1>Welcome back, {auth.displayName || 'engineer'}</h1><p className="subtitle">Your blueprint-first engineering control center.</p></div>
+        <div><h1>Welcome back, {auth.fullName || auth.username || 'engineer'}</h1><p className="subtitle">Your blueprint-first engineering control center.</p></div>
         <a href="#/projects/new" className="btn btn-primary"><I name="plus" /> New project</a>
       </div>
 

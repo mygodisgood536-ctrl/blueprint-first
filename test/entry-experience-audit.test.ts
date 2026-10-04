@@ -35,25 +35,63 @@ async function readServedBundle(): Promise<{ html: string; js: string; name: str
   return { html, js: await readFile(join(NEXONA_DIR, name), 'utf8'), name };
 }
 
-/** The routes the application actually recognises. */
-const RETIRED_ROUTES = ['/user', '/user/signin', '/user/entry', '/intro', '/login', '/login/verify', '/signup', '/forgot', '/splash'];
+/**
+ * The retired entry points that once existed, which must all still be present in
+ * the route table - and present only as a forwarding destination.
+ *
+ * These are the real Phase 2 names: the two-step verification screen became
+ * `/signin/verify` when the flow was replaced, and `/setup/*` is where the
+ * mandatory recovery/authenticator setup used to live.
+ */
+const RETIRED_ROUTES = [
+  '/signin/verify',
+  '/signin/recovery',
+  '/setup',
+  '/setup/recovery',
+  '/setup/authenticator',
+  '/settings/authenticator',
+  '/settings/security',
+  '/login',
+  '/signup',
+  '/forgot',
+  '/owner',
+  '/user',
+  '/user/signin',
+  '/user/entry',
+  '/intro',
+  '/splash',
+];
 
 test('the public product entry is the application root and carries no role word', async () => {
   const { js } = await readServedBundle();
   // The root is the entry: it is the splash that leads into the welcome screen.
   assert.match(js, /#\/welcome/, 'the product entry must lead to a welcome screen');
-  // No route may be a public, role-labelled entry point.
+
+  // Retired routes may only ever FORWARD. They are verified against the real
+  // route table rather than by looking for an identifier in the minified
+  // bundle: minification destroys the very names this used to grep for, which
+  // made the old assertion pass or fail for a cosmetic reason. Reading the
+  // source proves the actual routing behaviour.
+  const routesSrc = await readFile(join(process.cwd(), 'design-prototype', 'src', 'routes.ts'), 'utf8');
   for (const retired of RETIRED_ROUTES) {
-    // Retired routes are allowed to EXIST only as redirect targets/sources.
-    const occurrences = (js.match(new RegExp(retired.replace('/', '\\/'), 'g')) ?? []).length;
-    if (occurrences > 0) {
-      // Every occurrence must be inside a redirect to a clean destination.
-      assert.ok(
-        /Redirect/.test(js),
-        `retired route ${retired} must only be handled as a redirect`,
-      );
-    }
+    assert.match(
+      routesSrc,
+      new RegExp(`'${retired.replace('/', '\\/')}'\\s*:`),
+      `${retired} must still be listed in the retired-route table`,
+    );
   }
+  // Every retired route forwards somewhere; none renders a screen of its own.
+  const retiredTable = routesSrc.slice(routesSrc.indexOf('RETIRED_ROUTES'), routesSrc.indexOf('PRODUCT_PATHS'));
+  for (const line of retiredTable.split('\n')) {
+    const m = line.match(/'([^']+)'\s*:\s*'([^']+)'/);
+    if (m === null) continue;
+    assert.match(
+      m[2]!,
+      /^#\//,
+      `retired route ${m[1]} must forward to a hash destination, never render itself`,
+    );
+  }
+
   // The product entry must never be labelled with an internal role.
   assert.ok(!/#\/developer|#\/role|#\/normal-user|#\/member|#\/customer/.test(js), 'no role-labelled product route may exist');
 });
@@ -95,14 +133,24 @@ test('the normal-product experience never advertises the administration area, Da
 
 test('the private administration area is role-gated in source AND enforced by the server', async () => {
   const { js } = await readServedBundle();
-  // The administration settings route exists in the shipped bundle.
-  assert.match(js, /#\/owner\/settings/, 'the administration settings route must exist');
+  // The administration settings route exists in the shipped bundle. The route is
+  // assembled at runtime, so the bundle carries the path rather than the literal
+  // `#/settings/infrastructure`.
+  assert.match(js, /settings\/infrastructure/, 'the administration settings route must exist');
 
   // Role gating is a source-level guarantee (the bundle is minified, so the
   // identifier is not stable there). Read the real source instead.
   const shell = await readFile(join(process.cwd(), 'design-prototype', 'src', 'shell.tsx'), 'utf8');
-  assert.match(shell, /auth\.role === 'admin'/, 'the sidebar must gate the administration nav on the role');
-  assert.match(shell, /#\/owner\/settings/, 'the sidebar link must point at the administration route');
+  assert.match(
+    shell,
+    /auth\.canManagePlatform/,
+    'the sidebar must gate the administration nav on the server-resolved authorization flag',
+  );
+  assert.match(
+    shell,
+    /settings\/infrastructure/,
+    'the sidebar link must point at the administration route',
+  );
   assert.match(shell, /\{isOwner && \(/, 'the administration nav block must be conditional');
 
   // The route table itself must refuse a non-administrator account.
@@ -110,14 +158,14 @@ test('the private administration area is role-gated in source AND enforced by th
   assert.match(routesSrc, /isAdministrator/, 'the route table must be told the account role');
   assert.match(
     routesSrc,
-    /path === '\/owner\/settings'[\s\S]{0,240}?!auth\.isAdministrator/,
+    /path === '\/settings\/infrastructure'[\s\S]{0,240}?!auth\.isAdministrator/,
     'the administration route must refuse a non-administrator account',
   );
-  // And the app must pass the real role into that decision.
+  // And the app must pass the real flag into that decision.
   const app = await readFile(join(process.cwd(), 'design-prototype', 'src', 'App.tsx'), 'utf8');
   assert.match(
     app,
-    /isAdministrator: auth\.role === 'admin'/,
+    /isAdministrator: auth\.canManagePlatform/,
     'the app must derive the administrator flag from the authenticated account',
   );
 });
@@ -162,62 +210,93 @@ test('every sensitive input uses the shared show/hide control', async () => {
   assert.deepEqual(offenders, [], 'no page may render a bare password input instead of the shared control');
 
   // The fields that are actually reachable in the product are wired through the
-  // shared control. (Some legacy pages are not currently routed, so they are
-  // verified at source level above rather than by their presence in the bundle.)
+  // shared control, and every sensitive field the retired authentication model
+  // used to render is genuinely gone.
   for (const hook of [
     'daytona-api-key',
     'model-popup-api-key',
+  ]) {
+    assert.ok(js.includes(hook), `the shared control must be wired to "${hook}"`);
+  }
+  // The security answer is the one secret a member enters, and it is masked.
+  assert.ok(js.includes('Security Answer'), 'the security-answer field must ship in the bundle');
+
+  // The retired authentication inputs are NOT rendered any more. This is the
+  // direct replacement for the old "recovery-answer-${index}" Setup-page check:
+  // that page was deleted with the two-step flow, so the honest assertion is
+  // that its fields are absent from the shipped product.
+  for (const retiredHook of [
     'authenticator-secret',
     'auth-password',
     'auth-confirm',
     'owner-password',
     'owner-confirm',
     'recovery-verify-',
+    'recovery-answer-',
     'forgot-new-password',
     'settings-new-password',
   ]) {
-    assert.ok(js.includes(hook), `the shared control must be wired to "${hook}"`);
+    assert.ok(!js.includes(retiredHook), `the retired field "${retiredHook}" must not ship in the bundle`);
   }
-  // The first-time recovery answers are indexed, so the stable prefix is what
-  // the bundle carries.
-  const setupSrc = await readFile(join(pagesDir, 'pages', 'Setup.tsx'), 'utf8');
-  assert.match(setupSrc, /data-testid=\{`recovery-answer-\$\{index\}`\}/);
-  assert.match(setupSrc, /data-testid=\{`recovery-confirm-\$\{index\}`\}/);
+  // The retired setup page itself is gone from the source tree.
+  await assert.rejects(
+    readFile(join(pagesDir, 'pages', 'Setup.tsx'), 'utf8'),
+    'the retired Setup page must not exist',
+  );
 });
 
-test('the authenticator secret is a real backend value, issued once, matching its provisioning URI', async () => {
+test('the security answer is a real backend value that is never issued back', async () => {
   const dir = await tempDataDir();
   const s = await buildWorkingServer(dir);
   try {
-    // A brand-new, part-way-through-setup account: first-time authenticator
-    // enrollment is exactly the flow the UI drives.
-    const created = await fetch(`${s.url}/api/user/signup`, {
+    // This test used to pin the TOTP enrollment secret: a server-generated
+    // base32 value, returned exactly once, never readable again. That mechanism
+    // was deliberately removed in Phase 2, so there is no authenticator to
+    // enroll. The property it protected - a real backend secret that is issued
+    // once and never handed back - now applies to the security answer, which is
+    // the one secret a member holds.
+    const QUESTION = 'What city did my parents meet?';
+    const ANSWER = 'Riverbank-77';
+    const created = await fetch(`${s.url}/api/auth/signup`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ username: 'secret_user', password: 'secret-password-1' }),
+      body: JSON.stringify({
+        fullName: 'Secret User',
+        username: 'secret_user',
+        gmail: 'secret_user@gmail.com',
+        securityQuestion: QUESTION,
+        securityAnswer: ANSWER,
+      }),
     });
-    const cookie = created.headers.get('set-cookie')!.split(';')[0]!;
+    assert.equal(created.status, 201);
+    // Sign-up is not authentication, and it must not echo the answer back.
+    assert.equal(created.headers.get('set-cookie'), null, 'signup must not issue a session');
+    const createdText = await created.text();
+    assert.ok(!createdText.includes(ANSWER), 'signup must never return the security answer');
 
-    const first = (await (
-      await fetch(`${s.url}/api/account/authenticator/setup`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', cookie },
-        body: JSON.stringify({}),
-      })
-    ).json()) as { secret: string; otpauth: string };
+    // The answer is a genuine credential: only it, with the right question,
+    // yields a session.
+    const wrong = await fetch(`${s.url}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ gmail: 'secret_user@gmail.com', securityQuestion: QUESTION, securityAnswer: 'wrong' }),
+    });
+    assert.equal(wrong.status, 401, 'a wrong answer must not authenticate');
+    assert.equal(wrong.headers.get('set-cookie'), null, 'a failed login must not set a cookie');
 
-    // A real, server-generated base32 secret.
-    assert.match(first.secret, /^[A-Z2-7]{16,}$/);
-    // The provisioning URI embeds the SAME secret, so a QR scan and the
-    // displayed key are one authenticator rather than two different ones.
-    assert.ok(first.otpauth.includes(first.secret), 'the provisioning URI must carry the same secret');
-    assert.match(first.otpauth, /^otpauth:\/\/totp\//, 'a standard otpauth URI must be produced');
+    const ok = await fetch(`${s.url}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ gmail: 'secret_user@gmail.com', securityQuestion: QUESTION, securityAnswer: ANSWER }),
+    });
+    assert.equal(ok.status, 200);
+    const cookie = ok.headers.get('set-cookie')!.split(';')[0]!;
 
-    // The secret is not readable again through any account route.
+    // The answer is not readable again through any account route.
+    const session = await (await fetch(`${s.url}/api/auth/session`, { headers: { cookie } })).text();
+    assert.ok(!session.includes(ANSWER), 'the security answer must never be returned by the session route');
     const me = await (await fetch(`${s.url}/api/me`, { headers: { cookie } })).text();
-    assert.ok(!me.includes(first.secret), 'the secret must never be returned by /api/me');
-    const status = await (await fetch(`${s.url}/api/account/authenticator`, { headers: { cookie } })).text();
-    assert.ok(!status.includes(first.secret), 'the authenticator status route must never return the secret');
+    assert.ok(!me.includes(ANSWER), 'the security answer must never be returned by /api/me');
   } finally {
     await s.close();
   }
@@ -272,30 +351,64 @@ test('the backend refuses every owner endpoint regardless of any route the clien
     // The administration account is served.
     assert.equal((await fetch(`${s.url}/api/owner/daytona`, { headers: { cookie: owner } })).status, 200);
 
-    // The owner-exists probe reveals nothing about any other account.
-    const probe = (await (await fetch(`${s.url}/api/auth/owner-exists`)).json()) as { ownerExists: boolean };
-    assert.equal(typeof probe.ownerExists, 'boolean');
-    assert.deepEqual(Object.keys(probe), ['ownerExists'], 'the probe must not leak any account detail');
+    // There is no longer an "owner exists?" probe. That route existed only so
+    // the retired owner-signup screen could decide what to render; with one
+    // signup route and one server-provisioned privileged account it has nothing
+    // to ask, and it would only leak account existence. It must be unregistered.
+    for (const method of ['GET', 'POST'] as const) {
+      const res = await fetch(`${s.url}/api/auth/owner-exists`, {
+        method,
+        headers: { 'content-type': 'application/json' },
+      });
+      assert.equal(res.status, 404, `${method} /api/auth/owner-exists must not be registered`);
+    }
   } finally {
     await s.close();
   }
 });
 
-test('the authenticator is still mandatory and the setup gate is still enforced after the redesign', async () => {
+test('the retired setup gate is gone: a new account is never blocked from the product', async () => {
   const dir = await tempDataDir();
   const s = await buildWorkingServer(dir);
   try {
-    const res = await fetch(`${s.url}/api/user/signup`, {
+    // This test used to assert the OPPOSITE: that a freshly password-signed-up
+    // account was refused by `/api/system/foundation` with
+    // `recovery_setup_required`. That gate existed only because the product
+    // demanded a mandatory recovery/authenticator setup. Phase 2 removed that
+    // architecture, so the gate must no longer exist. The property worth keeping
+    // is that a new account can actually USE the product immediately.
+    const QUESTION = 'What city did my parents meet?';
+    const res = await fetch(`${s.url}/api/auth/signup`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ username: 'gate_user', password: 'gate-password-1' }),
+      body: JSON.stringify({
+        fullName: 'Gate User',
+        username: 'gate_user',
+        gmail: 'gate_user@gmail.com',
+        securityQuestion: QUESTION,
+        securityAnswer: 'Northgate-12',
+      }),
     });
     assert.equal(res.status, 201);
-    const cookie = res.headers.get('set-cookie')!.split(';')[0]!;
-    // No setup: the product is refused.
-    const blocked = await fetch(`${s.url}/api/system/foundation`, { headers: { cookie } });
-    assert.equal(blocked.status, 403);
-    assert.equal(((await blocked.json()) as { code: string }).code, 'recovery_setup_required');
+    assert.equal(res.headers.get('set-cookie'), null, 'signup must not authenticate the account');
+
+    const login = await fetch(`${s.url}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ gmail: 'gate_user@gmail.com', securityQuestion: QUESTION, securityAnswer: 'Northgate-12' }),
+    });
+    assert.equal(login.status, 200);
+    const cookie = login.headers.get('set-cookie')!.split(';')[0]!;
+
+    // No setup step exists, so nothing may block this account.
+    const foundation = await fetch(`${s.url}/api/system/foundation`, { headers: { cookie } });
+    assert.notEqual(
+      foundation.status,
+      403,
+      'a signed-in account must not be blocked by a setup gate that no longer exists',
+    );
+    const code = ((await foundation.json()) as { code?: string }).code;
+    assert.notEqual(code, 'recovery_setup_required', 'the retired setup gate must not be reachable');
   } finally {
     await s.close();
   }

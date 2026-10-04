@@ -63,20 +63,77 @@ function stderrToDetail(name: string, stderr: string, exitCode: number): string 
 }
 
 /**
+ * True when the shell reported that the command itself does not exist.
+ *
+ * This distinction matters because probes run THROUGH a shell. `cmd.exe /c
+ * cline --version` always spawns successfully, so a missing binary comes back as
+ * a non-zero exit rather than a spawn failure - which made an absent CLI
+ * indistinguishable from an installed-but-broken one, and therefore reported as
+ * DEGRADED ("installed, unresponsive") instead of NOT_INSTALLED ("absent").
+ *
+ * An absent execution component and a broken one are different facts and must be
+ * reported as such: the readiness requirement is unchanged either way, but the
+ * platform must not claim a component is installed when it is not.
+ */
+function commandNotFound(stderr: string, exitCode: number): boolean {
+  // POSIX shells use 127 for "command not found".
+  if (exitCode === 127) return true;
+  const text = stderr.toLowerCase();
+  if (text.includes('is not recognized as an internal or external command')) return true;
+  if (text.includes('command not found')) return true;
+  if (text.includes('no such file or directory') && exitCode !== 0) return true;
+  return false;
+}
+
+/**
+ * In-flight probes, keyed by command.
+ *
+ * `CapabilityDiscovery.discover()` and `ClineBoundary.capability()` both probe
+ * the same binary, and a test suite runs many servers at once. Without this,
+ * N concurrent callers each spawned their own `cmd.exe` → `cline` → node
+ * chain. That is pure contention: the probes compete with each other for the
+ * CPU they are waiting on, which is exactly what pushed them past the deadline.
+ *
+ * Deduplicating means concurrent callers share ONE probe. The result is a fact
+ * about the machine at a point in time, so sharing it is correct - and it is
+ * removed from the map as soon as it settles, so a later probe re-runs and the
+ * readiness check is never cached across a re-check.
+ */
+const inFlightProbes = new Map<string, Promise<{ exitCode: number; stdout: string; stderr: string } | null>>();
+
+/**
  * Real command probe: resolves with the command's status, or null when the
- * binary cannot even be spawned (ENOENT → not installed).
+ * binary does not exist at all (→ NOT_INSTALLED).
  */
 export async function probeBinary(
   name: string,
   args: readonly string[],
   options: { timeoutMs?: number } = {},
 ): Promise<{ exitCode: number; stdout: string; stderr: string } | null> {
+  const key = `${name} ${args.join(' ')}`;
+  const existing = inFlightProbes.get(key);
+  if (existing !== undefined) return await existing;
+
+  const probe = (async () => {
+    try {
+      const result = await runShellCommand(`${name} ${args.join(' ')}`, { timeoutMs: options.timeoutMs ?? 10_000 });
+      // The shell spawned, but the command may simply not exist. Report that as
+      // "not installed" rather than as a component that is installed and broken.
+      if (commandNotFound(result.stderr, result.exitCode)) return null;
+      return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
+    } catch {
+      // spawn/shell failure of the binary itself → binary not usable
+      return null;
+    }
+  })();
+
+  inFlightProbes.set(key, probe);
   try {
-    const result = await runShellCommand(`${name} ${args.join(' ')}`, { timeoutMs: options.timeoutMs ?? 10_000 });
-    return { exitCode: result.exitCode, stdout: result.stdout, stderr: result.stderr };
-  } catch {
-    // spawn/shell failure of the binary itself → binary not usable
-    return null;
+    return await probe;
+  } finally {
+    // Never cached across calls: a subsequent probe must re-run, so a component
+    // that appears (or stops answering) is still detected.
+    inFlightProbes.delete(key);
   }
 }
 

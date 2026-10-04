@@ -169,7 +169,13 @@ export function registerIdentityApi(app: Express, options: IdentityApiOptions): 
         String(body['securityAnswer'] ?? ''),
       );
       res.setHeader('set-cookie', sessionCookie(session.token, maxAgeSeconds));
-      res.status(200).json({ account: accountResponse(account) });
+      res.status(200).json({
+        account: accountResponse(account),
+        // Advisory only, and returned here as well as on /api/auth/session so the
+        // client does not have to re-fetch the session straight after signing in.
+        // The backend independently enforces every privileged route.
+        canManagePlatform: identities.isAdministrator(account.id),
+      });
     } catch (error) {
       fail(res, error);
     }

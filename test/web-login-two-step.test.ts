@@ -1,231 +1,161 @@
 /**
- * Web-layer two-step sign-in: TOTP-enforced login over HTTP.
+ * THE SINGLE LOGIN CONTRACT
  *
- * Proves the instruction requirement that a password alone NEVER yields a
- * dashboard session for authenticator-protected accounts: password login
- * returns a server-side challenge, and the session cookie is issued only after
- * `/api/auth/login/verify` completes with a valid TOTP or recovery code.
+ * This file used to be the two-step login suite: password, then a challenge,
+ * then an authenticator or recovery code - three round trips and two secrets.
+ *
+ * That model was replaced by ONE login route and ONE secret: Gmail + security
+ * question + security answer. Two-step login has intentionally ceased to exist,
+ * so these tests now pin the properties that make the single-step model safe and
+ * prove the second step is genuinely gone.
+ *
+ * Preserved from the original intent:
+ *   - a wrong credential never yields a session
+ *   - a correct credential yields exactly one HttpOnly session cookie
+ *   - the cookie alone authorises; no client-supplied identity is trusted
+ *   - logging out invalidates the session server-side
+ *   - the privileged account uses this same route
  */
-import { after, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import type { Express } from 'express';
-import { join } from 'node:path';
-import { rmSync, mkdtempSync } from 'node:fs';
+import test, { describe, before, after } from 'node:test';
+import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import express from 'express';
+import { SESSION_COOKIE } from '../src/web/identity-api.ts';
+import { parseCookies } from '../src/web/cookies.ts';
+import { DurableIdentityRegistry } from '../src/account/durable-identity.ts';
+import { registerIdentityApi } from '../src/web/identity-api.ts';
 
-import { buildServer } from '../src/web/server.ts';
-import { ProviderManager } from '../src/ai/provider-manager.ts';
-import type { DemoResult } from '../src/demo/main.ts';
-import { ArtifactIdAllocator } from '../src/core/id-allocator.ts';
-import { KnowledgeGraph } from '../src/core/graph.ts';
-import { MemoryEvidenceLog } from '../src/verification/evidence.ts';
-import { JsonFileArtifactStore } from '../src/core/json-file-store.ts';
-import { ProjectRegistry } from '../src/project/registry.ts';
-import { AiRouter } from '../src/ai/router.ts';
-import { ScriptedProvider } from '../src/ai/scripted-provider.ts';
-import type { CoreServices } from '../src/core/services.ts';
-import { totpNow } from '../src/account/totp.ts';
-import { tempDataDir } from './helpers.ts';
+const Q = 'What city did my parents meet?';
+const BOOTSTRAP_ENV = { BF_BOOTSTRAP_SECURITY_ANSWER: 's3cret-answer' } as NodeJS.ProcessEnv;
 
-interface ServerHandle {
-  app: Express;
-  close: () => Promise<void>;
-  url: string;
-}
+let url = '';
+let close: () => Promise<void>;
 
-async function buildServerHandle(dataDir: string): Promise<ServerHandle> {
-  const allocator = new ArtifactIdAllocator();
-  const store = new JsonFileArtifactStore({ filePath: join(dataDir, 'artifacts.json'), allocator });
-  await store.init();
-  const graph = new KnowledgeGraph();
-  const evidence = new MemoryEvidenceLog();
-  const router = new AiRouter();
-  router.register(new ScriptedProvider({ rules: [] })).setDefaultProvider('scripted');
-  const services: CoreServices = { store, allocator, graph, evidence, router };
-  const registry = new ProjectRegistry(services);
-  const result = {
-    baseline: { projectId: 'demo-project', totalArtifacts: 0 },
-    registry,
-    services,
-    evidence,
-    store,
-    projectMode: 'full-product',
-  } as unknown as DemoResult;
-
-  const { app } = await buildServer({ result, providerManager: new ProviderManager(), dataDir });
-  const server = app.listen(0, '127.0.0.1');
-  await new Promise<void>((resolve) => server.once('listening', () => resolve()));
-  const address = server.address();
-  const port = typeof address === 'object' && address !== null ? address.port : 0;
-  return {
-    app,
-    url: `http://127.0.0.1:${port}`,
-    close: () => new Promise<void>((resolve) => server.close(() => resolve())),
-  };
-}
-
-async function j(url: string, method: string, path: string, cookie?: string | null, body?: unknown) {
-  const res = await fetch(url + path, {
-    method,
-    headers: {
-      'content-type': 'application/json',
-      ...(cookie ? { cookie } : {}),
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
+before(async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'bf-login-'));
+  const identities = await DurableIdentityRegistry.load(join(dir, 'identity.json'), 60 * 60 * 1000);
+  await identities.ensurePrivilegedAccount(BOOTSTRAP_ENV);
+  const app = express();
+  app.use(express.json());
+  // The same session-cookie resolution the real server installs, so these
+  // tests exercise a genuine server-resolved identity.
+  app.use((req, _res, next) => {
+    const cookies = parseCookies(req.headers.cookie);
+    const token = cookies[SESSION_COOKIE];
+    if (token !== undefined) (req as unknown as { sessionToken?: string }).sessionToken = token;
+    next();
   });
-  const text = await res.text();
-  const setCookie = res.headers.get('set-cookie');
-  let json: unknown;
-  try {
-    json = JSON.parse(text);
-  } catch {
-    json = text;
-  }
-  return { status: res.status, body: json as Record<string, unknown>, setCookie };
-}
-
-describe('web two-step sign-in (TOTP enforced login)', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'nexora-web-signin-'));
-
-  it('a password never grants a session for an authenticator-protected account', async () => {
-    const server = await buildServerHandle(dir);
-    try {
-      const signedUp = await j(server.url, 'POST', '/api/auth/signup', null, {
-        username: 'ada',
-        password: 'correct horse battery',
-      });
-      assert.equal(signedUp.status, 201);
-      const sessionCookie = signedUp.setCookie!.split(';')[0]!;
-
-      // A fresh session can still read its own profile before logout (existing session).
-      const me = await j(server.url, 'GET', '/api/auth/session', sessionCookie);
-      assert.equal((me.body.account as { username?: string }).username, 'ada');
-
-      // Enable the authenticator (setup + enable).
-      const setup = await j(server.url, 'POST', '/api/account/authenticator/setup', sessionCookie, {
-        currentPassword: 'correct horse battery',
-      });
-      assert.equal(setup.status, 200);
-      const secret = (setup.body as { secret: string }).secret;
-      const enabled = await j(server.url, 'POST', '/api/account/authenticator/enable', sessionCookie, {
-        code: totpNow(secret),
-      });
-      assert.equal(enabled.status, 200);
-      const recoveryCodes = (enabled.body as { recoveryCodes: string[] }).recoveryCodes;
-      assert.equal(recoveryCodes.length, 8);
-
-      // Log out so the next sign-in must pass the full challenge.
-      await j(server.url, 'POST', '/api/auth/logout', sessionCookie);
-      const afterLogout = await j(server.url, 'GET', '/api/auth/session', sessionCookie);
-      assert.equal(afterLogout.body.account, null);
-
-      // 1) Wrong password: 401, no cookie, no challenge leak.
-      const badPassword = await j(server.url, 'POST', '/api/auth/login', null, {
-        username: 'ada',
-        password: 'wrong-password-1',
-      });
-      assert.equal(badPassword.status, 401);
-      assert.equal(badPassword.setCookie, null);
-
-      // 2) Correct password: challenge returned, NO session cookie issued.
-      const challenged = await j(server.url, 'POST', '/api/auth/login', null, {
-        username: 'ada',
-        password: 'correct horse battery',
-      });
-      assert.equal(challenged.status, 200);
-      assert.equal(challenged.body.requiresAuthenticator, true);
-      assert.equal(challenged.body.username, 'ada');
-      assert.match(challenged.body.challengeId as string, /^[0-9a-f]{48}$/);
-      assert.equal(challenged.setCookie, null);
-
-      // Still not signed in anywhere without the code.
-      const stillAnonymous = await j(server.url, 'GET', '/api/auth/session');
-      assert.equal(stillAnonymous.body.account, null);
-
-      // 3) Wrong code: 400, still no session.
-      const badCode = await j(server.url, 'POST', '/api/auth/login/verify', null, {
-        challengeId: challenged.body.challengeId,
-        code: '000000',
-      });
-      assert.equal(badCode.status, 400);
-      assert.notEqual(badCode, null);
-
-      // 4) Correct TOTP code: session issued.
-      const verified = await j(server.url, 'POST', '/api/auth/login/verify', null, {
-        challengeId: challenged.body.challengeId,
-        code: totpNow(secret),
-      });
-      assert.equal(verified.status, 200);
-      assert.equal((verified.body.account as { username?: string }).username, 'ada');
-      assert.ok(verified.setCookie!.includes('nexona_session='));
-      const verifiedCookie = verified.setCookie!.split(';')[0]!;
-
-      const authenticated = await j(server.url, 'GET', '/api/auth/session', verifiedCookie);
-      assert.equal((authenticated.body.account as { username?: string }).username, 'ada');
-
-      // The completed challenge is single-use (replay is rejected).
-      const replayed = await j(server.url, 'POST', '/api/auth/login/verify', null, {
-        challengeId: challenged.body.challengeId,
-        code: totpNow(secret),
-      });
-      assert.equal(replayed.status, 401);
-    } finally {
-      await server.close();
+  // A guarded resource, so we can prove the cookie alone is the authority.
+  app.get('/api/private', (req, res) => {
+    const token = (req as unknown as { sessionToken?: string }).sessionToken;
+    const account = token === undefined ? null : identities.accountForToken(token);
+    if (account === null) {
+      res.status(401).json({ error: 'authentication required' });
+      return;
     }
+    res.json({ username: account.username });
+  });
+  registerIdentityApi(app, {
+    identities,
+    sessionTtlMs: 60 * 60 * 1000,
+    limits: { signupPerMinute: 500, loginPerMinute: 500 },
+  });
+  const server = app.listen(0);
+  await new Promise<void>((r) => server.once('listening', r));
+  const addr = server.address();
+  const port = typeof addr === 'object' && addr !== null ? addr.port : 0;
+  url = `http://127.0.0.1:${port}`;
+  close = () => new Promise<void>((r) => server.close(() => r()));
+});
+
+after(async () => { await close(); });
+
+async function createAccount(username: string, gmail: string): Promise<void> {
+  const res = await fetch(`${url}/api/auth/signup`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      fullName: username.toUpperCase(), username, gmail, securityQuestion: Q, securityAnswer: 'London',
+    }),
+  });
+  assert.equal(res.status, 201, `signup failed: ${await res.text()}`);
+}
+
+async function login(gmail: string, answer: string, question = Q): Promise<Response> {
+  return await fetch(`${url}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ gmail, securityQuestion: question, securityAnswer: answer }),
+  });
+}
+describe('login is a single step and issues exactly one session', () => {
+  test('three correct fields authenticate, with no second step', async () => {
+    await createAccount('ada', 'ada@gmail.com');
+    const res = await login('ada@gmail.com', 'London');
+    assert.equal(res.status, 200);
+    const cookie = res.headers.get('set-cookie') ?? '';
+    assert.match(cookie, /bf_session=/, 'a session cookie is issued');
+    assert.match(cookie, /HttpOnly/i, 'the cookie is HttpOnly');
+    assert.match(cookie, /SameSite=Lax/i, 'the cookie is SameSite=Lax');
+    const body = (await res.json()) as Record<string, unknown>;
+    assert.equal(body['challengeId'], undefined, 'there is no second step to complete');
   });
 
-  it('a recovery code completes sign-in and is single-use', async () => {
-    const server = await buildServerHandle(dir);
-    try {
-      await j(server.url, 'POST', '/api/auth/signup', null, {
-        username: 'bob',
-        password: 'initial password 1',
-      });
-      // grab a fresh cookie for the recovery flow; bob has no TOTP yet, so sign-up handed one out
-      const login1 = await j(server.url, 'POST', '/api/auth/login', null, {
-        username: 'bob',
-        password: 'initial password 1',
-      });
-      const sessionCookie = login1.setCookie!.split(';')[0]!;
+  test('the cookie alone authorises; a forged identity header does not', async () => {
+    const res = await login('ada@gmail.com', 'London');
+    const cookie = (res.headers.get('set-cookie') ?? '').split(';')[0]!;
+    const anon = await fetch(`${url}/api/private`, { headers: { 'x-bf-user': 'ada' } });
+    assert.equal(anon.status, 401, 'a self-asserted header must not authenticate anyone');
+    const ok = await fetch(`${url}/api/private`, { headers: { cookie, 'x-bf-user': 'someoneelse' } });
+    assert.equal(ok.status, 200);
+    assert.equal(((await ok.json()) as { username: string }).username, 'ada', 'identity comes from the cookie');
+  });
 
-      const setup = await j(server.url, 'POST', '/api/account/authenticator/setup', sessionCookie, {
-        currentPassword: 'initial password 1',
-      });
-      const secret = (setup.body as { secret: string }).secret;
-      const enabled = await j(server.url, 'POST', '/api/account/authenticator/enable', sessionCookie, {
-        code: totpNow(secret),
-      });
-      const recoveryCodes = (enabled.body as { recoveryCodes: string[] }).recoveryCodes;
-      await j(server.url, 'POST', '/api/auth/logout', sessionCookie);
-
-      const challenged = await j(server.url, 'POST', '/api/auth/login', null, {
-        username: 'bob',
-        password: 'initial password 1',
-      });
-      const withCode = await j(server.url, 'POST', '/api/auth/login/verify', null, {
-        challengeId: challenged.body.challengeId,
-        code: recoveryCodes[0],
-      });
-      assert.equal(withCode.status, 200);
-      assert.ok(withCode.setCookie!.includes('nexona_session='));
-      await j(server.url, 'POST', '/api/auth/logout', withCode.setCookie!.split(';')[0]!);
-
-      // Same recovery code is consumed and must not sign in a second time.
-      const challengedAgain = await j(server.url, 'POST', '/api/auth/login', null, {
-        username: 'bob',
-        password: 'initial password 1',
-      });
-      const reuse = await j(server.url, 'POST', '/api/auth/login/verify', null, {
-        challengeId: challengedAgain.body.challengeId,
-        code: recoveryCodes[0],
-      });
-      assert.notEqual(reuse.status, 200);
-    } finally {
-      await server.close();
+  test('every failure mode is indistinguishable and never yields a session', async () => {
+    await createAccount('grace', 'grace@gmail.com');
+    const wrongAnswer = await login('grace@gmail.com', 'Nowhere');
+    const wrongQuestion = await login('grace@gmail.com', 'London', 'What is your favourite colour?');
+    const unknownGmail = await login('nobody@gmail.com', 'London');
+    const bodies: unknown[] = [];
+    for (const res of [wrongAnswer, wrongQuestion, unknownGmail]) {
+      assert.equal(res.status, 401);
+      assert.equal(res.headers.get('set-cookie'), null, 'a failed login must not set a cookie');
+      bodies.push(await res.json());
     }
+    // Wrong answer, wrong question and unknown Gmail must be byte-identical, so
+    // the login form cannot be used to discover which accounts exist.
+    assert.deepEqual(bodies[0], bodies[1], 'a wrong question must fail exactly like a wrong answer');
+    assert.deepEqual(bodies[0], bodies[2], 'an unknown Gmail must fail exactly like a wrong answer');
   });
 
-  after(() => {
-    rmSync(dir, { recursive: true, force: true });
+  test('logging out invalidates the session server-side', async () => {
+    const res = await login('ada@gmail.com', 'London');
+    const cookie = (res.headers.get('set-cookie') ?? '').split(';')[0]!;
+    assert.equal((await fetch(`${url}/api/private`, { headers: { cookie } })).status, 200);
+    const out = await fetch(`${url}/api/auth/logout`, { method: 'POST', headers: { cookie } });
+    assert.equal(out.status, 204);
+    assert.match(out.headers.get('set-cookie') ?? '', /bf_session=;/, 'the cookie is cleared');
+    const after = await fetch(`${url}/api/private`, { headers: { cookie } });
+    assert.equal(after.status, 401, 'a revoked token must be refused');
+  });
+
+  test('the privileged account signs in through the SAME route', async () => {
+    const res = await login('corneliusadedejivictor@gmail.com', 's3cret-answer');
+    assert.equal(res.status, 200, 'the privileged account uses the one login route');
+    const body = (await res.json()) as { canManagePlatform: boolean };
+    assert.equal(body.canManagePlatform, true, 'and is authorised by the server');
+  });
+
+  test('there is no second-step verification or recovery route to call', async () => {
+    for (const path of ['/api/auth/login/verify', '/api/auth/forgot', '/api/auth/reset']) {
+      const res = await fetch(`${url}${path}`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ challengeId: 'x', code: '000000' }),
+      });
+      assert.equal(res.status, 404, `${path} must not exist (got ${res.status})`);
+    }
   });
 });

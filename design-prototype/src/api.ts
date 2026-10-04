@@ -1,4 +1,4 @@
-﻿// API client for NEXORA frontend to communicate with the real backend
+// API client for NEXORA frontend to communicate with the real backend
 
 const API_BASE = ''
 
@@ -216,171 +216,71 @@ export const ownerApi = {
   clearDaytona: () => request<ApiOwnerDaytona>('/api/owner/daytona', { method: 'DELETE' }),
 }
 
-// Authentication
+// Authentication — the ONLY credential surface.
+//
+// Sign up with five fields: Full Name, Username, Gmail, Security Question,
+// Security Answer. Sign in with three: Gmail, Security Question, Security
+// Answer. There is no password, OTP, authenticator, recovery code or email
+// verification anywhere in this client.
 
 export interface AccountView {
   id: string
+  fullName: string
   username: string
-  displayName: string
-  role: string
+  gmail: string
+  securityQuestion: string
+  role: 'member' | 'administrator'
   createdAt: string
-  /** True while the account must still enable its authenticator (product gated server-side). */
-  authenticatorRequired: boolean
-  /** True while the account has not yet created its recovery question/answers. */
-  recoveryRequired: boolean
-  /** Where the account stands in the mandatory first-time setup. */
-  setupStage: 'recovery' | 'authenticator' | 'complete'
-  /** True only when BOTH recovery questions and the authenticator are complete. */
-  setupComplete: boolean
 }
 
-export interface RecoveryQuestion {
-  id: string
-  question: string
+export interface SignupInput {
+  fullName: string
+  username: string
+  gmail: string
+  securityQuestion: string
+  securityAnswer: string
 }
 
-export interface RecoveryAnswer {
-  questionId: string
-  answer: string
+export interface LoginInput {
+  gmail: string
+  securityQuestion: string
+  securityAnswer: string
 }
 
 export const authApi = {
-  // â”€â”€ Entry-point status â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  ownerExists: () => request<{ ownerExists: boolean }>('/api/auth/owner-exists'),
-
-  recoveryCatalog: () => request<{ questions: RecoveryQuestion[] }>('/api/auth/recovery-questions'),
-
-  // â”€â”€ Dedicated entry points (owner and user never share one) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  /** First-time administration setup. The role is fixed to administrator in the backend. */
-  ownerSignup: (username: string, displayName: string, password: string) =>
-    request<{ account: AccountView; nextStage: string }>('/api/owner/signup', {
-      method: 'POST',
-      body: JSON.stringify({ username, displayName, password }),
-    }),
-
-  /** First-time account creation. Always creates a non-administrator account. */
-  userSignup: (username: string, displayName: string, password: string) =>
-    request<{ account: AccountView; nextStage: string }>('/api/user/signup', {
-      method: 'POST',
-      body: JSON.stringify({ username, displayName, password }),
-    }),
-
-  login: (username: string, password: string) =>
-    request<Record<string, unknown>>('/api/auth/login', {
-      method: 'POST',
-      body: JSON.stringify({ username, password }),
-    }),
-
-  loginVerify: (challengeId: string, code: string) =>
-    request<{ account: AccountView }>('/api/auth/login/verify', {
-      method: 'POST',
-      body: JSON.stringify({ challengeId, code }),
-    }),
-
-  logout: () =>
-    request<void>('/api/auth/logout', { method: 'POST' }),
-
-  me: () =>
-    request<{ account: AccountView | null }>('/api/me'),
-
-  // â”€â”€ Forgot password: username -> recovery questions -> new password â”€â”€â”€â”€â”€â”€â”€
-  forgot: (username: string) =>
-    request<{
-      mode: 'recovery-questions'
-      challengeId: string
-      expiresAt: string
-      questions: RecoveryQuestion[]
-    }>('/api/auth/forgot', {
-      method: 'POST',
-      body: JSON.stringify({ username }),
-    }),
-
-  forgotAnswer: (challengeId: string, answers: RecoveryAnswer[]) =>
-    request<{ resetToken: string; expiresAt: string; notice?: string }>('/api/auth/forgot/answer', {
-      method: 'POST',
-      body: JSON.stringify({ challengeId, answers }),
-    }),
-
-  reset: (token: string, password: string) =>
-    request<{ account: any }>('/api/auth/reset', {
-      method: 'POST',
-      body: JSON.stringify({ token, password }),
-    }),
-
-  // â”€â”€ Recovery questions (setup + sensitive-change authorization) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  /** Returns the account's configured questions and the full catalog. Never answers. */
-  recoveryInfo: () =>
-    request<{ questions: RecoveryQuestion[]; catalog: RecoveryQuestion[]; configured: boolean }>(
-      '/api/account/recovery',
-    ),
-
-  /** First-time setup: stores hashed recovery answers. */
-  recoverySetup: (answers: RecoveryAnswer[]) =>
-    request<{ account: AccountView; nextStage: string }>('/api/account/recovery', {
-      method: 'POST',
-      body: JSON.stringify({ answers }),
-    }),
-
-  // â”€â”€ TOTP â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  totpStatus: () =>
-    request<{ enabled: boolean; recoveryCodesRemaining: number }>('/api/account/authenticator'),
+  /** The security questions an account may be created with. Public by design. */
+  securityQuestions: () => request<{ questions: string[] }>('/api/auth/security-questions'),
 
   /**
-   * First-time setup passes no authorization (recovery does not exist yet).
-   * Changing an authenticator passes the account's recovery answers.
+   * Creates an account. Issues NO session — the caller must sign in.
+   * Every account, privileged or not, is created here.
    */
-  totpSetup: (recoveryAnswers?: RecoveryAnswer[]) =>
-    request<{ secret: string; otpauth: string; changeAuthorized?: boolean }>(
-      '/api/account/authenticator/setup',
-      {
-        method: 'POST',
-        body: JSON.stringify(recoveryAnswers ? { recoveryAnswers } : {}),
-      },
-    ),
-
-  totpEnable: (code: string) =>
-    request<{ enabled: boolean; recoveryCodes: string[] }>('/api/account/authenticator/enable', {
+  signup: (input: SignupInput) =>
+    request<{ account: AccountView }>('/api/auth/signup', {
       method: 'POST',
-      body: JSON.stringify({ code }),
+      body: JSON.stringify(input),
     }),
 
-  totpDisable: (code: string) =>
-    request<{ enabled: boolean }>('/api/account/authenticator/disable', {
+  /** The single sign-in route for every account. */
+  login: (input: LoginInput) =>
+    request<{ account: AccountView; canManagePlatform: boolean }>('/api/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ code }),
+      body: JSON.stringify(input),
     }),
 
-  // Profile
-  updateProfile: (displayName: string) =>
+  logout: () => request<void>('/api/auth/logout', { method: 'POST' }),
+
+  /** Resolved server-side from the session cookie. Never from a client field. */
+  session: () =>
+    request<{ account: AccountView | null; canManagePlatform: boolean }>('/api/auth/session'),
+
+  // Non-authenticating account settings.
+  updateProfile: (fullName: string) =>
     request<{ account: AccountView }>('/api/account/profile', {
       method: 'POST',
-      body: JSON.stringify({ displayName }),
+      body: JSON.stringify({ fullName }),
     }),
 
-  // Password
-  /** Sensitive change: authorized by the account's recovery answers. */
-  changePassword: (newPassword: string, recoveryAnswers: RecoveryAnswer[], currentPassword?: string) =>
-    request<{ account: AccountView }>('/api/account/password', {
-      method: 'POST',
-      body: JSON.stringify({
-        newPassword,
-        recoveryAnswers,
-        ...(currentPassword ? { currentPassword } : {}),
-      }),
-    }),
-
-  // Sessions
-  listSessions: () =>
-    request<{ sessions: Array<{ createdAt: string; expiresAt: string; current: boolean }> }>('/api/account/sessions'),
-
-  revokeOtherSessions: () =>
-    request<{ revoked: number }>('/api/account/sessions/revoke-others', { method: 'POST' }),
-
-  // Security events
-  listSecurityEvents: () =>
-    request<{ events: Array<{ accountId: string; kind: string; at: string; detail?: string }> }>('/api/account/security-events'),
-
-  // Preferences
   getPreferences: () =>
     request<{ preferences: Record<string, unknown> }>('/api/account/preferences'),
 

@@ -1,79 +1,96 @@
-﻿import { useState, useCallback, createContext, useContext, ReactNode, useEffect } from 'react'
+import { useState, useCallback, createContext, useContext, ReactNode, useEffect } from 'react'
 import { navigate } from './router'
 import { Project, ProjectMode, stagesForMode, StageId, StageStatus } from './mock/data'
 import { api } from './api'
 
 interface Toast { id: number; message: string; type: 'success' | 'error' | 'info' }
+
+/**
+ * Authentication state.
+ *
+ * The ONLY credential on this platform is the security question + answer pair,
+ * proven against a Gmail address. There is no password, OTP, authenticator,
+ * recovery code or email verification - so none of them appears in this state.
+ *
+ * `canManagePlatform` is ADVISORY. It mirrors a server decision so the UI can
+ * choose what to render; it is never what protects a privileged resource. The
+ * server refuses those routes independently, and the HTTP tests prove it.
+ */
 interface AuthState {
   authenticated: boolean
   id: string
+  fullName: string
   username: string
-  displayName: string
-  totpEnabled: boolean
-  totpPending: boolean
-  authenticatorRequired: boolean
-  /** True while the account has not yet created its recovery question/answers. */
-  recoveryPending: boolean
-  /** Where the account stands in the mandatory first-time setup. */
-  setupStage: 'recovery' | 'authenticator' | 'complete'
-  setupComplete: boolean
-  role: string
+  gmail: string
+  securityQuestion: string
+  role: 'member' | 'administrator'
   createdAt: string
+  canManagePlatform: boolean
 }
 
-/** Builds the auth state from an account view returned by the backend. */
+/** The single public sign-up contract: five fields, nothing else. */
+export interface SignupFields {
+  fullName: string
+  username: string
+  gmail: string
+  securityQuestion: string
+  securityAnswer: string
+}
+
+/** The single public sign-in contract: three fields, nothing else. */
+export interface LoginFields {
+  gmail: string
+  securityQuestion: string
+  securityAnswer: string
+}
+
 function authFromAccount(
   account: {
     id: string
+    fullName: string
     username: string
-    displayName: string
-    role: string
+    gmail: string
+    securityQuestion: string
+    role: 'member' | 'administrator'
     createdAt: string
-    authenticatorRequired: boolean
-    recoveryRequired?: boolean
-    setupStage?: 'recovery' | 'authenticator' | 'complete'
-    setupComplete?: boolean
   },
-  totpEnabled: boolean,
+  canManagePlatform: boolean,
 ): AuthState {
-  const stage = account.setupStage ?? 'complete'
   return {
     authenticated: true,
     id: account.id,
+    fullName: account.fullName,
     username: account.username,
-    displayName: account.displayName,
-    totpEnabled,
-    totpPending: account.authenticatorRequired === true && !totpEnabled,
-    authenticatorRequired: account.authenticatorRequired === true,
-    recoveryPending: account.recoveryRequired === true,
-    setupStage: stage,
-    setupComplete: account.setupComplete === true,
+    gmail: account.gmail,
+    securityQuestion: account.securityQuestion,
     role: account.role,
     createdAt: account.createdAt,
+    canManagePlatform,
   }
 }
 
-interface LoginChallenge {
-  challengeId: string
-  expiresAt: string
-  username: string
+const ANONYMOUS: AuthState = {
+  authenticated: false,
+  id: '',
+  fullName: '',
+  username: '',
+  gmail: '',
+  securityQuestion: '',
+  role: 'member',
+  createdAt: '',
+  canManagePlatform: false,
 }
 
 interface StoreContextType {
   auth: AuthState
-  login: (username: string, password: string) => Promise<{ ok: boolean; totpEnabled: boolean; totpPending: boolean; requiresAuthenticator?: boolean }>
-  loginVerify: (code: string) => Promise<{ ok: boolean }>
-  /** First-time administration setup, from the private administration entry. */
-  ownerSignup: (username: string, displayName: string, password: string) => Promise<{ ok: boolean; reason: string }>
-  /** First-time account creation, from the public product entry. */
-  userSignup: (username: string, displayName: string, password: string) => Promise<{ ok: boolean; reason: string }>
+  /** Creates an account. Issues NO session - the caller must then sign in. */
+  signup: (fields: SignupFields) => Promise<{ ok: boolean; reason: string }>
+  /** The one sign-in route, used by every account including the privileged one. */
+  login: (fields: LoginFields) => Promise<{ ok: boolean; reason: string }>
   logout: () => Promise<void>
-  enableTotp: (code: string) => Promise<string[]>
-  disableTotp: (code: string) => Promise<void>
-  updateProfile: (displayName: string) => Promise<void>
-  changePassword: (newPassword: string, recoveryAnswers: Array<{ questionId: string; answer: string }>) => Promise<void>
-  /** First-time setup: stores the account's recovery question/answers. */
-  setupRecoveryQuestions: (answers: Array<{ questionId: string; answer: string }>) => Promise<{ ok: boolean; reason?: string }>
+  updateProfile: (fullName: string) => Promise<void>
+  securityQuestions: string[]
+  loadSecurityQuestions: () => Promise<void>
   toasts: Toast[]
   pushToast: (message: string, type?: Toast['type']) => void
   sidebarCollapsed: boolean
@@ -88,60 +105,26 @@ interface StoreContextType {
   endStageRun: () => void
   runProjectStage: (projectId: string, stageId: string, instruction?: string) => Promise<{ projectId: string; stageId: string; label: string; status: string; at: string; summary: string }>
   approveProject: (projectId: string) => Promise<{ projectId: string; status: string; approvedAt: string; approvedBy: string; summary: string }>
-  totpCode: string
-  setTotpCode: (c: string) => void
-  recoveryCode: string
-  setRecoveryCode: (c: string) => void
-  loginChallenge: LoginChallenge | null
-  clearLoginChallenge: () => void
-  // Authenticator setup. During first-time setup no authorization is needed;
-  // changing an already-active authenticator requires the recovery answers.
-  totpSetup: { secret: string; otpauth: string } | null
-  fetchTotpSetup: (recoveryAnswers?: Array<{ questionId: string; answer: string }>) => Promise<void>
-  // Sessions
-  sessions: Array<{ createdAt: string; expiresAt: string; current: boolean }>
-  fetchSessions: () => Promise<void>
-  revokeOtherSessions: () => Promise<void>
-  // Security events
-  securityEvents: Array<{ accountId: string; kind: string; at: string; detail?: string }>
-  fetchSecurityEvents: () => Promise<void>
-  // Preferences
   preferences: Record<string, unknown>
   fetchPreferences: () => Promise<void>
   updatePreferences: (preferences: Record<string, unknown>) => Promise<void>
-  // Document upload
   uploadDocument: (file: File) => Promise<{ document: { id: string; preview: string; charLength: number; byteLength: number; contentHash: string }; fileName: string | null }>
-  // Chat ingest
   ingestText: (text: string) => Promise<{ kind: 'message' | 'document'; message?: string; charLength?: number; documentRef?: { id: string; ownerId: string; charLength: number; byteLength: number; preview: string; contentHash: string; createdAt: string } }>
 }
 
 const StoreContext = createContext<StoreContextType | null>(null)
 
 let toastId = 0
-
 export function StoreProvider({ children }: { children: ReactNode }) {
-  const readSession = (): AuthState => {
-    // Session is managed by backend cookies, so we just track auth state locally
-    return { authenticated: false, id: '', username: '', displayName: '', totpEnabled: false, totpPending: false, authenticatorRequired: false, recoveryPending: false, setupStage: 'recovery' as const, setupComplete: false, role: '', createdAt: '' }
-  }
-  const [auth, setAuth] = useState<AuthState>(readSession)
+  const [auth, setAuth] = useState<AuthState>(ANONYMOUS)
   const [toasts, setToasts] = useState<Toast[]>([])
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  const [totpCode, setTotpCode] = useState('')
-  const [recoveryCode, setRecoveryCode] = useState('')
   const [projects, setProjects] = useState<Project[]>([])
   const [running, setRunning] = useState<{ projectId: string; stage: string } | null>(null)
-  const [totpSetup, setTotpSetup] = useState<{ secret: string; otpauth: string } | null>(null)
-  const [sessions, setSessions] = useState<Array<{ createdAt: string; expiresAt: string; current: boolean }>>([])
-  const [securityEvents, setSecurityEvents] = useState<Array<{ accountId: string; kind: string; at: string; detail?: string }>>([])
-  const [loginChallenge, setLoginChallenge] = useState<LoginChallenge | null>(null)
   const [preferences, setPreferences] = useState<Record<string, unknown>>({})
+  const [securityQuestions, setSecurityQuestions] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
-  const persist = (a: AuthState) => {
-    setAuth(a)
-  }
 
   const pushToast = useCallback((message: string, type: Toast['type'] = 'info') => {
     const id = ++toastId
@@ -149,209 +132,95 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3500)
   }, [])
 
-// Initialize auth state from backend
-  useEffect(() => {
-    const initAuth = async () => {
-      try {
-        const res = await api.auth.me()
-        if (res.account) {
-          let totpEnabled = false
-          try {
-            const status = await api.auth.totpStatus()
-            totpEnabled = status.enabled
-          } catch { /* authenticator status unavailable */ }
-          setAuth(authFromAccount(res.account, totpEnabled))
-        }
-      } catch {
-        // Not authenticated
-        setAuth(readSession())
-      }
+  const loadSecurityQuestions = useCallback(async () => {
+    try {
+      const res = await api.auth.securityQuestions()
+      setSecurityQuestions(res.questions)
+    } catch {
+      setSecurityQuestions([])
     }
-    initAuth()
   }, [])
 
-  const login = useCallback(async (usernameOrEmail: string, password: string) => {
+  // The session is a server-resolved HttpOnly cookie. We ask the server who we
+  // are; we never decide it here and never keep a copy of any credential.
+  useEffect(() => {
+    let alive = true
+    const initAuth = async () => {
+      try {
+        const res = await api.auth.session()
+        if (!alive) return
+        setAuth(res.account ? authFromAccount(res.account, res.canManagePlatform) : ANONYMOUS)
+      } catch {
+        if (alive) setAuth(ANONYMOUS)
+      }
+      void loadSecurityQuestions()
+    }
+    void initAuth()
+    return () => { alive = false }
+  }, [loadSecurityQuestions])
+
+  const signup = useCallback(async (fields: SignupFields): Promise<{ ok: boolean; reason: string }> => {
     setLoading(true)
     setError(null)
     try {
-      const res = await api.auth.login(usernameOrEmail, password)
-      if (res.requiresAuthenticator === true && typeof res.challengeId === 'string') {
-        setLoginChallenge({
-          challengeId: res.challengeId,
-          expiresAt: typeof res.expiresAt === 'string' ? res.expiresAt : '',
-          username: typeof res.username === 'string' ? res.username : usernameOrEmail,
-        })
-        pushToast('Enter your authenticator code to finish signing in', 'info')
-        return { ok: true, totpEnabled: true, totpPending: true, requiresAuthenticator: true }
-      }
-      const account = (res as { account?: Parameters<typeof authFromAccount>[0] }).account
-      if (!account) throw new Error('Unexpected login response')
-      let totpEnabled = false
-      try {
-        const status = await api.auth.totpStatus()
-        totpEnabled = status.enabled
-      } catch { /* authenticator status unavailable */ }
-      setAuth(authFromAccount(account, totpEnabled))
-      pushToast('Welcome back', 'success')
-      return { ok: true, totpEnabled, totpPending: false }
+      await api.auth.signup({
+        fullName: fields.fullName.trim(),
+        username: fields.username.trim(),
+        gmail: fields.gmail.trim(),
+        securityQuestion: fields.securityQuestion,
+        securityAnswer: fields.securityAnswer,
+      })
+      // Sign-up deliberately returns NO session, so we stay anonymous here and
+      // send the user to sign in rather than pretending they are logged in.
+      pushToast('Account created - sign in to continue', 'success')
+      return { ok: true, reason: '' }
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Incorrect username or password.'
-      setError(message)
-      return { ok: false, totpEnabled: false, totpPending: false }
+      const reason = err instanceof Error ? err.message : 'That account could not be created.'
+      setError(reason)
+      return { ok: false, reason }
     } finally {
       setLoading(false)
     }
   }, [pushToast])
 
-  const loginVerify = useCallback(async (code: string): Promise<{ ok: boolean }> => {
+  const login = useCallback(async (fields: LoginFields): Promise<{ ok: boolean; reason: string }> => {
     setLoading(true)
     setError(null)
     try {
-      if (loginChallenge === null) throw new Error('No pending sign-in. Enter your username and password first.')
-      const res = await api.auth.loginVerify(loginChallenge.challengeId, code)
-      let totpEnabled = false
-      try {
-        const status = await api.auth.totpStatus()
-        totpEnabled = status.enabled
-      } catch { /* authenticator status unavailable */ }
-      setAuth(authFromAccount(res.account, totpEnabled))
-      setLoginChallenge(null)
-      pushToast('Authenticated', 'success')
-      return { ok: true }
+      const res = await api.auth.login({
+        gmail: fields.gmail.trim(),
+        securityQuestion: fields.securityQuestion,
+        securityAnswer: fields.securityAnswer,
+      })
+      setAuth(authFromAccount(res.account, res.canManagePlatform))
+      pushToast('Welcome back', 'success')
+      return { ok: true, reason: '' }
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'That code is not valid.'
-      setError(message)
-      return { ok: false }
+      // One generic message for every failure, so the form cannot be used to
+      // discover which Gmail addresses exist.
+      const reason = err instanceof Error ? err.message : 'Those details did not match an account.'
+      setError(reason)
+      return { ok: false, reason }
     } finally {
       setLoading(false)
     }
-  }, [loginChallenge, pushToast])
-
-  const clearLoginChallenge = useCallback(() => {
-    setLoginChallenge(null)
-  }, [])
-
-  /**
-   * FIRST-TIME SETUP, shared body for both dedicated entry points. The account
-   * is never usable straight away: the backend reports the next mandatory
-   * stage, which the router walks through (recovery, then authenticator).
-   */
-  const beginSetup = useCallback(
-    async (
-      create: () => Promise<{ account: Parameters<typeof authFromAccount>[0]; nextStage: string }>,
-      welcome: string,
-    ): Promise<{ ok: boolean; reason: string }> => {
-      setLoading(true)
-      setError(null)
-      try {
-        const res = await create()
-        // A brand-new account always has no authenticator yet.
-        setAuth(authFromAccount(res.account, false))
-        pushToast(welcome, 'success')
-        return { ok: true, reason: res.nextStage }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Account setup failed.'
-        setError(message)
-        return { ok: false, reason: message }
-      } finally {
-        setLoading(false)
-      }
-    },
-    [pushToast],
-  )
-
-  /** First-time administration setup, from the private administration entry. */
-  const ownerSignup = useCallback(
-    (username: string, displayName: string, password: string) =>
-      beginSetup(() => api.auth.ownerSignup(username, displayName, password), 'Administration account created'),
-    [beginSetup],
-  )
-
-  /** First-time account creation, from the public product entry. */
-  const userSignup = useCallback(
-    (username: string, displayName: string, password: string) =>
-      beginSetup(() => api.auth.userSignup(username, displayName, password), 'Account created — welcome to NEXORA'),
-    [beginSetup],
-  )
-
-  /**
-   * First-time recovery question/answer setup. Answers go straight to the
-   * backend, which hashes them; they are never held in app state or logged.
-   */
-  const setupRecoveryQuestions = useCallback(
-    async (answers: Array<{ questionId: string; answer: string }>): Promise<{ ok: boolean; reason?: string }> => {
-      setLoading(true)
-      setError(null)
-      try {
-        const res = await api.auth.recoverySetup(answers)
-        setAuth((a) => ({
-          ...a,
-          recoveryPending: false,
-          setupStage: res.nextStage as AuthState['setupStage'],
-          setupComplete: res.account.setupComplete === true,
-        }))
-        pushToast('Recovery questions saved securely', 'success')
-        return { ok: true }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Recovery setup failed.'
-        setError(message)
-        return { ok: false, reason: message }
-      } finally {
-        setLoading(false)
-      }
-    },
-    [pushToast],
-  )
+  }, [pushToast])
 
   const logout = useCallback(async () => {
     try {
       await api.auth.logout()
-    } catch { /* ignore */ }
-    setAuth(readSession())
+    } catch { /* the local session is cleared regardless */ }
+    setAuth(ANONYMOUS)
     setProjects([])
     navigate('#/welcome')
-    pushToast('You have been logged out', 'info')
+    pushToast('You have been signed out', 'info')
   }, [pushToast])
 
-  const enableTotp = useCallback(async (code: string): Promise<string[]> => {
-    try {
-      const res = await api.auth.totpEnable(code)
-      // A verified 6-digit code completes the last mandatory setup step, so the
-      // account is now fully set up and may enter the dashboard.
-      setAuth((a) => ({
-        ...a,
-        totpEnabled: true,
-        totpPending: false,
-        setupStage: 'complete',
-        setupComplete: true,
-      }))
-      pushToast('Authenticator verified — setup complete', 'success')
-      return res.recoveryCodes ?? []
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to enable authenticator'
-      setError(message)
-      throw err
-    }
-  }, [pushToast])
-
-  const disableTotp = useCallback(async (code: string) => {
-    try {
-      await api.auth.totpDisable(code)
-      setAuth((a) => ({ ...a, totpEnabled: false, totpPending: !!a.authenticatorRequired }))
-      pushToast('Authenticator disabled', 'info')
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to disable authenticator'
-      setError(message)
-      throw err
-    }
-  }, [pushToast])
-
-  const updateProfile = useCallback(async (displayName: string) => {
+  const updateProfile = useCallback(async (fullName: string) => {
     setLoading(true)
     try {
-      await api.auth.updateProfile(displayName.trim())
-      const next = { ...auth, displayName: displayName.trim() }
-      persist(next)
+      const res = await api.auth.updateProfile(fullName.trim())
+      setAuth(a => ({ ...a, fullName: res.account.fullName }))
       pushToast('Profile updated', 'success')
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to update profile'
@@ -360,26 +229,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoading(false)
     }
-  }, [auth, pushToast])
-
-  /** Sensitive change: authorized by the account's recovery answers. */
-  const changePassword = useCallback(async (newPassword: string, recoveryAnswers: Array<{ questionId: string; answer: string }>) => {
-    setLoading(true)
-    try {
-      await api.auth.changePassword(newPassword, recoveryAnswers)
-      pushToast('Password updated', 'success')
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Failed to change password'
-      setError(message)
-      throw err
-    } finally {
-      setLoading(false)
-    }
   }, [pushToast])
 
   const toggleSidebar = useCallback(() => setSidebarCollapsed(p => !p), [])
-
-  const fetchProjects = useCallback(async () => {
+const fetchProjects = useCallback(async () => {
     try {
       const res = await api.projects.list()
       const mappedProjects: Project[] = res.projects.map(p => ({
@@ -471,13 +324,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         approval: res.approval,
         stagesRunCount: res.stagesRunCount,
         aiConfig: res.aiConfig ?? null,
-        stages: res.stages.map(s => ({ 
-          id: s.stageId as StageId, 
-          label: s.label, 
-          num: '', 
-          status: s.status as StageStatus, 
+        stages: res.stages.map(s => ({
+          id: s.stageId as StageId,
+          label: s.label,
+          num: '',
+          status: s.status as StageStatus,
           at: s.at ?? null,
-          inScope: s.inScope 
+          inScope: s.inScope
         })),
       } as Project
     } catch {
@@ -492,8 +345,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
     return projects
   }, [projects, fetchProjects])
-
-  const startStageRun = useCallback((projectId: string, stage: string) => setRunning({ projectId, stage }), [])
+const startStageRun = useCallback((projectId: string, stage: string) => setRunning({ projectId, stage }), [])
   const endStageRun = useCallback(() => setRunning(null), [])
 
   const runProjectStage = useCallback(async (projectId: string, stageId: string, instruction?: string) => {
@@ -520,53 +372,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [pushToast])
 
-  // Fetch TOTP setup
-  /**
-   * Starts authenticator enrollment. During first-time setup no authorization is
-   * required (the account has no recovery questions yet). Replacing an active
-   * authenticator is a sensitive change and must present the recovery answers.
-   */
-  const fetchTotpSetup = useCallback(async (recoveryAnswers?: Array<{ questionId: string; answer: string }>) => {
-    try {
-      const res = await api.auth.totpSetup(recoveryAnswers)
-      setTotpSetup(res)
-    } catch (err) {
-      setTotpSetup(null)
-      throw err
-    }
-  }, [])
-
-  // Sessions
-  const fetchSessions = useCallback(async () => {
-    try {
-      const res = await api.auth.listSessions()
-      setSessions(res.sessions)
-    } catch {
-      setSessions([])
-    }
-  }, [])
-
-  const revokeOtherSessions = useCallback(async () => {
-    try {
-      await api.auth.revokeOtherSessions()
-      await fetchSessions()
-      pushToast('Signed out of all other sessions', 'success')
-    } catch {
-      pushToast('Failed to revoke sessions', 'error')
-    }
-  }, [fetchSessions, pushToast])
-
-  // Security events
-  const fetchSecurityEvents = useCallback(async () => {
-    try {
-      const res = await api.auth.listSecurityEvents()
-      setSecurityEvents(res.events)
-    } catch {
-      setSecurityEvents([])
-    }
-  }, [])
-
-  // Preferences
   const fetchPreferences = useCallback(async () => {
     try {
       const res = await api.auth.getPreferences()
@@ -586,7 +391,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [pushToast])
 
-  // Document upload
   const uploadDocument = useCallback(async (file: File) => {
     setLoading(true)
     try {
@@ -602,7 +406,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [pushToast])
 
-  // Chat ingest
   const ingestText = useCallback(async (text: string) => {
     try {
       const res = await api.documents.ingest(text)
@@ -616,16 +419,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   return (
     <StoreContext.Provider value={{
-      auth, login, loginVerify, ownerSignup, userSignup, setupRecoveryQuestions, logout, enableTotp, disableTotp, updateProfile, changePassword, toasts, pushToast,
+      auth, signup, login, logout, updateProfile,
+      securityQuestions, loadSecurityQuestions,
+      toasts, pushToast,
       sidebarCollapsed, toggleSidebar,
       createProject, updateProject, deleteProject, getProject, listProjects,
       running, startStageRun, endStageRun, runProjectStage, approveProject,
-      totpCode, setTotpCode,
-      recoveryCode, setRecoveryCode,
-      loginChallenge, clearLoginChallenge,
-      totpSetup, fetchTotpSetup,
-      sessions, fetchSessions, revokeOtherSessions,
-      securityEvents, fetchSecurityEvents,
       preferences, fetchPreferences, updatePreferences,
       uploadDocument,
       ingestText,
@@ -640,8 +439,3 @@ export function useStore() {
   if (!ctx) throw new Error('useStore must be used within StoreProvider')
   return ctx
 }
-
-
-
-
-

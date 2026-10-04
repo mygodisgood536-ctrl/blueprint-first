@@ -1,15 +1,24 @@
-﻿/**
- * SIGN IN / CREATE ACCOUNT - the public product authentication entry.
+/**
+ * SIGN IN / CREATE ACCOUNT - the one public authentication entry.
  *
  * Reached deliberately from the product welcome screen. Contains no reference
- * to any privileged role, no owner link, and no internal terminology. The only
- * destinations it can produce are the product itself, first-time setup, or
- * password recovery.
+ * to any privileged role, no owner link, and no internal terminology.
+ *
+ * The credential model is deliberately minimal and is the ONLY one in the
+ * product:
+ *
+ *   CREATE ACCOUNT : Full Name, Username, Gmail, Security Question, Answer
+ *   SIGN IN        : Gmail, Security Question, Answer
+ *
+ * There is no password, OTP, SMS or email verification, authenticator,
+ * recovery-code or password-reset field anywhere on this screen, and no link to
+ * any of those flows. The privileged account is not created or signed in here
+ * either: it is provisioned server-side and then signs in through this exact
+ * screen, like any other account.
  */
 import React, { useState } from 'react'
 import { navigate } from '../router'
 import { useStore } from '../store'
-import { SecretField } from '../components/SecretField'
 
 function AuthShell({ children }: { children: React.ReactNode }) {
   return (
@@ -23,7 +32,7 @@ function AuthShell({ children }: { children: React.ReactNode }) {
         </div>
         <div className="auth-card card">{children}</div>
         <p className="center text-sm mt-16" style={{ color: 'var(--text-tertiary)' }}>
-          Â© 2026 NEXORA
+          © 2026 NEXORA
         </p>
       </div>
     </div>
@@ -43,144 +52,180 @@ function Notice({ tone, children }: { tone: 'error' | 'info' | 'success'; childr
   )
 }
 
-/**
- * Where a completed sign-in should land.
- *
- * The product is the only destination: the sign-in flow never routes anyone into
- * the private administration area. An administrator reaches that from their own
- * entry point or from the sidebar.
- */
-function destinationFor(setupComplete: boolean): string {
-  return setupComplete ? '#/dashboard' : '#/setup/recovery'
+/** The security-question picker. The catalog is public and fetched from the server. */
+function QuestionSelect({
+  value,
+  onChange,
+  id,
+}: {
+  value: string
+  onChange: (v: string) => void
+  id: string
+}) {
+  const { securityQuestions, loadSecurityQuestions } = useStore()
+  React.useEffect(() => {
+    if (securityQuestions.length === 0) void loadSecurityQuestions()
+  }, [securityQuestions.length, loadSecurityQuestions])
+  return (
+    <select id={id} value={value} onChange={(e) => onChange(e.target.value)} required>
+      <option value="">Choose a security question…</option>
+      {securityQuestions.map(q => (
+        <option key={q} value={q}>
+          {q}
+        </option>
+      ))}
+    </select>
+  )
 }
 
 export function SignIn() {
   const store = useStore()
   const [mode, setMode] = useState<'signin' | 'create'>('signin')
+
+  // Sign in: exactly three fields.
+  const [gmail, setGmail] = useState('')
+  const [signinQuestion, setSigninQuestion] = useState('')
+  const [signinAnswer, setSigninAnswer] = useState('')
+
+  // Create account: exactly five fields.
+  const [fullName, setFullName] = useState('')
   const [username, setUsername] = useState('')
-  const [displayName, setDisplayName] = useState('')
-  const [password, setPassword] = useState('')
-  const [confirm, setConfirm] = useState('')
+  const [createGmail, setCreateGmail] = useState('')
+  const [createQuestion, setCreateQuestion] = useState('')
+  const [createAnswer, setCreateAnswer] = useState('')
+
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
+  const creating = mode === 'create'
+
   // An already signed-in account never needs this screen.
   React.useEffect(() => {
-    if (store.auth.authenticated && store.auth.setupComplete) navigate('#/dashboard')
-  }, [store.auth.authenticated, store.auth.setupComplete])
+    if (store.auth.authenticated) navigate('#/dashboard')
+  }, [store.auth.authenticated])
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!username.trim()) {
-      setError('Enter your username.')
+    setError('')
+
+    if (creating) {
+      if (fullName.trim().length < 2) { setError('Enter your full name.'); return }
+      if (username.trim().length < 3) { setError('Username must be at least 3 characters.'); return }
+      if (!createGmail.trim()) { setError('Enter your Gmail address.'); return }
+      if (!createQuestion) { setError('Choose a security question.'); return }
+      if (createAnswer.trim().length < 2) { setError('Enter the answer to your security question.'); return }
+      setBusy(true)
+      const res = await store.signup({
+        fullName, username, gmail: createGmail,
+        securityQuestion: createQuestion, securityAnswer: createAnswer,
+      })
+      setBusy(false)
+      if (res.ok) {
+        // Sign-up issues no session, so we switch to the sign-in form with the
+        // details carried across rather than pretending the account is active.
+        setGmail(createGmail)
+        setSigninQuestion(createQuestion)
+        setMode('signin')
+        setError('Account created. Sign in with your Gmail and security question.')
+      } else {
+        setError(res.reason)
+      }
       return
     }
-    if (mode === 'create') {
-      if (username.trim().length < 3) {
-        setError('Username must be at least 3 characters.')
-        return
-      }
-      if (password.length < 8) {
-        setError('Password must be at least 8 characters.')
-        return
-      }
-      // The confirmation field only exists while creating an account. Checking
-      // it when signing in would compare the typed password against an empty
-      // string and block every returning user.
-      if (password !== confirm) {
-        setError('Passwords do not match.')
-        return
-      }
-    }
-    setError('')
+
+    if (!gmail.trim()) { setError('Enter your Gmail address.'); return }
+    if (!signinQuestion) { setError('Choose your security question.'); return }
+    if (!signinAnswer.trim()) { setError('Enter the answer to your security question.'); return }
     setBusy(true)
-    try {
-      if (mode === 'create') {
-        const res = await store.userSignup(username.trim(), displayName.trim() || username.trim(), password)
-        if (res.ok) {
-          navigate('#/setup/recovery')
-        } else {
-          setError(res.reason || 'We could not create that account.')
-        }
-        return
-      }
-      const res = await store.login(username.trim(), password)
-      if (!res.ok) {
-        setError('That username and password do not match.')
-        return
-      }
-      if (res.requiresAuthenticator === true) {
-        navigate('#/signin/verify')
-        return
-      }
-      navigate(destinationFor(store.auth.setupComplete))
-    } finally {
-      setBusy(false)
+    const res = await store.login({ gmail, securityQuestion: signinQuestion, securityAnswer: signinAnswer })
+    setBusy(false)
+    if (res.ok) {
+      navigate('#/dashboard')
+    } else {
+      // One generic message for every failure: an unknown Gmail, a wrong
+      // question and a wrong answer are indistinguishable.
+      setError('Those details did not match an account.')
     }
   }
-
-  const creating = mode === 'create'
-
-  return (
+return (
     <AuthShell>
       <h1 style={{ fontSize: 21, marginBottom: 4 }}>{creating ? 'Create your account' : 'Sign in'}</h1>
       <p className="muted text-sm mb-20">
-        {creating ? 'Start your workspace in about a minute.' : 'Welcome back.'}
+        {creating
+          ? 'Five details create your account. You will sign in with your Gmail and security question.'
+          : 'Sign in with your Gmail address and the security question you chose.'}
       </p>
       <form onSubmit={submit} noValidate>
         {error && <Notice tone="error">{error}</Notice>}
-        <div className="field">
-          <label htmlFor="auth-username">Username</label>
-          <input
-            id="auth-username"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            placeholder="your-username"
-            autoComplete="username"
-            autoFocus
-          />
-        </div>
+
         {creating && (
           <div className="field">
-            <label htmlFor="auth-display-name">Display name</label>
+            <label htmlFor="full-name">Full Name</label>
             <input
-              id="auth-display-name"
-              value={displayName}
-              onChange={(e) => setDisplayName(e.target.value)}
-              placeholder="How your name appears in the workspace"
+              id="full-name"
+              value={fullName}
+              onChange={(e) => setFullName(e.target.value)}
+              placeholder="Your full name"
+              autoComplete="name"
+              data-testid="auth-fullname"
             />
           </div>
         )}
-        <div className="field">
-          <label htmlFor="auth-password">Password</label>
-          <SecretField
-            id="auth-password"
-            value={password}
-            onChange={setPassword}
-            placeholder={creating ? 'At least 8 characters' : ''}
-            autoComplete={creating ? 'new-password' : 'current-password'}
-            data-testid="auth-password"
-          />
-        </div>
+
         {creating && (
           <div className="field">
-            <label htmlFor="auth-confirm">Confirm password</label>
-            <SecretField
-              id="auth-confirm"
-              value={confirm}
-              onChange={setConfirm}
-              placeholder="Re-enter your password"
-              autoComplete="new-password"
-              data-testid="auth-confirm"
+            <label htmlFor="username">Username</label>
+            <input
+              id="username"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="Choose a username"
+              autoComplete="username"
+              data-testid="auth-username"
             />
           </div>
         )}
+
+        <div className="field">
+          <label htmlFor="gmail">Gmail</label>
+          <input
+            id="gmail"
+            type="email"
+            value={creating ? createGmail : gmail}
+            onChange={(e) => (creating ? setCreateGmail(e.target.value) : setGmail(e.target.value))}
+            placeholder="you@gmail.com"
+            autoComplete="email"
+            data-testid="auth-gmail"
+          />
+        </div>
+
+        <div className="field">
+          <label htmlFor="security-question">Security Question</label>
+          <QuestionSelect
+            id="security-question"
+            value={creating ? createQuestion : signinQuestion}
+            onChange={(v) => (creating ? setCreateQuestion(v) : setSigninQuestion(v))}
+          />
+        </div>
+
+        <div className="field">
+          <label htmlFor="security-answer">Security Answer</label>
+          <input
+            id="security-answer"
+            value={creating ? createAnswer : signinAnswer}
+            onChange={(e) => (creating ? setCreateAnswer(e.target.value) : setSigninAnswer(e.target.value))}
+            placeholder="Answer from memory"
+            autoComplete="off"
+            data-testid="auth-answer"
+          />
+        </div>
+
         <button className="btn btn-primary btn-block btn-lg" disabled={busy} type="submit">
-          {busy ? 'Workingâ€¦' : creating ? 'Create account' : 'Sign in'}
+          {busy ? 'Working…' : creating ? 'Create account' : 'Sign in'}
         </button>
       </form>
       <div className="divider" />
-      <p className="center text-sm muted">
+      <p className="center text-sm muted" style={{ marginBottom: 0 }}>
         {creating ? 'Already have an account? ' : 'New to NEXORA? '}
         <a
           href="#/signin"
@@ -188,90 +233,11 @@ export function SignIn() {
             e.preventDefault()
             setMode(creating ? 'signin' : 'create')
             setError('')
-            setConfirm('')
           }}
         >
           {creating ? 'Sign in instead' : 'Create an account'}
         </a>
       </p>
-      {!creating && (
-        <p className="center text-sm mt-16" style={{ marginBottom: 0 }}>
-          <a href="#/signin/recovery">Forgot your password?</a>
-        </p>
-      )}
     </AuthShell>
   )
 }
-
-/** Second step of a normal sign-in: the 6-digit authenticator code. */
-export function SignInVerify() {
-  const store = useStore()
-  const [code, setCode] = useState('')
-  const [error, setError] = useState('')
-  const [busy, setBusy] = useState(false)
-
-  React.useEffect(() => {
-    if (store.loginChallenge === null && !store.auth.authenticated) navigate('#/signin')
-  }, [store.loginChallenge, store.auth.authenticated])
-
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    const digits = code.replace(/\D/g, '')
-    if (digits.length !== 6) {
-      setError('Enter the 6-digit code from your authenticator app.')
-      return
-    }
-    setError('')
-    setBusy(true)
-    const res = await store.loginVerify(digits)
-    setBusy(false)
-    if (res.ok) {
-      navigate(destinationFor(store.auth.setupComplete))
-    } else {
-      setError('That code was not accepted. Check your authenticator app and try again.')
-    }
-  }
-
-  return (
-    <AuthShell>
-      <h1 style={{ fontSize: 21, marginBottom: 4 }}>Two-step verification</h1>
-      <p className="muted text-sm mb-20">
-        Enter the current 6-digit code from your authenticator app to finish signing in.
-      </p>
-      <form onSubmit={submit} noValidate>
-        {error && <Notice tone="error">{error}</Notice>}
-        <div className="field">
-          <label htmlFor="verify-code">6-digit code</label>
-          <input
-            id="verify-code"
-            value={code}
-            onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
-            placeholder="000000"
-            inputMode="numeric"
-            autoComplete="one-time-code"
-            autoFocus
-            style={{ letterSpacing: '0.4em', fontSize: 20, textAlign: 'center' }}
-            data-testid="verify-code"
-          />
-        </div>
-        <button className="btn btn-primary btn-block btn-lg" disabled={busy} type="submit">
-          {busy ? 'Verifyingâ€¦' : 'Verify'}
-        </button>
-      </form>
-      <div className="divider" />
-      <p className="center text-sm">
-        <a
-          href="#/signin"
-          onClick={(e) => {
-            e.preventDefault()
-            store.clearLoginChallenge()
-            navigate('#/signin')
-          }}
-        >
-          â† Back to sign in
-        </a>
-      </p>
-    </AuthShell>
-  )
-}
-

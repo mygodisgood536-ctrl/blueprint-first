@@ -7,37 +7,28 @@
  *
  * Route model
  * -----------
- * PUBLIC PRODUCT ENTRY (no role wording in any URL):
- *   ''/ ''            the application root: brand splash, then the welcome screen
- *   /welcome          the product welcome screen
- *   /signin           sign in, or create an account
- *   /signin/verify    the 6-digit authenticator code
- *   /signin/recovery  password recovery
- *   /setup/recovery   first-time recovery questions   (mandatory)
- *   /setup/authenticator  first-time authenticator    (mandatory)
- *   /dashboard ...    the workspace
+ * ONE PUBLIC APPLICATION URL. There is no role-named entry point: no /owner,
+ * no /user, no developer/member variant. Authorization decides what an
+ * authenticated account may see AFTER sign-in; it is never encoded in the URL.
  *
- * PRIVATE ADMINISTRATION ENTRY (unadvertised, never linked from the product):
- *   /owner            create / sign in to the administration account
- *   /owner/settings   platform configuration
+ * PUBLIC ENTRY (no role wording in any URL):
+ *   '/'            the application root: brand splash, then the welcome screen
+ *   /welcome       the product welcome screen
+ *   /signin        sign in, or create an account (the ONLY authentication URL)
+ *   /dashboard ... the workspace
+ *
+ * PRIVILEGED PAGES (unadvertised, never linked from the product; the server
+ * refuses the corresponding APIs for any other account regardless):
+ *   /settings/infrastructure   platform configuration
  *
  * RETIRED ROUTES
- *   A retired route never renders a page of its own; it resolves to a
- *   `redirect` so a stale bookmark or deep link lands on the intended screen
- *   and can never become a second, role-named public entry point.
+ *   A retired route never renders a page of its own and never re-enters an old
+ *   flow: it forwards to the single current sign-in screen. `/signin/verify`,
+ *   `/signin/recovery`, `/setup/*`, `/owner` and `/user` all land there, so no
+ *   stale bookmark can become a second public entry point or resurrect a
+ *   password, OTP, authenticator or recovery screen.
  */
-export type RouteKind =
-  | 'splash'
-  | 'welcome'
-  | 'signin'
-  | 'signinVerify'
-  | 'signinRecovery'
-  | 'setupRecovery'
-  | 'setupAuthenticator'
-  | 'ownerAccess'
-  | 'ownerSettings'
-  | 'product'
-  | 'notFound'
+export type RouteKind = 'splash' | 'welcome' | 'signin' | 'ownerSettings' | 'product' | 'notFound'
 
 export interface RouteDecision {
   kind: RouteKind
@@ -49,14 +40,31 @@ export interface RouteDecision {
 
 export interface AuthFacts {
   authenticated: boolean
-  setupComplete: boolean
-  recoveryPending: boolean
-  totpPending: boolean
   isAdministrator: boolean
 }
 
-/** Retired routes that only ever forward. Keyed by the path the router sees. */
+/**
+ * Retired routes that only ever forward to the one current sign-in screen.
+ * None resolves to a password, OTP, authenticator or recovery screen, because
+ * those screens no longer exist anywhere in the application.
+ */
 export const RETIRED_ROUTES: Readonly<Record<string, string>> = {
+  '/signin/verify': '#/signin',
+  '/signin/recovery': '#/signin',
+  '/forgot': '#/signin',
+  '/setup': '#/signin',
+  '/setup/recovery': '#/signin',
+  '/setup/authenticator': '#/signin',
+  '/settings/authenticator': '#/signin',
+  '/settings/security': '#/signin',
+  '/settings/security/password': '#/signin',
+  '/settings/security/authenticator': '#/signin',
+  '/settings/security/sessions': '#/signin',
+  '/settings/security/events': '#/signin',
+  '/owner': '#/signin',
+  '/owner/access': '#/signin',
+  '/owner/settings': '#/signin',
+  '/owner/infrastructure': '#/signin',
   '/user': '#/signin',
   '/user/signin': '#/signin',
   '/user/entry': '#/',
@@ -65,11 +73,8 @@ export const RETIRED_ROUTES: Readonly<Record<string, string>> = {
   '/role': '#/signin',
   '/intro': '#/welcome',
   '/login': '#/signin',
-  '/login/verify': '#/signin/verify',
   '/signup': '#/signin',
-  '/forgot': '#/signin/recovery',
   '/splash': '#/',
-  '/settings/authenticator': '#/setup/authenticator',
 }
 
 /** Product paths served to an authenticated, fully set-up account. */
@@ -93,11 +98,6 @@ const PRODUCT_PATHS: ReadonlySet<string> = new Set([
   '/continuous',
   '/certification',
   '/settings/profile',
-  '/settings/security',
-  '/settings/security/password',
-  '/settings/security/authenticator',
-  '/settings/security/sessions',
-  '/settings/security/events',
   '/settings/preferences',
   '/help',
   '/faq',
@@ -109,21 +109,17 @@ const PRODUCT_PATHS: ReadonlySet<string> = new Set([
  * Resolves a hash route into the screen to render.
  *
  * Order matters and is deliberate:
- *  1. The private administration entry is resolved first and unconditionally, so
- *     it is reachable but never advertised.
- *  2. Retired routes forward. They can never render content of their own.
- *  3. The public entry, welcome and authentication screens.
- *  4. First-time setup, which requires a session.
- *  5. Mandatory setup gates, which the server enforces independently.
- *  6. The product.
+ *  1. Retired routes forward. They can never render content of their own.
+ *  2. The public entry, welcome and the single sign-in screen.
+ *  3. Privileged pages: reachable only with a session, and only for the
+ *     privileged account. A non-privileged account is returned to their own
+ *     workspace rather than left on a URL the server would refuse.
+ *  4. The product.
  */
 export function resolveRoute(hash: string, auth: AuthFacts, depth = 0): RouteDecision {
   const { path, parts } = splitRoute(hash)
 
-  // 1. Private administration entry.
-  if (path === '/owner') return { kind: 'ownerAccess' }
-
-  // 2. Retired routes forward only. The decision is resolved against the
+  // 1. Retired routes forward only. The decision is resolved against the
   //    destination so the reported screen is the one that will actually render,
   //    and `depth` guarantees a mis-authored table can never loop.
   const retired = RETIRED_ROUTES[path]
@@ -133,45 +129,26 @@ export function resolveRoute(hash: string, auth: AuthFacts, depth = 0): RouteDec
     return { kind: target.kind, redirect: retired, requiresAuth: target.requiresAuth }
   }
 
-  // 3. Public product entry and authentication.
+  // 2. Public product entry and the one authentication screen.
   if (path === '' || path === '/') return { kind: 'splash' }
   if (path === '/welcome') return { kind: 'welcome' }
-  if (path === '/signin') return { kind: 'signin' }
-  if (path === '/signin/verify') return { kind: 'signinVerify' }
-  if (path === '/signin/recovery') return { kind: 'signinRecovery' }
+  if (path === '/signin') {
+    return auth.authenticated ? { kind: 'product', redirect: PRODUCT_HOME } : { kind: 'signin' }
+  }
   if (path === '/how' || path === '/difference' || path === '/use-cases') {
     return { kind: 'product', requiresAuth: false }
   }
 
-  // 4. First-time setup. A session is required to reach these screens.
-  if (path === '/setup/recovery') {
-    return auth.authenticated ? { kind: 'setupRecovery', requiresAuth: true } : { kind: 'signin', redirect: '#/signin' }
-  }
-  if (path === '/setup/authenticator') {
-    return auth.authenticated
-      ? { kind: 'setupAuthenticator', requiresAuth: true }
-      : { kind: 'signin', redirect: '#/signin' }
-  }
-
-  // 5. Platform configuration: refused for a non-administrator account, and the
-  //    server refuses the corresponding APIs regardless. A non-administrator is
-  //    returned to their own workspace rather than left sitting on an
-  //    administration URL they cannot use, which would misrepresent the page.
-  if (path === '/owner/settings' || path === '/owner/infrastructure') {
+  // 3. Privileged platform configuration. Presentation only — the server
+  //    refuses these APIs for any other account independently.
+  if (path === '/settings/infrastructure') {
     if (!auth.authenticated) return { kind: 'welcome', redirect: '#/welcome' }
-    if (!auth.isAdministrator) return { kind: 'product', redirect: '#/dashboard' }
-    if (!auth.setupComplete) return { kind: 'product', redirect: '#/setup/recovery' }
+    if (!auth.isAdministrator) return { kind: 'product', redirect: PRODUCT_HOME }
     return { kind: 'ownerSettings', requiresAuth: true }
   }
 
-  // 6. The product requires a session.
+  // 4. The product requires a session.
   if (!auth.authenticated) return { kind: 'welcome', redirect: '#/welcome' }
-
-  // Mandatory setup, in the enforced order. The server answers 403 on every
-  // product route until both steps are complete, so this is a convenience.
-  if (auth.recoveryPending) return { kind: 'product', redirect: '#/setup/recovery' }
-  if (auth.totpPending) return { kind: 'product', redirect: '#/setup/authenticator' }
-  if (!auth.setupComplete) return { kind: 'product', redirect: '#/setup/recovery' }
 
   if (PRODUCT_PATHS.has(path)) return { kind: 'product', requiresAuth: true }
   // Parameterised product routes: /projects/:id, /artifacts/:id, ...
@@ -181,23 +158,8 @@ export function resolveRoute(hash: string, auth: AuthFacts, depth = 0): RouteDec
   return { kind: 'notFound' }
 }
 
-/**
- * TEMPORARY AUDIT MODE - NOT THE FINAL ENTRY ARCHITECTURE.
- *
- * While authentication is deliberately set aside for a backend/execution audit,
- * the product still presents its normal splash and welcome experience; only the
- * authentication hand-off itself is bypassed, so "Get started" enters the
- * workspace directly. There is ONE application URL. No role is ever taken from
- * the URL: identity and permissions remain the backend's decision.
- */
-export const AUDIT_MODE_FLAG = '/audit-mode';
-
-/** Product entry for a signed-in, fully set-up account. */
-export const PRODUCT_HOME = '#/dashboard';
-
-export function isAuditModePath(path: string): boolean {
-  return path === '/audit-mode';
-}
+/** Product entry for a signed-in account. */
+export const PRODUCT_HOME = '#/dashboard'
 
 export function hasRoleWordingInPath(path: string): boolean {
   return /(^|\/)(user|users|developer|developers|member|members|role|roles|normal-user|customer|admin|owner)(?=\/|$)/i.test(

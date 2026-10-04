@@ -4,10 +4,7 @@ import { resolveRoute } from './routes'
 import { StoreProvider, useStore } from './store'
 import { ToastHost } from './ui'
 import { Splash, Welcome } from './pages/Welcome'
-import { SignIn, SignInVerify } from './pages/SignIn'
-import { Forgot } from './pages/Auth2'
-import { OwnerAccess } from './pages/OwnerAccess'
-import { RecoverySetup, AuthenticatorSetup } from './pages/Setup'
+import { SignIn } from './pages/SignIn'
 import { HowPage, DifferencePage } from './pages/Public'
 import { HelpPage, FaqPage, HelpArticle, NotFound, Founder } from './pages/Help'
 import { UseCasesPage } from './pages/UseCases'
@@ -31,11 +28,6 @@ import { Verification } from './pages/Verification'
 import { Testing, Operations, Continuous, Certification } from './pages/Engineering'
 import {
   Profile,
-  Security,
-  Password,
-  AuthenticatorPage,
-  Sessions,
-  Events,
   Preferences,
 } from './pages/Account'
 
@@ -47,13 +39,11 @@ function Router() {
   // Routing decisions come from a single, testable table (src/routes.ts) so the
   // entry model can be verified rather than only inspected by eye. Retired
   // routes resolve to a redirect, so a stale role-labelled URL can never become
-  // a second public entry point.
+  // a second public entry point. `canManagePlatform` is advisory presentation
+  // only - the server enforces authorization on every privileged route.
   const decision = resolveRoute(hash, {
     authenticated: auth.authenticated,
-    setupComplete: auth.setupComplete,
-    recoveryPending: auth.recoveryPending,
-    totpPending: auth.totpPending,
-    isAdministrator: auth.role === 'admin',
+    isAdministrator: auth.canManagePlatform,
   })
   if (decision.redirect !== undefined) return <Redirect to={decision.redirect} />
 
@@ -64,16 +54,6 @@ function Router() {
       return <Welcome />
     case 'signin':
       return <SignIn />
-    case 'signinVerify':
-      return <SignInVerify />
-    case 'signinRecovery':
-      return <Forgot />
-    case 'setupRecovery':
-      return <RecoverySetup />
-    case 'setupAuthenticator':
-      return <AuthenticatorSetup />
-    case 'ownerAccess':
-      return <OwnerAccess />
     case 'ownerSettings':
       return <OwnerSettings isOwner />
     case 'notFound':
@@ -82,8 +62,7 @@ function Router() {
       break
   }
 
-  // Product routes, all of which require a completed, authenticated account.
-  if (path === '/settings/authenticator/manage') return <AuthenticatorPage />
+  // Product routes, all of which require an authenticated account.
   if (path === '/dashboard') return <Dashboard />
   if (path === '/projects') return <ProjectsList />
   if (path === '/projects/new') return <CreateProject />
@@ -109,11 +88,6 @@ function Router() {
   if (path === '/continuous') return <Continuous />
   if (path === '/certification') return <Certification />
   if (path === '/settings/profile') return <Profile />
-  if (path === '/settings/security') return <Security />
-  if (path === '/settings/security/password') return <Password />
-  if (path === '/settings/security/authenticator') return <AuthenticatorPage />
-  if (path === '/settings/security/sessions') return <Sessions />
-  if (path === '/settings/security/events') return <Events />
   if (path === '/settings/preferences') return <Preferences />
   if (path === '/founder' || path === '/about') return <Founder />
   if (path === '/help') return <HelpPage />

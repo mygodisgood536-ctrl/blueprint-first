@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Nexona web application server.
  *
  * Serves the Nexona browser product: a single-page application backed by an
@@ -18,10 +18,10 @@ import type { CoreServices } from '../core/services.ts';
 import { docStateOf } from '../core/doc.ts';
 import type { Artifact } from '../core/artifact.ts';
 import { BlueprintError, ConfigurationError, RoutingError } from '../core/errors.ts';
-import { DurableAccountRegistry } from '../account/durable-registry.ts';
-import { assertSameOrigin, attachAuth } from './auth.ts';
-import { auditNoAuthEnabled, applyAuditIdentity, AUDIT_ACCOUNT_ID } from './audit-mode.ts';
-import { registerAuthApi } from './auth-api.ts';
+import { DurableIdentityRegistry } from '../account/durable-identity.ts';
+import { assertSameOrigin, attachIdentity } from './auth.ts';
+import { registerIdentityApi } from './identity-api.ts';
+import { registerAccountApi } from './account-api.ts';
 import { DurableDocumentStore, documentsFilePath } from './durable-documents.ts';
 import { DurableProjectStore, webProjectsFilePath } from './durable-projects.ts';
 import { DurableJudgmentLedger, judgmentFilePath } from '../judgment/store.ts';
@@ -248,8 +248,8 @@ export interface BuildServerOptions {
   result?: DemoResult;
   /** Root directory for durable application state (default: BF_DATA_DIR or <repo>/data). */
   dataDir?: string;
-  /** Injected durable account registry (tests); loaded from dataDir/accounts.json otherwise. */
-  accounts?: DurableAccountRegistry;
+  /** Injected identity registry (tests); loaded from dataDir/identity.json otherwise. */
+  identities?: DurableIdentityRegistry;
   /**
    * Minimum time between live foundation capability re-probes (ms). Lower
    * values make /api/system/foundation reflect newly installed components
@@ -264,7 +264,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
   providerManager: ProviderManager;
   modelCatalogue: ModelCatalogue;
   documentStore: DocumentStore | DurableDocumentStore;
-  accounts: DurableAccountRegistry;
+  identities: DurableIdentityRegistry;
   working: { bus: DurableEventBus; environments: EnvironmentManager; jobs: JobEngine; supervisor: ExecutionSupervisor };
   judgment: DurableJudgmentLedger;
 }> {
@@ -311,23 +311,18 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
     providerManager.enableOpenCode(openCodeProvider);
   }
 
-  // --- durable accounts, documents and web projects --------------------------
-  const accounts =
-    options.accounts ??
-    (await DurableAccountRegistry.load(join(dataDir, 'accounts.json'), SESSION_TTL_MS));
-  // Operator-controlled platform-owner designation. The first account on a fresh
-  // installation already becomes the owner, but once durable state exists there is
-  // otherwise no supported way to designate one. The decision is made here, in the
-  // backend, from the operator's environment - never from a client request.
-  const ownerUsername = process.env['BF_PLATFORM_OWNER']?.trim();
-  if (ownerUsername !== undefined && ownerUsername.length > 0) {
-    const owner = await accounts.promoteToPlatformOwner(ownerUsername);
-    logger.info('owner.designated', {
-      username: ownerUsername,
-      applied: owner !== null,
-      ...(owner === null ? { reason: 'no such account yet; sign up with this username to claim ownership' } : {}),
-    });
-  }
+  // --- durable identities, documents and web projects -------------------------
+  // ONE authentication substrate. The privileged account is provisioned here,
+  // server-side, from the operator's environment — never from a client request,
+  // and never with a credential that lives in source control.
+  const identities =
+    options.identities ??
+    (await DurableIdentityRegistry.load(join(dataDir, 'identity.json'), SESSION_TTL_MS));
+  const privileged = await identities.ensurePrivilegedAccount();
+  logger.info('identity.bootstrap', {
+    privilegedAccountPresent: privileged !== null,
+    accounts: identities.count(),
+  });
   const documentStore: DocumentStore | DurableDocumentStore =
     options.documentStore ?? new DurableDocumentStore({ filePath: documentsFilePath(dataDir) });
   if (documentStore instanceof DurableDocumentStore) await documentStore.init();
@@ -355,96 +350,35 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
   const app = express();
   app.use(express.json());
   app.use(assertSameOrigin); // CSRF defense: cross-site writes are rejected
-  app.use(attachAuth(accounts)); // identity = verified session cookie only
-
-  // TEMPORARY AUDIT MODE (development only, `BF_AUDIT_NO_AUTH=1`).
-  // Authentication is deliberately set aside for this audit phase, so a request
-  // without a real session receives a synthetic development identity and the
-  // governed execution surface becomes reachable. `/api/me` is handled further
-  // down and still reports "no account", so the splash/welcome experience is
-  // preserved. No authentication route or check is removed or weakened.
-  const auditMode = auditNoAuthEnabled();
-  if (auditMode) {
-    logger.warn('audit.no_auth_enabled', {
-      note: 'Authentication bypassed for backend/execution auditing. Development use only.',
-    });
-    app.use('/api', (req, _res, next) => {
-      if (req.path === '/me' || req.path === '/audit-mode') {
-        next();
-        return;
-      }
-      applyAuditIdentity(req);
-      next();
-    });
-    app.get('/api/audit-mode', (_req, res) => {
-      res.json({ enabled: true, ownerAccountId: AUDIT_ACCOUNT_ID });
-    });
-  } else {
-    app.get('/api/audit-mode', (_req, res) => {
-      res.json({ enabled: false });
-    });
-  }
+  app.use(attachIdentity(identities)); // identity = verified session cookie only
 
   app.use('/nexona', express.static(PUBLIC_DIR, { maxAge: '365d', immutable: true, setHeaders: (res, filePath) => { if (filePath.endsWith('.html')) res.setHeader('Cache-Control', 'no-store'); res.setHeader('X-Nexona-Asset', 'ok'); } }));
-  app.use('/assets', express.static(join(PUBLIC_DIR, 'assets'), { maxAge: '365d', immutable: true, setHeaders: (res, filePath) => { res.setHeader('Cache-Control', 'public, max-age=31536000, immutable'); } }));
+  app.use('/assets', express.static(join(PUBLIC_DIR, 'assets'), { maxAge: '365d', immutable: true, setHeaders: (res) => { res.setHeader('Cache-Control', 'public, max-age=31536000, immutable'); } }));
   app.use('/favicon.svg', express.static(join(PUBLIC_DIR, 'favicon.svg'), { maxAge: '1h' }));
 
-  // --- Nexona authentication & account security --------------------------------
-  registerAuthApi(app, { accounts });
-
-  // Mandatory first-time setup gate. Every product route requires a session AND
-  // a COMPLETED setup, where complete means BOTH:
-  //   1. recovery questions and answers have been created, and
-  //   2. the authenticator is enrolled, verified and enabled.
-  // Auth/account-management routes stay usable so the setup wizard itself can
-  // run; everything else answers 403 until setup is finished. This is enforced
-  // server-side, so it cannot be bypassed by the SPA or by raw API calls, and
-  // neither step can be skipped.
-  const SETUP_EXEMPT_PREFIXES = ['/auth', '/me', '/account', '/teamtask'];
-  app.use('/api', (req, res, next) => {
-    if (req.account === undefined) {
-      next();
-      return;
-    }
-    for (const prefix of SETUP_EXEMPT_PREFIXES) {
-      if (req.path.startsWith(prefix)) {
-        next();
-        return;
-      }
-    }
-    if (accounts.needsRecoverySetup(req.account.id)) {
-      res.status(403).json({
-        error: 'Recovery questions must be set up before you can use the product.',
-        code: 'recovery_setup_required',
-        nextStage: 'recovery',
-      });
-      return;
-    }
-    if (accounts.needsAuthenticatorSetup(req.account.id)) {
-      res.status(403).json({
-        error: 'Authenticator setup is required before you can use the product.',
-        code: 'authenticator_setup_required',
-        nextStage: 'authenticator',
-      });
-      return;
-    }
-    next();
-  });
+  // --- Nexona authentication (the ONLY authentication surface) ----------------
+  // signup / login / logout / session / security-questions. There is no owner
+  // or user entry point, no password, no OTP, no authenticator and no recovery
+  // route registered anywhere in this application.
+  registerIdentityApi(app, { identities, sessionTtlMs: SESSION_TTL_MS });
+  // Non-authenticating account settings (display name, preferences).
+  registerAccountApi(app, { identities });
 
     // --- session identity (frontend entry point) ---------------------------------
   app.get('/api/me', (req, res) => {
-    if (req.account === undefined) {
+    // Resolved server-side from the session cookie. The client never asserts it.
+    if (req.identity === undefined) {
       res.json({ account: null });
       return;
     }
-    res.json({ account: accounts.view(req.account) });
+    res.json({ account: req.identity });
   });
 
   const services: CoreServices = result.services;
 
   // --- summary ---------------------------------------------------------------
   app.get('/api/summary', async (req, res) => {
-    if (req.account === undefined) {
+    if (req.identity === undefined) {
       res.status(401).json({ error: 'authentication required' });
       return;
     }
@@ -1027,13 +961,13 @@ res.json({ project: projectSummary(updated) });
         throw error;
       }
     }
-    const account = req.account;
+    const account = req.identity;
     try {
       const project = await result.registry.createProject({
         title: name,
         description: vision,
         mode: mode as ProjectMode,
-        owner: { userId: user, label: account !== undefined ? account.displayName ?? account.username : user },
+        owner: { userId: user, label: account !== undefined ? account.fullName || account.username : user },
         actor: { kind: 'human', id: user },
         scope: [name],
         config: { vision, source: 'nexona-web', ...(visionDocumentRef ? { visionDocument: visionDocumentRef } : {}), ...(aiConfig !== null ? { aiConfig } : {}) },
@@ -1342,7 +1276,7 @@ res.json({ project: projectSummary(updated) });
 
   // --- roadmap ---------------------------------------------------------------
   app.get('/api/roadmap', (req, res) => {
-    if (req.account === undefined) {
+    if (req.identity === undefined) {
       res.status(401).json({ error: 'authentication required' });
       return;
     }
@@ -1351,7 +1285,7 @@ res.json({ project: projectSummary(updated) });
 
   // --- caps (capabilities available vs not exercised) -------------------------
   app.get('/api/caps', (req, res) => {
-    if (req.account === undefined) {
+    if (req.identity === undefined) {
       res.status(401).json({ error: 'authentication required' });
       return;
     }
@@ -1469,7 +1403,7 @@ res.json({ project: projectSummary(updated) });
 
   // --- project / discovery ----------------------------------------------------
   app.get('/api/discovery', (req, res) => {
-    if (req.account === undefined) {
+    if (req.identity === undefined) {
       res.status(401).json({ error: 'authentication required' });
       return;
     }
@@ -1490,7 +1424,7 @@ res.json({ project: projectSummary(updated) });
 
   // --- Â§0.6 Recursive Page Expansion (Level 3 Pass 10) -----------------------
   app.get('/api/expansion', (req, res) => {
-    if (req.account === undefined) {
+    if (req.identity === undefined) {
       res.status(401).json({ error: 'authentication required' });
       return;
     }
@@ -1529,7 +1463,7 @@ res.json({ project: projectSummary(updated) });
 
   // --- Interactive Digital Twin (Â§1.4) ---------------------------------------
   app.get('/api/twin', (req, res) => {
-    if (req.account === undefined) {
+    if (req.identity === undefined) {
       res.status(401).json({ error: 'authentication required' });
       return;
     }
@@ -1542,7 +1476,7 @@ res.json({ project: projectSummary(updated) });
 
   // --- design / engineering artifacts -----------------------------------------
   app.get('/api/design', (req, res) => {
-    if (req.account === undefined) {
+    if (req.identity === undefined) {
       res.status(401).json({ error: 'authentication required' });
       return;
     }
@@ -1560,7 +1494,7 @@ res.json({ project: projectSummary(updated) });
 
   // --- multi-perspective reasoning council ------------------------------------
   app.get('/api/council', (req, res) => {
-    if (req.account === undefined) {
+    if (req.identity === undefined) {
       res.status(401).json({ error: 'authentication required' });
       return;
     }
@@ -1577,7 +1511,7 @@ res.json({ project: projectSummary(updated) });
 
   // --- master verification ----------------------------------------------------
   app.get('/api/verification', (req, res) => {
-    if (req.account === undefined) {
+    if (req.identity === undefined) {
       res.status(401).json({ error: 'authentication required' });
       return;
     }
@@ -1599,7 +1533,7 @@ res.json({ project: projectSummary(updated) });
 
   // --- acceptance testing ------------------------------------------------------
   app.get('/api/testing', (req, res) => {
-    if (req.account === undefined) {
+    if (req.identity === undefined) {
       res.status(401).json({ error: 'authentication required' });
       return;
     }
@@ -1622,7 +1556,7 @@ res.json({ project: projectSummary(updated) });
 
   // --- deployment --------------------------------------------------------------
   app.get('/api/deployment', (req, res) => {
-    if (req.account === undefined) {
+    if (req.identity === undefined) {
       res.status(401).json({ error: 'authentication required' });
       return;
     }
@@ -1645,7 +1579,7 @@ res.json({ project: projectSummary(updated) });
 
   // --- runtime telemetry --------------------------------------------------------
   app.get('/api/telemetry', (req, res) => {
-    if (req.account === undefined) {
+    if (req.identity === undefined) {
       res.status(401).json({ error: 'authentication required' });
       return;
     }
@@ -1661,7 +1595,7 @@ res.json({ project: projectSummary(updated) });
 
   // --- continuous engineering ----------------------------------------------------
   app.get('/api/continuous', (req, res) => {
-    if (req.account === undefined) {
+    if (req.identity === undefined) {
       res.status(401).json({ error: 'authentication required' });
       return;
     }
@@ -1681,7 +1615,7 @@ res.json({ project: projectSummary(updated) });
 
   // --- recursion -----------------------------------------------------------------
   app.get('/api/recursion', (req, res) => {
-    if (req.account === undefined) {
+    if (req.identity === undefined) {
       res.status(401).json({ error: 'authentication required' });
       return;
     }
@@ -1699,7 +1633,7 @@ res.json({ project: projectSummary(updated) });
 
   // --- safe change ----------------------------------------------------------------
   app.get('/api/safe-change', (req, res) => {
-    if (req.account === undefined) {
+    if (req.identity === undefined) {
       res.status(401).json({ error: 'authentication required' });
       return;
     }
@@ -1723,7 +1657,7 @@ res.json({ project: projectSummary(updated) });
 
   // --- PEO (Permanent Engineering Organization) -----------------------------------
   app.get('/api/peo', (req, res) => {
-    if (req.account === undefined) {
+    if (req.identity === undefined) {
       res.status(401).json({ error: 'authentication required' });
       return;
     }
@@ -1745,7 +1679,7 @@ res.json({ project: projectSummary(updated) });
 
   // --- artifacts inventory --------------------------------------------------------
   app.get('/api/artifacts', async (req, res) => {
-    if (req.account === undefined) {
+    if (req.identity === undefined) {
       res.status(401).json({ error: 'authentication required' });
       return;
     }
@@ -1767,7 +1701,7 @@ res.json({ project: projectSummary(updated) });
 
   // --- dependency map --------------------------------------------------------------
   app.get('/api/dependency-map', (req, res) => {
-    if (req.account === undefined) {
+    if (req.identity === undefined) {
       res.status(401).json({ error: 'authentication required' });
       return;
     }
@@ -1781,7 +1715,7 @@ res.json({ project: projectSummary(updated) });
 
   // --- lineage / provenance --------------------------------------------------------
   app.get('/api/lineage', (req, res) => {
-    if (req.account === undefined) {
+    if (req.identity === undefined) {
       res.status(401).json({ error: 'authentication required' });
       return;
     }
@@ -1795,7 +1729,7 @@ res.json({ project: projectSummary(updated) });
 
   // --- evidence / certification detail ------------------------------------------------
   app.get('/api/evidence', async (req, res) => {
-    if (req.account === undefined) {
+    if (req.identity === undefined) {
       res.status(401).json({ error: 'authentication required' });
       return;
     }
@@ -1804,7 +1738,7 @@ res.json({ project: projectSummary(updated) });
   });
 
   app.get('/api/certification', (req, res) => {
-    if (req.account === undefined) {
+    if (req.identity === undefined) {
       res.status(401).json({ error: 'authentication required' });
       return;
     }
@@ -1827,7 +1761,7 @@ res.json({ project: projectSummary(updated) });
 
   // --- traceability ----------------------------------------------------------------
   app.get('/api/traceability', (req, res) => {
-    if (req.account === undefined) {
+    if (req.identity === undefined) {
       res.status(401).json({ error: 'authentication required' });
       return;
     }
@@ -1846,7 +1780,7 @@ res.json({ project: projectSummary(updated) });
   };
 
   /** The authenticated account's username, or null when anonymous. */
-  const userIdOf = (req: express.Request): string | null => req.account?.username ?? null;
+  const userIdOf = (req: express.Request): string | null => req.identity?.username ?? null;
 
   const ACCESS_CATEGORIES: readonly ModelAccessCategory[] = [
     'free_no_api_key',
@@ -3027,13 +2961,15 @@ execution.router.complete({
   // This is enforced in the BACKEND; hiding the navigation entry is only
   // presentation.
 
-  const isPlatformOwner = (req: express.Request): boolean => req.account?.role === 'admin';
+  // The role comes from the server-resolved session, never from a client field.
+  const isPlatformOwner = (req: express.Request): boolean =>
+    req.identity !== undefined && identities.isAdministrator(req.identity.id);
 
   const ownerRouter = express.Router();
 
   // Guard: applies to EVERY method and every path under /api/owner.
   ownerRouter.use((req, res, next) => {
-    if (req.account === undefined) {
+    if (req.identity === undefined) {
       res.status(401).json({ error: 'authentication required' });
       return;
     }
@@ -3554,7 +3490,7 @@ execution.router.complete({
   });
 
   app.get('/api/models', async (req, res) => {
-    if (req.account === undefined) {
+    if (req.identity === undefined) {
       res.status(401).json({ error: 'authentication required' });
       return;
     }
@@ -3599,7 +3535,7 @@ execution.router.complete({
   });
 
   app.get('/api/models/stats', async (req, res) => {
-    if (req.account === undefined) {
+    if (req.identity === undefined) {
       res.status(401).json({ error: 'authentication required' });
       return;
     }
@@ -3889,7 +3825,7 @@ execution.router.complete({
   return {
     app,
     result,
-    accounts,
+    identities,
     providerManager,
     modelCatalogue,
     documentStore,
@@ -3900,7 +3836,7 @@ execution.router.complete({
 
 export async function startServer(): Promise<void> {
   const logger = createLogger({ level: 'info', sink: consoleSink() });
-    const { app, accounts, working } = await buildServer();
+    const { app, identities, working } = await buildServer();
   const host = process.env['BF_WEB_HOST']?.trim() || '127.0.0.1';
   const portRaw = Number(process.env['BF_WEB_PORT']?.trim() || '3000');
   const port = Number.isInteger(portRaw) && portRaw > 0 && portRaw < 65536 ? portRaw : 3000;
@@ -3910,7 +3846,7 @@ export async function startServer(): Promise<void> {
     console.log('Nexona - The Blueprint AI Software Engineering Platform');
     console.log('-------------------------------------------------------');
     console.log(`  Open in Chrome : http://${host}:${port}`);
-    console.log(`  Accounts        : ${accounts.filePath}`);
+    console.log(`  Identities      : ${identities.filePath}`);
     console.log('');
   });
   server.on('error', (err) => {
