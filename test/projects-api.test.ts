@@ -24,8 +24,7 @@ import { ProjectRegistry } from '../src/project/registry.ts';
 import { AiRouter } from '../src/ai/router.ts';
 import { ScriptedProvider } from '../src/ai/scripted-provider.ts';
 import type { CoreServices } from '../src/core/services.ts';
-import { tempDataDir, signupCookie, signupEnrolledCookie, loginTOTPCookie, completeSetup } from './helpers.ts';
-import { totpNow } from '../src/account/totp.ts';
+import { tempDataDir, signupCookie, signupEnrolledCookie, loginCookie } from './helpers.ts';
 
 interface ServerHandle {
   app: Express;
@@ -287,7 +286,6 @@ describe('Stage 6 â€” Projects API (real registry + durable store)', () => 
     try {
       s1 = await buildProjectServer(dataDir);
       const aliceCookie = await signupCookie(s1.url, 'alice_persist');
-      const { secret } = await completeSetup(s1.url, aliceCookie);
       const created = await j(s1.url, 'POST', '/api/projects', aliceCookie, {
         name: 'Persistent Project',
         vision: 'A vision that will survive a restart for validation purposes.',
@@ -301,7 +299,7 @@ describe('Stage 6 â€” Projects API (real registry + durable store)', () => 
       // Fresh server instance on the SAME data dir.
       const s2 = await buildProjectServer(dataDir);
       try {
-        const amBack = await loginTOTPCookie(s2.url, 'alice_persist', 'test-password-1', totpNow(secret)!);
+        const amBack = await loginCookie(s2.url, 'alice_persist');
         const list = await j(s2.url, 'GET', '/api/projects', amBack);
         const projects = (list.body.projects ?? []) as { id: string; title: string }[];
         assert.ok(projects.some((p) => p.id === id), JSON.stringify(list.body));
@@ -323,7 +321,6 @@ describe('Stage 6 â€” Projects API (real registry + durable store)', () => 
     try {
       s1 = await buildProjectServer(dataDir);
       const aliceCookie = await signupCookie(s1.url, 'alice_replay');
-      const { secret } = await completeSetup(s1.url, aliceCookie);
       const created = await j(s1.url, 'POST', '/api/projects', aliceCookie, {
         name: 'Replay Project',
         vision: 'A vision that must survive a store-rebuild for validation purposes.',
@@ -339,7 +336,7 @@ describe('Stage 6 â€” Projects API (real registry + durable store)', () => 
       // snapshot can restore the project.
       const s2 = await buildProjectServerFreshStore(dataDir, 'rebuilt-artifacts.json');
       try {
-        const amBack = await loginTOTPCookie(s2.url, 'alice_replay', 'test-password-1', totpNow(secret)!);
+        const amBack = await loginCookie(s2.url, 'alice_replay');
         const list = await j(s2.url, 'GET', '/api/projects', amBack);
         const projects = (list.body.projects ?? []) as { id: string; title: string }[];
         assert.ok(projects.some((p) => p.id === id), JSON.stringify(list.body));
