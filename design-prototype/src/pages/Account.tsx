@@ -95,7 +95,7 @@ export function Preferences() {
     return preferences[key] === true
   }
 
-  const toggle = async (key: string, value: boolean) => {
+  const toggle = async (key: string, value: boolean | string) => {
     setSaving(true)
     try {
       await updatePreferences({ ...preferences, [key]: value })
@@ -119,9 +119,10 @@ export function Preferences() {
                 <div><div>In-app notifications</div><div className="muted text-sm">Show toast and bell notifications in the workspace.</div></div>
                 <label className="switch"><input type="checkbox" checked={valueOf('notificationsEnabled')} onChange={e => toggle('notificationsEnabled', e.target.checked)} disabled={saving} /><span className="track" /></label>
               </div>
-              <div className="row-between">
+<div className="row-between">
                 <div><div>Reduce motion</div><div className="muted text-sm">Minimise animation across the workspace.</div></div>
-                <label className="switch"><input type="checkbox" checked={valueOf('reduceMotion')} onChange={e => toggle('reduceMotion', e.target.checked)} disabled={saving} /><span className="track"
+                <label className="switch"><input type="checkbox" checked={valueOf('reduceMotion')} onChange={e => toggle('reduceMotion', e.target.checked)} disabled={saving} /><span className="track" /></label>
+              </div>
               <div className="row-between">
                 <div><div>Theme</div><div className="muted text-sm">Choose light, dark, or system theme.</div></div>
                 <select value={(preferences.theme as string) || 'system'} onChange={e => toggle('theme', e.target.value)} disabled={saving} style={{ padding: '6px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)' }}>
@@ -129,7 +130,6 @@ export function Preferences() {
                   <option value="light">Light</option>
                   <option value="dark">Dark</option>
                 </select>
-              </div> /></label>
               </div>
             </div>
           )}

@@ -1,8 +1,13 @@
 import { useState, useCallback, createContext, useContext, ReactNode, useEffect } from 'react'
 import { navigate } from './router'
 import { applyTheme, Theme } from './theme'
+import { Project, ProjectMode, stagesForMode, StageId, StageStatus } from './mock/data'
+import { api } from './api'
 
+/** A transient notification raised by the app shell. */
 interface Toast { id: number; message: string; type: 'success' | 'error' | 'info' }
+
+/**
  * Authentication state.
  *
  * The ONLY credential on this platform is the security question + answer pair,

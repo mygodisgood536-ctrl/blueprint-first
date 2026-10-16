@@ -179,6 +179,34 @@ table.data tr:hover td { background: var(--surface-hover); }
 .aim-section-title { font-size: 11px; font-weight: 700; letter-spacing: 1.1px; text-transform: uppercase; color: var(--text-tertiary); margin: 2px 0 8px; }
 .aim-free-row { font-size: 14px; font-weight: 500; color: var(--text-primary); line-height: 1.9; }
 .aim-free-empty { font-size: 12px; line-height: 1.45; color: var(--text-secondary); margin: 0 0 8px; }
+
+/* FREE MODELS list (§ V.5): the approved set, each row showing whether the live
+   catalogue currently offers it. An unavailable entry is visibly unavailable
+   rather than hidden, and is never selectable. */
+.aim-free-list { list-style: none; margin: 0 0 4px; padding: 0; }
+.aim-free-list button.aim-free-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  width: 100%; text-align: left; padding: 7px 10px; margin: 0 0 2px;
+  background: transparent; border: 1px solid transparent; border-radius: var(--radius-sm);
+  font: inherit; cursor: pointer; transition: background var(--transition-fast, 120ms ease), border-color var(--transition-fast, 120ms ease);
+}
+.aim-free-list button.aim-free-row:hover:not(:disabled) { background: var(--surface-hover, rgba(127, 127, 127, 0.08)); }
+.aim-free-list button.aim-free-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.aim-free-list button.aim-free-row.is-selected { border-color: var(--accent); background: var(--accent-soft, rgba(37, 99, 235, 0.08)); }
+.aim-free-list button.aim-free-row.is-unavailable { opacity: 0.5; cursor: not-allowed; }
+.aim-free-name { font-weight: 500; }
+.aim-free-state { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-tertiary, var(--text-secondary)); white-space: nowrap; }
+.aim-free-list button.aim-free-row.is-selected .aim-free-state { color: var(--accent); }
+.aim-free-extra { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border); }
+.aim-free-extra-title { font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--text-tertiary, var(--text-secondary)); margin-bottom: 4px; }
+.aim-free-extra button.aim-free-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  width: 100%; text-align: left; padding: 6px 10px; background: transparent;
+  border: 1px solid transparent; border-radius: var(--radius-sm);
+  font: inherit; cursor: pointer;
+}
+.aim-free-extra button.aim-free-row:hover:not(:disabled) { background: var(--surface-hover, rgba(127, 127, 127, 0.08)); }
+.aim-free-extra button.aim-free-row.is-selected { border-color: var(--accent); }
 .aim-field-label { display: block; font-size: 12px; font-weight: 600; color: var(--text-secondary); margin: 12px 0 5px; }
 .aim-field { position: relative; display: flex; align-items: center; }
 .aim-field select,
