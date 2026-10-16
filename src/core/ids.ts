@@ -33,6 +33,8 @@ export const ARTIFACT_TYPES = [
   'TRACE_REPORT',
   'DOC',
   'A11Y', 'PERF', 'TWIN',
+  // Discovery Pass Sequence artifact classes (§0.4-§0.11, passes 5/12/13/15/19):
+  'ROLE', 'EDGECASE', 'DEPENDENCY', 'CONTRADICTION', 'OPS',
 ] as const;
 
 export type ArtifactType = (typeof ARTIFACT_TYPES)[number];

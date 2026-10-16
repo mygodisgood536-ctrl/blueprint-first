@@ -79,6 +79,12 @@ export interface DepartmentRunResult {
   readonly status: 'accepted' | 'rejected' | 'failed';
   readonly baseline?: import('../materialize.ts').DiscoveryBaseline;
   readonly inventory?: NormalizedInventory;
+  /**
+   * Domain Profile produced by Cluster A (DW-A2). Surfaced so the Discovery
+   * Pass Sequence can certify Pass 2 and derive the Pass 3 category without
+   * re-running the understanding worker.
+   */
+  readonly domainProfile?: string;
   readonly understandingReport?: VerificationReport;
   readonly structuralReport?: VerificationReport;
   readonly bossDecision?: BossDecision;

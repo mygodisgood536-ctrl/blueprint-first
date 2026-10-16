@@ -41,11 +41,20 @@ export async function executeMaterializationPlan(
   services: CoreServices,
   plan: MaterializationPlan,
   producer: Actor,
+  options: { projectId?: string } = {},
 ): Promise<DiscoveryBaseline> {
   const at = new Date().toISOString();
 
-  // Pass 1: allocate IDs in fixed plan order.
-  const allocated = plan.plans.map((p) => ({ ...p, id: services.allocator.nextId(p.type) }));
+  // Pass 1: allocate IDs in fixed plan order. When the caller already owns a
+  // PROJECT artifact (a web-created project), that id is reused instead of a
+  // fresh one, so every discovered artifact is scoped to the existing project.
+  const allocated = plan.plans.map((p) => ({
+    ...p,
+    id:
+      p.type === 'PROJECT' && options.projectId !== undefined
+        ? options.projectId
+        : services.allocator.nextId(p.type),
+  }));
   const idByRef = new Map<string, string>();
   for (const p of allocated) idByRef.set(`${p.type}:${p.key}`, p.id);
 
@@ -59,6 +68,10 @@ export async function executeMaterializationPlan(
 
   // Pass 2: create + persist + graph.
   for (const p of allocated) {
+    // Reusing the caller's PROJECT artifact: it already exists (with its owner,
+    // mode and scope), so it is neither re-created nor counted here. Its id is
+    // still the projectId every other artifact references.
+    if (p.type === 'PROJECT' && options.projectId !== undefined) continue;
     const deps: string[] = [];
     let parentId: string | undefined;
     if (p.parentId !== undefined && !p.parentId.startsWith('PROJECT:')) {

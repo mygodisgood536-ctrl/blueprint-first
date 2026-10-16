@@ -1,11 +1,8 @@
 import { useState, useCallback, createContext, useContext, ReactNode, useEffect } from 'react'
 import { navigate } from './router'
-import { Project, ProjectMode, stagesForMode, StageId, StageStatus } from './mock/data'
-import { api } from './api'
+import { applyTheme, Theme } from './theme'
 
 interface Toast { id: number; message: string; type: 'success' | 'error' | 'info' }
-
-/**
  * Authentication state.
  *
  * The ONLY credential on this platform is the security question + answer pair,
@@ -153,7 +150,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       } catch {
         if (alive) setAuth(ANONYMOUS)
       }
-      void loadSecurityQuestions()
+      void loadSecurityQuestions(); void fetchPreferences()
     }
     void initAuth()
     return () => { alive = false }
@@ -439,3 +436,12 @@ export function useStore() {
   if (!ctx) throw new Error('useStore must be used within StoreProvider')
   return ctx
 }
+
+
+
+
+
+
+
+
+

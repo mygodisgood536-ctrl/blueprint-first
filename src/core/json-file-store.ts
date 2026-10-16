@@ -1,11 +1,13 @@
 /**
- * Durable JSON-file ArtifactStore with atomic writes.
+ * Durable ArtifactStore with atomic writes.
  *
- * This is the Level-1a persistence adapter: a single snapshot file holding
- * every artifact plus ID allocator state, written atomically (temp file +
- * rename with Windows-safe fallback) on every mutation. It implements the
- * same port as MemoryArtifactStore, so swapping in a database-backed
- * Knowledge Graph later changes nothing upstream.
+ * Two real implementations satisfy the same `ArtifactStore` port:
+ *
+ *   - `JsonFileArtifactStore`  a single snapshot file on the local disk —
+ *                              development and the automated test suite
+ *   - `PostgresArtifactStore`  a relational table with per-row optimistic
+ *                              concurrency and indexed project scoping —
+ *                              production, on managed PostgreSQL (Decision D2)
  *
  * Schema (file version 1):
  *   { schemaVersion, savedAt, allocatorState?: { counters }, artifacts: [...] }
@@ -45,7 +47,10 @@ export class JsonFileArtifactStore implements ArtifactStore {
   private artifacts: Map<string, Artifact> = new Map();
   private loaded = false;
 
-  constructor(options: { filePath: string; allocator?: ArtifactIdAllocator }) {
+  constructor(options: {
+    filePath: string;
+    allocator?: ArtifactIdAllocator;
+  }) {
     this.filePath = options.filePath;
     this.allocator = options.allocator;
   }

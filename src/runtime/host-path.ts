@@ -22,24 +22,58 @@
 
 import { execFileSync } from 'node:child_process';
 
+/**
+ * Reads a PATH value from the registry. Uses `reg.exe` rather than spawning
+ * PowerShell: PowerShell startup is orders of magnitude slower (measured
+ * ~14s/binaries on hosts with aggressive AV scanning, vs ~2s for reg.exe) and
+ * this runs on every server boot. The read is cached per process so a single
+ * long-running server or a test that boots many servers probes the registry
+ * once. `resetHostPathCache()` forces a fresh read (used before a forced
+ * foundation re-probe so a live CLI install is still seen without a restart).
+ */
+const registryCache = new Map<string, string[]>();
+
+/** Clears the cached registry PATH reads (see module docs). */
+export function resetHostPathCache(): void {
+  registryCache.clear();
+}
+
+const REGISTERED_PATH_KEYS: Record<'machine' | 'user', string> = {
+  machine: 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment',
+  user: 'HKCU\\Environment',
+};
+
+function expandEnv(value: string): string {
+  return value.replace(/%([^%]+)%/g, (_m, name: string) => {
+    return process.env[name] ?? process.env[name.toUpperCase()] ?? `%${name}%`;
+  });
+}
+
 function registryPath(scope: 'machine' | 'user'): string[] {
   if (process.platform !== 'win32') return [];
-  const args = scope === 'machine'
-    ? ['-NoProfile', '-Command', '[Environment]::GetEnvironmentVariable("Path","Machine")']
-    : ['-NoProfile', '-Command', '[Environment]::GetEnvironmentVariable("Path","User")'];
+  const cached = registryCache.get(scope);
+  if (cached !== undefined) return cached;
+  const key = REGISTERED_PATH_KEYS[scope];
   try {
-    const out = execFileSync('powershell.exe', args, {
+    const out = execFileSync('reg.exe', ['query', key, '/v', 'Path'], {
       encoding: 'utf8',
       windowsHide: true,
       timeout: 10_000,
       stdio: ['ignore', 'pipe', 'ignore'],
     });
-    return out
-      .split(/\r?\n/)
-      .flatMap((line) => line.split(';'))
-      .map((entry) => entry.trim().replace(/^"|"$/g, ''))
-      .filter((entry) => entry.length > 0);
+    const match = /^\s+Path\s+REG_(?:EXPAND_)?SZ\s+(.+)$/m.exec(out);
+    const raw = match?.[1] ?? '';
+    const entries =
+      raw === ''
+        ? []
+        : expandEnv(raw)
+            .split(';')
+            .map((entry) => entry.trim().replace(/^"|"$/g, ''))
+            .filter((entry) => entry.length > 0);
+    registryCache.set(scope, entries);
+    return entries;
   } catch {
+    registryCache.set(scope, []);
     return [];
   }
 }

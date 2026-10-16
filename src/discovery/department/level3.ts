@@ -295,7 +295,7 @@ const NEGATIVE_SPACE_RULES: readonly {
   },
 ];
 
-async function discoverNegativeSpace(
+export async function discoverNegativeSpace(
   services: CoreServices,
   baseline: DiscoveryBaseline,
 ): Promise<{ questions: readonly string[]; evidenceIds: readonly string[] }> {
@@ -346,7 +346,7 @@ function detectCategory(hint: string | undefined, baseline: DiscoveryBaseline): 
   return null;
 }
 
-async function runIndustryComparison(
+export async function runIndustryComparison(
   services: CoreServices,
   baseline: DiscoveryBaseline,
   producer: Actor,
@@ -417,7 +417,7 @@ async function runIndustryComparison(
 
 /** Cluster E — Discovery Red Team (§0.10): hunt commonly-underdiscovered
  *  page classes (admin / error / empty states) and log omissions by ID. */
-async function runRedTeam(
+export async function runRedTeam(
   services: CoreServices,
   baseline: DiscoveryBaseline,
   producer: Actor,
@@ -554,7 +554,7 @@ await services.store.append(finding);
 
 /** Cluster E — DW-E5 Discovery Auditor: samples the accepted inventory and
  *  re-runs the §0.18 evidence check independently of the Boss. */
-async function runDiscoveryAudit(
+export async function runDiscoveryAudit(
   services: CoreServices,
   baseline: DiscoveryBaseline,
   sampledIds: readonly string[],

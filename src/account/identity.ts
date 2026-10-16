@@ -54,6 +54,8 @@ export interface IdentityView {
   readonly securityQuestion: string;
   readonly role: IdentityRole;
   readonly createdAt: string;
+  /** Stored display/UX preferences. Allow-listed keys only; never credentials. */
+  readonly preferences?: Readonly<Record<string, string | number | boolean>>;
 }
 
 /** Opaque bearer session. */
@@ -411,6 +413,7 @@ export class IdentityRegistry {
       securityQuestion: record.securityQuestion,
       role: record.role,
       createdAt: record.createdAt,
+      ...(record.preferences !== undefined ? { preferences: { ...record.preferences } } : {}),
     };
   }
 

@@ -13,7 +13,10 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promises as fs } from 'node:fs';
 import { consoleSink, createLogger } from '../core/logging.ts';
-import { runDemoPipeline, type DemoResult } from '../demo/main.ts';
+import type { DemoResult } from '../demo/main.ts';
+import { createBootServices, neutralBootResult, stageStateFilePath, type BootServices } from './boot-services.ts';
+import { StageStateStore, type StageRecord } from '../project/stage-state.ts';
+import { ProjectExecution } from '../project/execution.ts';
 import type { CoreServices } from '../core/services.ts';
 import { docStateOf } from '../core/doc.ts';
 import type { Artifact } from '../core/artifact.ts';
@@ -52,7 +55,7 @@ import { DaytonaPlatformConfig, daytonaPlatformConfigFilePath } from '../env/day
 import { prepareClineAi, clineProfileDirs, clineRootDir, runClineTask } from '../env/cline-bridge.ts';
 import type { EnvAdapter } from '../env/types.ts';
 import type { JobRecord } from '../jobs/types.ts';
-import { reconcileHostPath } from '../runtime/host-path.ts';
+import { reconcileHostPath, resetHostPathCache } from '../runtime/host-path.ts';
 import { JobEngine, jobsFilePath } from '../jobs/engine.ts';
 import { buildExecutionGraph } from '../jobs/graph.ts';
 import { AgenticSession } from '../agentic/session.ts';
@@ -62,12 +65,17 @@ import type { JobExecutor, JobResult } from '../jobs/types.ts';
 import { ExecutionSupervisor, supervisionTraceFilePath } from '../supervisor/supervisor.ts';
 import type { SupervisorTarget } from '../supervisor/types.ts';
 import { evaluateApproval } from '../design/approval.ts';
+import { isBaseArtifactId } from '../core/ids.ts';
+import { lineageStatus } from '../traceability/trace.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, 'public', 'nexona');
 
 /** Session lifetime: 12 hours (the session cookie Max-Age matches this). */
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+
+/** Product version reported by GET /api/health. */
+const APP_VERSION = '3.3.0';
 
 /** Roadmap state fixed by the repository (verified from git log/docs). */
 const ROADMAP = [
@@ -267,6 +275,9 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
   identities: DurableIdentityRegistry;
   working: { bus: DurableEventBus; environments: EnvironmentManager; jobs: JobEngine; supervisor: ExecutionSupervisor };
   judgment: DurableJudgmentLedger;
+  /** Present on a real boot (no injected `result`): the per-project D5 runner. */
+  execution?: ProjectExecution;
+  stageState?: StageStateStore;
 }> {
   const logger = createLogger({ level: 'warn', sink: consoleSink() });
   // --- Nexona durable application state (survives restarts) --------------------
@@ -277,7 +288,14 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
   // run evidence) is written to evidence.json and replayed on the next boot.
   const durableEvidence = new DurableEvidenceLog(evidenceFilePath(dataDir));
   await durableEvidence.init();
-  const result = options.result ?? (await runDemoPipeline(logger, { evidence: durableEvidence }));
+  // Decision D5: boot performs NO pipeline work. Real core services and the
+  // per-project execution runner are built here; tests may still inject a
+  // `result` to obtain the server cheaply.
+  const boot: BootServices | null =
+    options.result !== undefined
+      ? null
+      : await createBootServices({ dataDir, evidence: durableEvidence, logger });
+  const result: DemoResult = options.result ?? neutralBootResult(boot!);
   // The integrated OpenCode execution layer: REAL opencode subprocess + the
   // runtime's own catalogue. Never simulated; a missing runtime is reported.
   const openCodeRuntime = new OpenCodeRuntime({});
@@ -347,6 +365,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
     await durableProjects.replayInto(result.store, result.services.graph, result.services.allocator);
   }
 
+
   const app = express();
   app.use(express.json());
   app.use(assertSameOrigin); // CSRF defense: cross-site writes are rejected
@@ -355,6 +374,19 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
   app.use('/nexona', express.static(PUBLIC_DIR, { maxAge: '365d', immutable: true, setHeaders: (res, filePath) => { if (filePath.endsWith('.html')) res.setHeader('Cache-Control', 'no-store'); res.setHeader('X-Nexona-Asset', 'ok'); } }));
   app.use('/assets', express.static(join(PUBLIC_DIR, 'assets'), { maxAge: '365d', immutable: true, setHeaders: (res) => { res.setHeader('Cache-Control', 'public, max-age=31536000, immutable'); } }));
   app.use('/favicon.svg', express.static(join(PUBLIC_DIR, 'favicon.svg'), { maxAge: '1h' }));
+
+  // --- liveness / version (public; discloses no tenant data) ---------------------
+  app.get('/api/health', (req, res) => {
+    res.json({
+      status: 'ok',
+      service: 'blueprint-first-control-plane',
+      version: APP_VERSION,
+      architecture: '3.3',
+      environment: process.env['BF_ENV'] ?? 'development',
+      persistence: boot?.persistenceKind ?? 'json-file',
+      time: new Date().toISOString(),
+    });
+  });
 
   // --- Nexona authentication (the ONLY authentication surface) ----------------
   // signup / login / logout / session / security-questions. There is no owner
@@ -375,122 +407,111 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
   });
 
   const services: CoreServices = result.services;
+  // Per-project execution (D5). A test may inject a scenario-stub result whose
+  // `services` is not a real core bundle; execution is then unavailable and the
+  // run route reports so honestly (501).
+  const stageState: StageStateStore = boot?.stageState ?? new StageStateStore({ filePath: stageStateFilePath(dataDir) });
+  if (boot === null) await stageState.init();
+  const hasRealServices =
+    result.services !== undefined && (result.services as CoreServices | undefined)?.store !== undefined;
+  const execution: ProjectExecution | null =
+    boot?.execution ??
+    (hasRealServices
+      ? new ProjectExecution({ services: result.services, stages: stageState, logger })
+      : null);
 
-  // --- summary ---------------------------------------------------------------
+  // --- summary (per-project, authoritative) ---------------------------------
+  // Decision D5: there is no boot-time scenario. The summary is derived from
+  // the project's own persisted stage records and the live artifact store.
+  // Never-run or out-of-scope data is reported as null/PENDING - never a demo
+  // value. An optional ?projectId selects a project; otherwise the most recent
+  // owned project is used.
   app.get('/api/summary', async (req, res) => {
-    if (req.identity === undefined) {
+    const user = userIdOf(req);
+    if (user === null) {
       res.status(401).json({ error: 'authentication required' });
       return;
     }
     const evidenceEntries = await result.evidence.all();
-    const project = result.project;
-    const projectMode = result.projectMode;
-    const lifecycleComplete =
-      result.registry === undefined ? null : await result.registry.lifecycleComplete(project.id);
-    res.json({
-      productName: result.baseline.projectId,
-      projectId: result.baseline.projectId,
-      project: {
-        id: project.id,
-        title: project.title,
-        mode: projectMode,
-        lifecycleComplete,
-      },
+    const projects = await ownedProjectsOf(user);
+    const requested = typeof req.query['projectId'] === 'string' ? req.query['projectId'] : null;
+    const project =
+      requested !== null
+        ? await requireOwnedProject(user, requested)
+        : (projects[projects.length - 1] ?? null);
+    const base = {
       envName: result.config.envName,
       dataDir: result.config.dataDir,
-      provider: 'ScriptedProvider (DETERMINISTIC DEMO RESPONSES - not a live model)',
-      providerCalls: result.providerCalls,
+      provider: 'per-project verified model',
       storeKind: services.store.kind,
       evidenceCount: evidenceEntries.length,
       graph: result.stats,
-      discoveryArtifacts: result.baseline.totalArtifacts,
-      designCoverage: {
-        coveredCount: result.designCoverage.covered.length,
-        totalDimensions: result.designCoverage.allDimensions.length,
-        missing: result.designCoverage.missing,
-        assessmentHash: result.designCoverage.assessmentHash,
-      },
-      businessModel: {
-        roleCount: result.businessModel.roles.length,
-        permissionCount: result.businessModel.rolePermissions.length,
-        entityCount: result.businessModel.entities.length,
-        workflowCount: result.businessModel.workflows.length,
-        adminRoles: result.businessModel.adminCapabilities.map((a) => a.role),
-      },
-      threatModel: {
-        threatCount: result.threatModel.threats.length,
-        strideCategories: [...new Set(result.threatModel.threats.map((t) => t.category))],
-        requirementCount: result.threatModel.securityRequirements.length,
-        p0Count: result.threatModel.securityRequirements.filter((r) => r.priority === 'P0').length,
-      },
-      uxVerification: {
-        tokenScore: result.uxVerification.tokenCoverage.score,
-        accessibilityScore: result.uxVerification.accessibilityCoverage.score,
-        responsiveScore: result.uxVerification.responsiveCoverage.score,
-        overallScore: result.uxVerification.overallScore,
-        findingsCount: result.uxVerification.findings.length,
-      },
-      designCodeTrace: {
-        total: result.designCodeTrace.total,
-        traced: result.designCodeTrace.traced,
-        unimplemented: result.designCodeTrace.unimplemented,
-        orphans: result.designCodeTrace.orphans,
-        forwardComplete: result.designCodeTrace.forwardComplete,
-        reverseComplete: result.designCodeTrace.reverseComplete,
-      },
-      projectBinding: {
-        documentCount: result.projectBinding.documentCount,
-        documentIds: result.projectBinding.documentIds.slice(0, 20),
-        ownerCount: result.projectBinding.ownerCount,
-      },
-      portability: {
-        artifactCount: result.portability.artifactCount,
-        edgeCount: result.portability.edgeCount,
-        evidenceCount: result.portability.evidenceCount,
-        integrityVerified: result.portability.integrityVerified,
-      },
-      account: {
-        accountCount: result.account.accountCount,
-        ownerAccountId: result.account.ownerAccountId,
-        ownerCanAccess: result.account.ownerCanAccess,
-        strangerCanAccess: result.account.strangerCanAccess,
-      },
-      designQuality: {
-        overallScore: result.designQuality.overallScore,
-        identitySpecificity: result.designQuality.identitySpecificity,
-        componentConsistency: result.designQuality.componentConsistency,
-        accessibility: result.designQuality.accessibility,
-        findingsCount: result.designQuality.findings.length,
-      },
-      designConsistency: {
-        overallConsistency: result.designConsistency.overallConsistency,
-        tokenVariance: result.designConsistency.tokenConsistency.variance,
-        componentVariance: result.designConsistency.componentConsistency.variance,
-        spacingVariance: result.designConsistency.spacingConsistency.variance,
-        typographyVariance: result.designConsistency.typographyConsistency.variance,
-        exceptionsCount: result.designConsistency.exceptions.length,
-      },
-      visual: {
-        identityTone: result.visual.identity.direction.tone,
-        seedHue: result.visual.identity.direction.seedHue,
-        seedSaturation: result.visual.identity.direction.seedSaturation,
-        componentCount: result.visual.components.inventoried.length,
-        motionDurationStandard: result.visual.tokens.motion?.durationStandard,
-        reducedMotion: result.visual.tokens.motion?.reducedMotion,
-      },
-      blueprintId: result.design.blueprintId,
-      manifestId: result.build.manifestId ?? null,
-      certified: result.certification.certified,
-      certifiedStamped: result.certification.stampedArtifactIds.length,
-      certificationEvidenceId: result.certification.evidenceId ?? null,
-      councilVerdict: result.council.verdict,
-      masterPassed: result.master.masterPassed,
-      traceComplete: result.trace.complete,
-      opsUnitsReleased: result.opsRun.executed.length,
-      continuousVerdict: result.contRun.finalVerdict,
-      safeChangeStatus: result.changeResult.status,
-      peoClassification: result.peoResult.watch.classifiedAs,
-      peoAuthorized: result.peoResult.authorized,
+      projectCount: projects.length,
+      projects: projects.map((p) => ({ id: p.id, title: p.title, mode: p.attributes['mode'] })),
+    };
+    if (project === null) {
+      res.json({
+        ...base,
+        productName: null,
+        projectId: null,
+        project: null,
+        stages: [],
+        discoveryArtifacts: null,
+        businessModel: null,
+        threatModel: null,
+        visual: null,
+        designCoverage: null,
+        blueprintId: null,
+        manifestId: null,
+        implementationCount: null,
+        certified: null,
+        masterPassed: null,
+        traceComplete: null,
+      });
+      return;
+    }
+    const mode = String(project.attributes['mode']);
+    const state = stageState !== null ? stageState.get(project.id) : null;
+    const stagesForMode =
+      (PROJECT_MODE_STAGES as Record<string, { stageId: string; label: string; inScope: boolean }[]>)[mode] ?? [];
+    const stageSummary = (id: string): Readonly<Record<string, unknown>> => state?.stages[id]?.summary ?? {};
+    const discovery = stageSummary('discovery');
+    const design = stageSummary('design');
+    const architecture = stageSummary('architecture');
+    const implementation = stageSummary('implementation');
+    const verification = stageSummary('verification');
+    const lifecycleComplete =
+      result.registry === undefined ? null : await result.registry.lifecycleComplete(project.id);
+    res.json({
+      ...base,
+      productName: project.title,
+      projectId: project.id,
+      project: { id: project.id, title: project.title, mode, lifecycleComplete },
+      stages: stagesForMode.map((s) => {
+        const rec = state?.stages[s.stageId];
+        return {
+          stageId: s.stageId,
+          label: s.label,
+          inScope: s.inScope,
+          status: !s.inScope ? 'OUT_OF_SCOPE' : (rec?.status ?? 'pending').toUpperCase(),
+          error: rec?.error ?? null,
+          artifactIds: rec?.artifactIds ?? [],
+          evidenceIds: rec?.evidenceIds ?? [],
+          summary: rec?.summary ?? {},
+        };
+      }),
+      discoveryArtifacts: typeof discovery['totalArtifacts'] === 'number' ? discovery['totalArtifacts'] : null,
+      businessModel: discovery['businessModel'] ?? null,
+      threatModel: discovery['threatModel'] ?? null,
+      visual: discovery['visual'] ?? null,
+      designCoverage: design['coverage'] ?? null,
+      blueprintId: typeof design['blueprintId'] === 'string' ? design['blueprintId'] : null,
+      manifestId: typeof architecture['manifestId'] === 'string' ? architecture['manifestId'] : null,
+      implementationCount:
+        typeof implementation['implementationCount'] === 'number' ? implementation['implementationCount'] : null,
+      certified: typeof verification['certified'] === 'boolean' ? verification['certified'] : null,
+      masterPassed: typeof verification['masterPassed'] === 'boolean' ? verification['masterPassed'] : null,
+      traceComplete: typeof verification['traceComplete'] === 'boolean' ? verification['traceComplete'] : null,
     });
   });
 
@@ -548,6 +569,24 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
     }
   };
 
+  /**
+   * Tenant/project isolation scope for inventory reads (§ V.3, V.4, V.9).
+   *
+   * Every PROJECT artifact the caller owns becomes a scope root; every other
+   * artifact is reachable only through a `projectId` pointing at one of those
+   * roots. An artifact with no project and no owning project is therefore never
+   * visible — an orphan can never leak to a caller who does not own it.
+   */
+  const ownedScope = async (user: string): Promise<{ projectIds: Set<string>; artifactIds: Set<string> }> => {
+    const projects = await ownedProjectsOf(user);
+    const projectIds = new Set(projects.map((p) => p.id));
+    const artifactIds = new Set<string>(projectIds);
+    for (const artifact of await services.store.list()) {
+      if (artifact.projectId !== null && projectIds.has(artifact.projectId)) artifactIds.add(artifact.id);
+    }
+    return { projectIds, artifactIds };
+  };
+
   // --- projects (project foundation) ------------------------------------------
   app.get('/api/projects', async (req, res) => {
     const user = userIdOf(req);
@@ -598,7 +637,9 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
           ? 'PENDING'
           : 'status' in run && run.status === 'EXECUTED'
             ? 'EXECUTED'
-            : 'RECORDED';
+            : 'status' in run && run.status === 'FAILED'
+              ? 'FAILED'
+              : 'RECORDED';
         return {
           stageId: s.stageId,
           label: s.label,
@@ -1063,37 +1104,34 @@ res.json({ project: projectSummary(updated) });
       res.status(409).json({ error: `Stage "${stage.label}" is OUT OF SCOPE for mode "${mode}". Out-of-scope stages are never falsely run.` });
       return;
     }
-    const stagesRun = (project.attributes['stages'] as readonly { stageId: string; at: string; recordedBy: string }[] | undefined) ?? [];
-    if (stagesRun.some((r) => r.stageId === stageId)) {
+    const stagesRun = (project.attributes['stages'] as readonly { stageId: string; at: string; recordedBy: string; status?: string }[] | undefined) ?? [];
+    if (stagesRun.some((r) => r.stageId === stageId && r.status === 'EXECUTED')) {
       res.status(409).json({ error: `Stage "${stage.label}" has already been recorded for this project.` });
       return;
     }
     // Execution resolution: ONLY the project's own authoritative AI configuration
     // (provider + model bound through the project AI MODEL control) can drive a
-    // run. There is no fallback to a global/window selection: running a stage
-    // with anything other than the project's provider/model is silent
-    // substitution, which the architecture forbids (Â§3.3 ONE authoritative
-    // configuration). The route exists only when the credential REALLY verifies;
-    // otherwise the stage is checkpointed honestly below.
+    // run (§3.3 ONE authoritative configuration). The credential must REALLY
+    // verify; otherwise the stage is checkpointed honestly below, and nothing is
+    // fabricated.
     const projectAiConfig = aiConfigOf(project);
-    const execution = projectAiConfig !== null
+    const verifiedRouter = projectAiConfig !== null
       ? await providerManager.getExecutionRouterFor(user, projectAiConfig.providerId, projectAiConfig.modelId)
       : null;
-    // No verified model â†’ record the lifecycle checkpoint honestly, without
-    // fabricating an AI run. When the user HAS a verified selection we really
-    // execute the stage through that provider/model (below).
-    if (execution === null) {
+    if (verifiedRouter === null || execution === null) {
       const now = new Date().toISOString();
-      const nextStages = [...stagesRun, { stageId, label: stage.label, at: now, recordedBy: user, status: 'RECORDED', ...(instruction ? { instruction } : {}) }];
+      const nextStages = [...stagesRun.filter((r) => r.stageId !== stageId), { stageId, label: stage.label, at: now, recordedBy: user, status: 'RECORDED', ...(instruction ? { instruction } : {}) }];
       const recorded = await result.services.store.update(project.id, project.version, (draft) => ({
         ...draft,
         attributes: { ...draft.attributes, stages: nextStages },
       }));
       await durableProjects.capture(recorded);
       const bindingNote =
-        projectAiConfig === null
-          ? 'no AI model is configured for this project'
-          : `the bound ${projectAiConfig.providerId}/${projectAiConfig.modelId} is not verified for this account`;
+        execution === null
+          ? 'the project engine is not available in this build'
+          : projectAiConfig === null
+            ? 'no AI model is configured for this project'
+            : `the bound ${projectAiConfig.providerId}/${projectAiConfig.modelId} is not verified for this account`;
       await result.evidence.append({
         kind: 'inspection',
         summary: `Stage "${stage.label}" checkpoint for project ${project.id} by ${user}: ${bindingNote}; the stage was NOT executed and nothing was fabricated. Set the AI model (AI MODEL control) to enable real execution.`,
@@ -1110,90 +1148,60 @@ res.json({ project: projectSummary(updated) });
       });
       return;
     }
-    // Real execution: the selected provider sends the actual request, the
-    // selected model generates the actual response, and that response is
-    // recorded verbatim as evidence + project output. Upstream failures are
-    // honest: the stage is NOT marked completed and the error is returned.
-    const taskType: AiTaskType = STAGE_TASK_TYPES[stageId] ?? 'BUILD';
-    const startedAt = Date.now();
-    let completion: AiCompletionResponse;
+    // Real execution (D5): the stage's real department engines run against the
+    // project's OWN artifacts, bound to the project's verified provider/model.
+    // The department engines call router.complete() with a task type but no
+    // concrete model (they rely on one bound provider/model per project, §3.3),
+    // so the bound model is injected here - real vendor adapters require it.
+    const boundRouter = Object.create(verifiedRouter.router) as typeof verifiedRouter.router;
+    boundRouter.complete = (request) =>
+      verifiedRouter.router.complete({ ...request, model: request.model ?? verifiedRouter.modelId });
+    const runServices: CoreServices = { ...services, router: boundRouter };
+    let outcome;
     try {
-      completion = await execution.router.complete({
-        taskType,
-        model: execution.modelId,
-        messages: [
-          {
-            role: 'system',
-            content:
-              'You are the Blueprint-First project engine. Produce a concrete, honest deliverable for the requested lifecycle stage based only on the project information given. Do not fabricate results that were not produced.',
-          },
-          {
-            role: 'user',
-            content: `Project: ${project.title}\nVision: ${project.description}\nStage: ${stage.label}\n\n${instruction ? `User instruction for this run: ${instruction}\n\n` : ''}Produce the ${stage.label} deliverable for this project.`,
-          },
-        ],
+      outcome = await execution.runStage({
+        project,
+        stageId,
+        services: runServices,
+        actor: { kind: 'human', id: user },
+        ...(instruction ? { instruction } : {}),
       });
     } catch (error) {
-      jsonError(res, 502, error);
+      jsonError(res, 400, error);
       return;
     }
-    const latencyMs = Date.now() - startedAt;
-    const now = new Date().toISOString();
-    const evidenceRecord = await result.evidence.append({
-      kind: 'external-response',
-      summary: `Stage "${stage.label}" executed via ${completion.providerId}/${completion.modelId} for project ${project.id} (${latencyMs}ms).`,
-      artifactIds: [project.id],
-      payloadRef: sha256(completion.content),
-      producer: { kind: 'ai', id: completion.providerId, modelId: completion.modelId },
-    });
-    const aiOutputs =
-      typeof project.attributes['aiOutputs'] === 'object' && project.attributes['aiOutputs'] !== null
-        ? (project.attributes['aiOutputs'] as Record<string, unknown>)
-        : {};
+    const now = outcome.record.endedAt ?? new Date().toISOString();
     const nextStages = [
-      ...stagesRun,
+      ...stagesRun.filter((r) => r.stageId !== stageId),
       {
         stageId,
         label: stage.label,
         at: now,
         recordedBy: user,
-        status: 'EXECUTED',
-        providerId: completion.providerId,
-        modelId: completion.modelId,
+        status: outcome.ok ? 'EXECUTED' : 'FAILED',
         ...(instruction ? { instruction } : {}),
       },
     ];
-    const executed = await result.services.store.update(project.id, project.version, (draft) => ({
-      ...draft,
-      attributes: {
-        ...draft.attributes,
-        stages: nextStages,
-        aiOutputs: {
-          ...aiOutputs,
-          [stageId]: {
-            providerId: completion.providerId,
-            modelId: completion.modelId,
-            content: completion.content,
-            latencyMs,
-            at: now,
-            evidenceId: evidenceRecord.id,
-          },
-        },
-      },
-    }));
-    await durableProjects.capture(executed);
-    res.json({
+    // Real execution advanced the project artifact (adopted/ linked artifacts),
+    // so re-read the current version before recording the ledger breadcrumb.
+    const current = await result.services.store.get(project.id);
+    if (current !== null && current !== undefined) {
+      const updated = await result.services.store.update(current.id, current.version, (draft) => ({
+        ...draft,
+        attributes: { ...draft.attributes, stages: nextStages },
+      }));
+      await durableProjects.capture(updated);
+    }
+    res.status(outcome.ok ? 200 : 422).json({
       projectId: project.id,
       stageId,
       label: stage.label,
-      status: 'EXECUTED',
+      status: outcome.record.status,
       at: now,
-      providerId: completion.providerId,
-      modelId: completion.modelId,
-      latencyMs,
-      evidenceId: evidenceRecord.id,
-      content: completion.content,
-      summary: `Stage "${stage.label}" executed via ${completion.providerId}/${completion.modelId} (${latencyMs}ms).`,
+      artifactIds: outcome.record.artifactIds,
+      evidenceIds: outcome.record.evidenceIds,
+      summary: outcome.record.summary,
+      error: outcome.record.error ?? null,
     });
   });
 
@@ -1401,10 +1409,72 @@ res.json({ project: projectSummary(updated) });
   };
   const PENDING_CERT = { status: 'PENDING', presentDimensions: [], missingDimensions: [], requiredDimensions: [], certified: null, certifiable: null };
 
+  // --- per-project stage reads (D5 / Option 1 incremental migration) --------
+
+  /** Maps a persisted StageRecord to the status word the stage views expect. */
+  const stageStatusWord = (record: StageRecord | undefined): string => {
+    if (record === undefined) return 'PENDING';
+    return record.status === 'completed'
+      ? 'COMPLETED'
+      : record.status === 'failed'
+        ? 'FAILED'
+        : record.status === 'running'
+          ? 'RUNNING'
+          : 'PENDING';
+  };
+
+  /** Resolved scope for a stage read that may carry an explicit ?projectId. */
+  type ScopedStage =
+    | { kind: 'none' } // no projectId supplied -> legacy read path
+    | { kind: 'invalid' } // projectId supplied but missing/foreign -> 404
+    | { kind: 'ok'; project: Artifact; record: StageRecord | undefined };
+
+  /**
+   * Resolves the caller's own project (only when an explicit ?projectId is
+   * supplied) and its persisted stage record. When no projectId is passed this
+   * reports 'none', so the legacy demo-compat reads behave exactly as before.
+   */
+  const projectStageOf = async (req: express.Request, stageId: string): Promise<ScopedStage> => {
+    const requested = typeof req.query['projectId'] === 'string' ? req.query['projectId'] : null;
+    if (requested === null) return { kind: 'none' };
+    const user = userIdOf(req);
+    if (user === null) return { kind: 'invalid' };
+    const project = await requireOwnedProject(user, requested);
+    if (project === null) return { kind: 'invalid' };
+    const record = stageState === null ? undefined : stageState.get(project.id)?.stages[stageId];
+    return { kind: 'ok', project, record };
+  };
+
   // --- project / discovery ----------------------------------------------------
-  app.get('/api/discovery', (req, res) => {
+  app.get('/api/discovery', async (req, res) => {
     if (req.identity === undefined) {
       res.status(401).json({ error: 'authentication required' });
+      return;
+    }
+    const scoped = await projectStageOf(req, 'discovery');
+    if (scoped.kind === 'invalid') {
+      res.status(404).json({ error: 'project-not-found' });
+      return;
+    }
+    if (scoped.kind === 'ok') {
+      const record = scoped.record;
+      if (record === undefined) {
+        res.json(PENDING_DISCOVERY);
+        return;
+      }
+      res.json({
+        status: stageStatusWord(record),
+        error: record.error ?? null,
+        baseline: record.summary['baseline'] ?? null,
+        artifactIds: record.artifactIds,
+        findingIds: Array.isArray(record.summary['findingIds'])
+          ? (record.summary['findingIds'] as readonly string[])
+          : [],
+        diff: record.summary['diff'] ?? null,
+        uncertainties: Array.isArray(record.summary['uncertainties'])
+          ? (record.summary['uncertainties'] as readonly string[])
+          : null,
+      });
       return;
     }
     if (!result.discovery) {
@@ -1423,9 +1493,38 @@ res.json({ project: projectSummary(updated) });
   });
 
   // --- Â§0.6 Recursive Page Expansion (Level 3 Pass 10) -----------------------
-  app.get('/api/expansion', (req, res) => {
+  app.get('/api/expansion', async (req, res) => {
     if (req.identity === undefined) {
       res.status(401).json({ error: 'authentication required' });
+      return;
+    }
+    const scoped = await projectStageOf(req, 'discovery');
+    if (scoped.kind === 'invalid') {
+      res.status(404).json({ error: 'project-not-found' });
+      return;
+    }
+    if (scoped.kind === 'ok') {
+      const record = scoped.record;
+      if (record === undefined) {
+        res.json(PENDING_EXPANSION);
+        return;
+      }
+      const l3 = record.summary['level3'] as Record<string, number> | undefined;
+      res.json({
+        status: record.status === 'completed' ? 'READY' : stageStatusWord(record),
+        pages: [],
+        tally: null,
+        artifactIds: record.artifactIds,
+        fullDepartment: l3 === undefined
+          ? null
+          : {
+              contentAdded: l3['content'] ?? 0,
+              edgeStatesAdded: l3['edgeStates'] ?? 0,
+              risks: l3['risks'] ?? 0,
+              audited: record.status === 'completed',
+              artifactIds: record.artifactIds,
+            },
+      });
       return;
     }
     if (!result.fullDepartment) {
@@ -1462,9 +1561,33 @@ res.json({ project: projectSummary(updated) });
   });
 
   // --- Interactive Digital Twin (Â§1.4) ---------------------------------------
-  app.get('/api/twin', (req, res) => {
+  app.get('/api/twin', async (req, res) => {
     if (req.identity === undefined) {
       res.status(401).json({ error: 'authentication required' });
+      return;
+    }
+    const scoped = await projectStageOf(req, 'design');
+    if (scoped.kind === 'invalid') {
+      res.status(404).json({ error: 'project-not-found' });
+      return;
+    }
+    if (scoped.kind === 'ok') {
+      const design = scoped.record;
+      const twin = design?.summary['twin'] as { twinArtifactId?: string; pages?: number; elements?: number } | undefined;
+      res.json({
+        projectId: scoped.project.id,
+        blueprintId: design?.summary['blueprintId'] ?? null,
+        twinArtifactId: twin?.twinArtifactId ?? null,
+        pages: [],
+        elementCount: twin?.elements ?? 0,
+        boundElementCount: 0,
+        gapCount: 0,
+        evidenceCount: 0,
+        built: typeof twin?.twinArtifactId === 'string',
+        note: typeof twin?.twinArtifactId === 'string'
+          ? 'Per-project twin materialized; page-level element bindings are not surfaced on this read yet.'
+          : 'Twin materializes with the Design stage.',
+      });
       return;
     }
     if (!result.twin) {
@@ -1475,9 +1598,28 @@ res.json({ project: projectSummary(updated) });
   });
 
   // --- design / engineering artifacts -----------------------------------------
-  app.get('/api/design', (req, res) => {
+  app.get('/api/design', async (req, res) => {
     if (req.identity === undefined) {
       res.status(401).json({ error: 'authentication required' });
+      return;
+    }
+    const scoped = await projectStageOf(req, 'design');
+    if (scoped.kind === 'invalid') {
+      res.status(404).json({ error: 'project-not-found' });
+      return;
+    }
+    if (scoped.kind === 'ok') {
+      const record = scoped.record;
+      if (record === undefined) {
+        res.json(PENDING_DESIGN);
+        return;
+      }
+      res.json({
+        status: stageStatusWord(record),
+        blueprintId: typeof record.summary['blueprintId'] === 'string' ? (record.summary['blueprintId'] as string) : null,
+        artifactIds: record.artifactIds,
+        approval: scoped.project.attributes['approval'] ?? null,
+      });
       return;
     }
     if (!result.design) {
@@ -1493,9 +1635,27 @@ res.json({ project: projectSummary(updated) });
   });
 
   // --- multi-perspective reasoning council ------------------------------------
-  app.get('/api/council', (req, res) => {
+  app.get('/api/council', async (req, res) => {
     if (req.identity === undefined) {
       res.status(401).json({ error: 'authentication required' });
+      return;
+    }
+    const scoped = await projectStageOf(req, 'verification');
+    if (scoped.kind === 'invalid') {
+      res.status(404).json({ error: 'project-not-found' });
+      return;
+    }
+    if (scoped.kind === 'ok') {
+      const record = scoped.record;
+      if (record === undefined) {
+        res.json(PENDING_COUNCIL);
+        return;
+      }
+      res.json({
+        subject: typeof record.summary['subject'] === 'string' ? (record.summary['subject'] as string) : null,
+        verdict: record.summary['councilVerdict'] ?? 'PENDING',
+        seats: record.summary['seats'] ?? null,
+      });
       return;
     }
     if (!result.council) {
@@ -1510,9 +1670,38 @@ res.json({ project: projectSummary(updated) });
   });
 
   // --- master verification ----------------------------------------------------
-  app.get('/api/verification', (req, res) => {
+  app.get('/api/verification', async (req, res) => {
     if (req.identity === undefined) {
       res.status(401).json({ error: 'authentication required' });
+      return;
+    }
+    const scoped = await projectStageOf(req, 'verification');
+    if (scoped.kind === 'invalid') {
+      res.status(404).json({ error: 'project-not-found' });
+      return;
+    }
+    if (scoped.kind === 'ok') {
+      const record = scoped.record;
+      if (record === undefined) {
+        res.json(PENDING_VERIFICATION);
+        return;
+      }
+      const masterPassed =
+        typeof record.summary['masterPassed'] === 'boolean'
+          ? (record.summary['masterPassed'] as boolean)
+          : record.status === 'failed'
+            ? false
+            : null;
+      res.json({
+        masterPassed,
+        subjectsAudited: typeof record.summary['subjectCount'] === 'number' ? (record.summary['subjectCount'] as number) : 0,
+        blockingFails: typeof record.summary['blockingFails'] === 'number' ? (record.summary['blockingFails'] as number) : 0,
+        unresolvedInconclusive: 0,
+        notes: record.error?.message ?? null,
+        closureArtifactCount: record.artifactIds.length,
+        rollup: record.summary['designCodeTrace'] ?? null,
+        reports: 0,
+      });
       return;
     }
     if (!result.master) {
@@ -1532,9 +1721,35 @@ res.json({ project: projectSummary(updated) });
   });
 
   // --- acceptance testing ------------------------------------------------------
-  app.get('/api/testing', (req, res) => {
+  app.get('/api/testing', async (req, res) => {
     if (req.identity === undefined) {
       res.status(401).json({ error: 'authentication required' });
+      return;
+    }
+    const scoped = await projectStageOf(req, 'testing');
+    if (scoped.kind === 'invalid') {
+      res.status(404).json({ error: 'project-not-found' });
+      return;
+    }
+    if (scoped.kind === 'ok') {
+      const record = scoped.record;
+      if (record === undefined) {
+        res.json(PENDING_TESTING);
+        return;
+      }
+      res.json({
+        status: stageStatusWord(record),
+        executed: typeof record.summary['executed'] === 'number' ? (record.summary['executed'] as number) : 0,
+        testIds: Array.isArray(record.summary['testIds'])
+          ? (record.summary['testIds'] as readonly string[])
+          : record.artifactIds,
+        reportId: record.summary['reportId'] ?? null,
+        evidenceId: record.evidenceIds[0] ?? null,
+        advancedToTestVerified: record.summary['advancedToTestVerified'] ?? null,
+        docHalts: record.summary['docHalts'] ?? null,
+        boss: record.summary['boss'] ?? null,
+        auditor: record.summary['auditor'] ?? null,
+      });
       return;
     }
     if (!result.testRun) {
@@ -1555,9 +1770,35 @@ res.json({ project: projectSummary(updated) });
   });
 
   // --- deployment --------------------------------------------------------------
-  app.get('/api/deployment', (req, res) => {
+  app.get('/api/deployment', async (req, res) => {
     if (req.identity === undefined) {
       res.status(401).json({ error: 'authentication required' });
+      return;
+    }
+    const scoped = await projectStageOf(req, 'deployment');
+    if (scoped.kind === 'invalid') {
+      res.status(404).json({ error: 'project-not-found' });
+      return;
+    }
+    if (scoped.kind === 'ok') {
+      const record = scoped.record;
+      if (record === undefined) {
+        res.json(PENDING_OPS);
+        return;
+      }
+      res.json({
+        status: stageStatusWord(record),
+        executed: typeof record.summary['executed'] === 'number' ? (record.summary['executed'] as number) : 0,
+        deployIds: Array.isArray(record.summary['deployIds'])
+          ? (record.summary['deployIds'] as readonly string[])
+          : record.artifactIds,
+        manifestId: record.summary['manifestId'] ?? null,
+        evidenceId: record.evidenceIds[0] ?? null,
+        advancedToDeployedVerified: record.summary['advancedToDeployedVerified'] ?? null,
+        docHalts: record.summary['docHalts'] ?? null,
+        boss: record.summary['boss'] ?? null,
+        auditor: record.summary['auditor'] ?? null,
+      });
       return;
     }
     if (!result.opsRun) {
@@ -1578,9 +1819,19 @@ res.json({ project: projectSummary(updated) });
   });
 
   // --- runtime telemetry --------------------------------------------------------
-  app.get('/api/telemetry', (req, res) => {
+  app.get('/api/telemetry', async (req, res) => {
     if (req.identity === undefined) {
       res.status(401).json({ error: 'authentication required' });
+      return;
+    }
+    // Telemetry is a runtime observation; no lifecycle stage persists it yet.
+    const scoped = await projectStageOf(req, 'operations');
+    if (scoped.kind === 'invalid') {
+      res.status(404).json({ error: 'project-not-found' });
+      return;
+    }
+    if (scoped.kind === 'ok') {
+      res.json(PENDING_TELEMETRY);
       return;
     }
     if (!result.telemetryObservation || !result.telemetrySource) {
@@ -1594,9 +1845,33 @@ res.json({ project: projectSummary(updated) });
   });
 
   // --- continuous engineering ----------------------------------------------------
-  app.get('/api/continuous', (req, res) => {
+  app.get('/api/continuous', async (req, res) => {
     if (req.identity === undefined) {
       res.status(401).json({ error: 'authentication required' });
+      return;
+    }
+    const scoped = await projectStageOf(req, 'operations');
+    if (scoped.kind === 'invalid') {
+      res.status(404).json({ error: 'project-not-found' });
+      return;
+    }
+    if (scoped.kind === 'ok') {
+      const record = scoped.record;
+      if (record === undefined) {
+        res.json(PENDING_CONTINUOUS);
+        return;
+      }
+      res.json({
+        finalVerdict: record.summary['finalVerdict'] ?? stageStatusWord(record),
+        rationale: record.error?.message ?? null,
+        workerReport: {
+          scopedCount: typeof record.summary['scopedCount'] === 'number' ? (record.summary['scopedCount'] as number) : 0,
+          stableCount: typeof record.summary['stableCount'] === 'number' ? (record.summary['stableCount'] as number) : 0,
+        },
+        bossDecision: record.summary['boss'] ?? null,
+        auditorDecision: record.summary['auditor'] ?? null,
+        materialization: null,
+      });
       return;
     }
     if (!result.contRun) {
@@ -1614,9 +1889,18 @@ res.json({ project: projectSummary(updated) });
   });
 
   // --- recursion -----------------------------------------------------------------
-  app.get('/api/recursion', (req, res) => {
+  app.get('/api/recursion', async (req, res) => {
     if (req.identity === undefined) {
       res.status(401).json({ error: 'authentication required' });
+      return;
+    }
+    const scoped = await projectStageOf(req, 'operations');
+    if (scoped.kind === 'invalid') {
+      res.status(404).json({ error: 'project-not-found' });
+      return;
+    }
+    if (scoped.kind === 'ok') {
+      res.json(PENDING_RECURSION);
       return;
     }
     if (!result.recursionResult) {
@@ -1632,9 +1916,18 @@ res.json({ project: projectSummary(updated) });
   });
 
   // --- safe change ----------------------------------------------------------------
-  app.get('/api/safe-change', (req, res) => {
+  app.get('/api/safe-change', async (req, res) => {
     if (req.identity === undefined) {
       res.status(401).json({ error: 'authentication required' });
+      return;
+    }
+    const scoped = await projectStageOf(req, 'maintenance');
+    if (scoped.kind === 'invalid') {
+      res.status(404).json({ error: 'project-not-found' });
+      return;
+    }
+    if (scoped.kind === 'ok') {
+      res.json(PENDING_SAFE_CHANGE);
       return;
     }
     if (!result.changeResult) {
@@ -1656,9 +1949,18 @@ res.json({ project: projectSummary(updated) });
   });
 
   // --- PEO (Permanent Engineering Organization) -----------------------------------
-  app.get('/api/peo', (req, res) => {
+  app.get('/api/peo', async (req, res) => {
     if (req.identity === undefined) {
       res.status(401).json({ error: 'authentication required' });
+      return;
+    }
+    const scoped = await projectStageOf(req, 'continuous-improvement');
+    if (scoped.kind === 'invalid') {
+      res.status(404).json({ error: 'project-not-found' });
+      return;
+    }
+    if (scoped.kind === 'ok') {
+      res.json(PENDING_PEO);
       return;
     }
     if (!result.peoResult) {
@@ -1679,11 +1981,13 @@ res.json({ project: projectSummary(updated) });
 
   // --- artifacts inventory --------------------------------------------------------
   app.get('/api/artifacts', async (req, res) => {
-    if (req.identity === undefined) {
+    const user = userIdOf(req);
+    if (user === null) {
       res.status(401).json({ error: 'authentication required' });
       return;
     }
-    const artifacts = await services.store.list();
+    const { artifactIds } = await ownedScope(user);
+    const artifacts = (await services.store.list()).filter((a) => artifactIds.has(a.id));
     res.json({
       count: artifacts.length,
       artifacts: artifacts.map(artifactSummary),
@@ -1691,32 +1995,66 @@ res.json({ project: projectSummary(updated) });
   });
 
   app.get('/api/artifacts/:id', async (req, res) => {
-    const artifact = await services.store.get(req.params.id);
+    const user = userIdOf(req);
+    if (user === null) {
+      res.status(401).json({ error: 'authentication required' });
+      return;
+    }
+    const { artifactIds } = await ownedScope(user);
+    const id = req.params['id']!;
+    // Authorization is decided before existence is disclosed: a caller who does
+    // not own the artifact receives 404, never the record and never a 403 that
+    // would confirm the artifact exists.
+    if (!artifactIds.has(id)) {
+      res.status(404).json({ error: 'not-found', id });
+      return;
+    }
+    const artifact = await services.store.get(id);
     if (artifact === null) {
-      res.status(404).json({ error: 'not-found', id: req.params.id });
+      res.status(404).json({ error: 'not-found', id });
       return;
     }
     res.json(artifact);
   });
 
   // --- dependency map --------------------------------------------------------------
-  app.get('/api/dependency-map', (req, res) => {
+  app.get('/api/dependency-map', async (req, res) => {
+    const user = userIdOf(req);
+    if (user === null) {
+      res.status(401).json({ error: 'authentication required' });
+      return;
+    }
+    const { artifactIds } = await ownedScope(user);
+    const nodes = services.graph.allNodes().filter((n) => artifactIds.has(n.id));
+    const edges = services.graph
+      .allEdges()
+      .filter((e) => artifactIds.has(e.from) && artifactIds.has(e.to))
+      .map((e) => ({ from: e.from, relation: e.relation, to: e.to }));
+    res.json({ nodeCount: nodes.length, edgeCount: edges.length, edges });
+  });
+
+  // --- lineage / provenance --------------------------------------------------------
+  app.get('/api/lineage', async (req, res) => {
     if (req.identity === undefined) {
       res.status(401).json({ error: 'authentication required' });
       return;
     }
-    const edges = services.graph.allEdges().map((e) => ({
-      from: e.from,
-      relation: e.relation,
-      to: e.to,
-    }));
-    res.json({ nodeCount: result.stats.nodeCount, edgeCount: result.stats.edgeCount, edges });
-  });
-
-  // --- lineage / provenance --------------------------------------------------------
-  app.get('/api/lineage', (req, res) => {
-    if (req.identity === undefined) {
-      res.status(401).json({ error: 'authentication required' });
+    const scoped = await projectStageOf(req, 'verification');
+    if (scoped.kind === 'invalid') {
+      res.status(404).json({ error: 'project-not-found' });
+      return;
+    }
+    if (scoped.kind === 'ok') {
+      const record = scoped.record;
+      const lineage = record?.summary['lineage'] as
+        | { baseId?: string; links?: unknown; completeThrough?: string | null; gaps?: unknown }
+        | undefined;
+      res.json({
+        firstPageId: lineage?.baseId ?? null,
+        links: lineage?.links ?? [],
+        completeThrough: lineage?.completeThrough ?? null,
+        gaps: lineage?.gaps ?? [],
+      });
       return;
     }
     res.json({
@@ -1729,17 +2067,72 @@ res.json({ project: projectSummary(updated) });
 
   // --- evidence / certification detail ------------------------------------------------
   app.get('/api/evidence', async (req, res) => {
+    const user = userIdOf(req);
+    if (user === null) {
+      res.status(401).json({ error: 'authentication required' });
+      return;
+    }
+    const scope = await ownedScope(user);
+    const all = await result.evidence.all();
+    // Tenant isolation: an evidence record is visible only when at least one
+    // artifact it concerns belongs to a project the caller owns. Platform-level
+    // records (startup gate, capability probes) carry no artifact at all and are
+    // surfaced separately rather than mixed into a tenant's project evidence.
+    const projectEntries = all.filter((e) =>
+      e.artifactIds.length > 0 && e.artifactIds.some((id) => scope.artifactIds.has(id)));
+    const platformEntries = all.filter((e) => e.artifactIds.length === 0);
+
+    const requested = req.query['projectId'];
+    if (typeof requested === 'string' && requested.length > 0) {
+      if (!scope.projectIds.has(requested)) {
+        res.status(404).json({ error: 'project-not-found' });
+        return;
+      }
+      const artifactIds = new Set<string>([requested]);
+      for (const a of await services.store.list()) {
+        if (a.projectId === requested) artifactIds.add(a.id);
+      }
+      const entries = all.filter(
+        (e) => e.artifactIds.length > 0 && e.artifactIds.some((id) => artifactIds.has(id)));
+      res.json({ count: entries.length, entries });
+      return;
+    }
+    res.json({
+      count: projectEntries.length,
+      entries: projectEntries,
+      platform: { count: platformEntries.length, entries: platformEntries },
+    });
+  });
+
+  app.get('/api/certification', async (req, res) => {
     if (req.identity === undefined) {
       res.status(401).json({ error: 'authentication required' });
       return;
     }
-    const all = await result.evidence.all();
-    res.json({ count: all.length, entries: all });
-  });
-
-  app.get('/api/certification', (req, res) => {
-    if (req.identity === undefined) {
-      res.status(401).json({ error: 'authentication required' });
+    const scoped = await projectStageOf(req, 'verification');
+    if (scoped.kind === 'invalid') {
+      res.status(404).json({ error: 'project-not-found' });
+      return;
+    }
+    if (scoped.kind === 'ok') {
+      const record = scoped.record;
+      if (record === undefined) {
+        res.json(PENDING_CERT);
+        return;
+      }
+      const certified = record.summary['certified'] === true;
+      res.json({
+        certified,
+        reasons: record.error !== undefined ? [record.error.message] : [],
+        stampedArtifactIds: Array.isArray(record.summary['stampedArtifactIds'])
+          ? (record.summary['stampedArtifactIds'] as readonly string[])
+          : [],
+        evidenceId: record.summary['certificationEvidenceId'] ?? null,
+        confidence: null,
+        certifiable: certified,
+        status: certified ? 'CERTIFIED' : 'BLOCKED',
+        trace: record.summary['designCodeTrace'] ?? null,
+      });
       return;
     }
     if (!result.certification) {
@@ -1759,13 +2152,45 @@ res.json({ project: projectSummary(updated) });
     });
   });
 
-  // --- traceability ----------------------------------------------------------------
-  app.get('/api/traceability', (req, res) => {
-    if (req.identity === undefined) {
+  // --- traceability (§T standing queries) -------------------------------------------
+  // Derived live from the caller's own artifacts; never a boot-time global. An
+  // artifact with no forward edge into the next lifecycle phase is reported as
+  // the specific broken edge, by ID (§T.3) — never as "something is incomplete".
+  app.get('/api/traceability', async (req, res) => {
+    const user = userIdOf(req);
+    if (user === null) {
       res.status(401).json({ error: 'authentication required' });
       return;
     }
-    res.json(result.trace);
+    const scope = await ownedScope(user);
+    const owned = (await services.store.list()).filter((a) => scope.artifactIds.has(a.id));
+    const baseIds = new Set(owned.filter((a) => isBaseArtifactId(a.id)).map((a) => a.id));
+    const artifacts: Record<string, unknown>[] = [];
+    for (const baseId of [...baseIds].sort()) {
+      const status = await lineageStatus(services.store, baseId);
+      artifacts.push({ ...status });
+    }
+    const requested = req.query['projectId'];
+    const filtered =
+      typeof requested === 'string' && requested.length > 0
+        ? artifacts.filter((a) => {
+            const artifact = owned.find((x) => x.id === a['baseId']);
+            return artifact !== undefined && artifact.projectId === requested;
+          })
+        : artifacts;
+    if (typeof requested === 'string' && requested.length > 0 && !scope.projectIds.has(requested)) {
+      res.status(404).json({ error: 'project-not-found' });
+      return;
+    }
+    res.json({
+      count: filtered.length,
+      artifacts: filtered,
+      brokenEdges: filtered.flatMap((a) =>
+        ((a['gaps'] as { id: string; reason: string }[] | undefined) ?? []).map(
+          (g) => ({ artifactId: a['baseId'], missing: g.id, reason: g.reason }),
+        ),
+      ),
+    });
   });
 
   // --- model selector (catalogue + credentials + selection) -------------------------
@@ -2361,6 +2786,8 @@ execution.router.complete({
   let lastFoundationRefresh = Date.now();
   const refreshFoundation = async (force: boolean): Promise<FoundationReport> => {
     if (!force && Date.now() - lastFoundationRefresh < foundationTtlMs) return foundationReport;
+    resetHostPathCache();
+    reconcileHostPath();
     const decisions = await capabilityDiscovery.discover();
     const nextDaytonaReady = decisions.some((c) => c.capability === 'daytona' && c.status === 'READY');
     const nextBackend: 'local-workspace' | 'daytona' = nextDaytonaReady ? 'daytona' : 'local-workspace';
@@ -3649,6 +4076,10 @@ execution.router.complete({
   });
 
   app.get('/api/models/:providerId/:modelId', async (req, res) => {
+    if (userIdOf(req) === null) {
+      res.status(401).json({ error: 'authentication required' });
+      return;
+    }
     try {
       const model = await modelCatalogue.getModel(req.params['providerId']!, req.params['modelId']!);
       if (model === null) {
@@ -3831,6 +4262,7 @@ execution.router.complete({
     documentStore,
     working: { bus, environments, jobs: jobEngine, supervisor },
     judgment,
+    ...(boot !== null ? { execution: boot.execution, stageState: boot.stageState } : {}),
   };
 }
 

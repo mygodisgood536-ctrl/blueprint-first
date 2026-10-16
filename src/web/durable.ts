@@ -1,20 +1,28 @@
 /**
- * Generic durable JSON-file store for application-layer state.
+ * Generic durable store for application-layer state.
  *
- * Nexona's product layer (accounts, sessions, documents, evidence) needs
- * small, structured snapshots that survive process restarts. This module
- * provides one tiny, typed primitive for that: a schema-versioned JSON file
- * written atomically on every save (temp file + rename, Windows-safe
- * fallback reused from the core artifact store).
+ * Accounts, sessions, projects, documents, evidence, jobs, events, environments,
+ * capabilities, the judgment ledger, the supervision trace and per-project stage
+ * state all occupy one slot of this store. The constructor signature is
+ * unchanged — callers still pass a file path — but the bytes now land in the
+ * backend selected for the process (Decision D2):
  *
- * Deliberately storage-light by design — the same philosophy as the core's
- * JsonFileArtifactStore: single-node durable persistence behind a narrow
- * surface, swappable for a database adapter later without touching callers.
+ *   - `json-file`    local disk, development and the test suite
+ *   - `postgresql`   Neon, production (a `DATABASE_URL` is present)
+ *
+ * The file path is therefore a *slot name*, not a write location, and the schema
+ * version is still enforced on read so an incompatible store fails closed
+ * instead of being silently misread.
  */
 
-import { promises as fs } from 'node:fs';
+import { basename, dirname, extname, resolve } from 'node:path';
 import { BlueprintError } from '../core/errors.ts';
-import { atomicWriteText } from '../core/json-file-store.ts';
+import { jsonFileBackend } from '../storage/json-file-backend.ts';
+import {
+  resolveBackend,
+  selectStorageKind,
+  type DurableSnapshotBackend,
+} from '../storage/index.ts';
 
 interface Envelope<T> {
   schemaVersion: number;
@@ -23,65 +31,90 @@ interface Envelope<T> {
 }
 
 export class JsonFileStore<T> {
-  private readonly filePath: string;
+  private readonly slot: string;
   private readonly schemaVersion: number;
+  private readonly rootDir: string;
+  private backendOverride?: DurableSnapshotBackend;
 
-  constructor(options: { filePath: string; schemaVersion: number }) {
-    this.filePath = options.filePath;
+  constructor(options: { filePath: string; schemaVersion: number; backend?: DurableSnapshotBackend }) {
+    // The file path still decides *where* development state lives, so a test
+    // (or a second local instance) rooted at its own directory stays fully
+    // isolated. In production the path is ignored: PostgreSQL is the substrate.
+    this.rootDir = dirname(resolve(options.filePath));
+    this.slot = basename(options.filePath, extname(options.filePath));
     this.schemaVersion = options.schemaVersion;
+    if (options.backend !== undefined) this.backendOverride = options.backend;
+  }
+
+  /** The live durable backend. Overridable for tests. */
+  backend(): DurableSnapshotBackend {
+    if (this.backendOverride !== undefined) return this.backendOverride;
+    this.backendOverride = selectStorageKind() === 'postgresql' ? resolveBackend() : jsonFileBackend(this.rootDir);
+    return this.backendOverride;
+  }
+
+  /** Pins this store to an explicit backend (tests, alternate hosts). */
+  useBackend(value: DurableSnapshotBackend): void {
+    this.backendOverride = value;
   }
 
   /**
-   * Loads the persisted value, or null when no file exists yet (first run).
-   * Throws STORE_CORRUPT on invalid JSON or a schema-version mismatch so a
-   * bad file is never silently ignored.
+   * Loads the persisted value, or null when the slot has never been written
+   * (first run). Throws STORE_CORRUPT on a schema-version mismatch so an
+   * incompatible store is never silently ignored.
    */
   async load(): Promise<T | null> {
-    let raw: string | null = null;
-    try {
-      raw = await fs.readFile(this.filePath, 'utf8');
-    } catch {
-      return null; // first run - nothing persisted yet
-    }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch (error) {
-      // A store whose bytes are entirely NUL or whitespace is unambiguously a
-      // write that never completed - not meaningful state. Windows can leave a
-      // pre-allocated, zero-filled file when a process is terminated mid-write.
-      // Treating that as "first run" lets the platform start and immediately
-      // rewrite a valid store. Any file with real content that fails to parse
-      // still fails closed, so genuine corruption is never silently ignored.
-      if (raw.length > 0 && /^[\0\s]+$/.test(raw)) {
-        return null;
-      }
-      throw new BlueprintError(
-        'STORE_CORRUPT',
-        `Durable store file ${this.filePath} is not valid JSON: ${(error as Error).message}`,
-      );
-    }
+    const raw = await this.backend().read(this.slot);
+    if (raw === null) return null;
     if (
-      typeof parsed !== 'object' ||
-      parsed === null ||
-      !('schemaVersion' in parsed) ||
-      (parsed as Envelope<T>).schemaVersion !== this.schemaVersion
+      typeof raw !== 'object' ||
+      raw === null ||
+      !('schemaVersion' in raw) ||
+      (raw as Envelope<T>).schemaVersion !== this.schemaVersion
     ) {
       throw new BlueprintError(
         'STORE_CORRUPT',
-        `Durable store file ${this.filePath} does not match schema version ${this.schemaVersion}.`,
+        `Durable store slot ${this.slot} does not match schema version ${this.schemaVersion}.`,
       );
     }
-    return (parsed as Envelope<T>).value;
+    return (raw as Envelope<T>).value;
   }
 
-  /** Persists the value atomically (temp file + rename with fallback). */
+  /** Persists the value atomically in the active backend. */
   async save(value: T): Promise<void> {
-    const envelope: Envelope<T> = {
+    await this.backend().write(this.slot, {
       schemaVersion: this.schemaVersion,
       savedAt: new Date().toISOString(),
       value,
-    };
-    await atomicWriteText(this.filePath, JSON.stringify(envelope, null, 2));
+    } satisfies Envelope<T>);
   }
+
+  /**
+   * Serialized read-modify-write for callers that must not lose an update under
+   * concurrency (used by the per-project stage ledger and the identity registry).
+   */
+  async update<R>(mutate: (current: T | null) => Promise<{ value: T; result: R }> | { value: T; result: R }): Promise<R> {
+    return this.backend().transact(this.slot, async (current) => {
+      const typed = current as Envelope<T> | null;
+      if (typed !== null && typed.schemaVersion !== this.schemaVersion) {
+        throw new BlueprintError(
+          'STORE_CORRUPT',
+          `Durable store slot ${this.slot} does not match schema version ${this.schemaVersion}.`,
+        );
+      }
+      const { value, result } = await mutate(typed === null ? null : typed.value);
+      return {
+        value: { schemaVersion: this.schemaVersion, savedAt: new Date().toISOString(), value },
+        result,
+      };
+    });
+  }
+}
+
+/**
+ * Stable slot name derived from a durable file path. Slots are scoped by the
+ * backend root (the directory), so only the base name is needed as the key.
+ */
+export function slotNameFrom(filePath: string): string {
+  return basename(filePath, extname(filePath));
 }

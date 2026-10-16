@@ -6,6 +6,15 @@
  * from a persisted snapshot, so the same history always produces the same next
  * ID. Allocation itself is pure bookkeeping - persistence is the caller's
  * responsibility (the JSON-file store snapshots allocator state atomically).
+ *
+ * Concurrent instances (the control plane runs as many short-lived serverless
+ * instances behind a load balancer) are served by `IdReservation`: the
+ * allocator atomically reserves a contiguous, exclusive block of numbers per
+ * type from the database at boot, then serves `nextId` from that block. Two
+ * instances therefore can never mint the same canonical ID, and no call site has
+ * to become asynchronous. When a block runs out the allocator fails closed with
+ * `IdAllocationExhaustedError` rather than risking a duplicate - the caller
+ * surfaces it and the platform retries after a fresh reservation.
  */
 
 import { formatArtifactId, parseArtifactId } from './ids.ts';
@@ -15,10 +24,33 @@ export interface AllocatorSnapshot {
   readonly counters: Readonly<Record<string, number>>;
 }
 
+/** Raised when a reserved ID block is exhausted and no new one was fetched. */
+export class IdAllocationExhaustedError extends Error {
+  readonly code = 'ID_ALLOCATION_EXHAUSTED';
+  readonly artifactType: string;
+  constructor(artifactType: string) {
+    super(`No reserved ID block remains for artifact type ${artifactType}.`);
+    this.name = 'IdAllocationExhaustedError';
+    this.artifactType = artifactType;
+  }
+}
+
+/** Atomic block reservation against a shared durable counter. */
+export interface IdReservation {
+  /** Reserves `[from, to]` inclusive, exclusively owned by this caller. */
+  reserve(type: ArtifactType, size: number): Promise<{ from: number; to: number }>;
+}
+
+/** IDs reserved per artifact type per instance. Large enough to be uneventful. */
+export const ID_RESERVATION_BLOCK = 1024;
+
 export class ArtifactIdAllocator {
   private counters: Map<ArtifactType, number> = new Map();
+  private readonly blockEnd: Map<ArtifactType, number> = new Map();
+  private readonly reservation?: IdReservation;
 
-  constructor(snapshot?: AllocatorSnapshot) {
+  constructor(snapshot?: AllocatorSnapshot, reservation?: IdReservation) {
+    if (reservation !== undefined) this.reservation = reservation;
     if (snapshot === undefined) return;
     for (const [rawType, value] of Object.entries(snapshot.counters)) {
       if (!Number.isInteger(value) || value < 0) {
@@ -30,8 +62,30 @@ export class ArtifactIdAllocator {
     }
   }
 
+  /**
+   * Ensures a reserved block covers the counter for `type`.
+   * Awaited during boot (and by any caller that wants to guarantee headroom).
+   */
+  async reserve(
+    type: ArtifactType,
+    size: number = ID_RESERVATION_BLOCK,
+    reservation?: IdReservation,
+  ): Promise<void> {
+    const source = reservation ?? this.reservation;
+    if (source === undefined) return;
+    const block = await source.reserve(type, size);
+    const highWater = this.counters.get(type) ?? 0;
+    const from = Math.max(block.from - 1, highWater);
+    if (block.to >= from) this.blockEnd.set(type, block.to);
+  }
+
   /** Allocates the next canonical ID for the given type (monotonic). */
   nextId(type: ArtifactType): string {
+    const limit = this.blockEnd.get(type);
+    if (limit !== undefined) {
+      const current = this.counters.get(type) ?? 0;
+      if (current >= limit) throw new IdAllocationExhaustedError(type);
+    }
     const current = this.counters.get(type) ?? 0;
     const next = current + 1;
     this.counters.set(type, next);

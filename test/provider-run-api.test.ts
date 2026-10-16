@@ -18,16 +18,23 @@ import { ProjectRegistry } from '../src/project/registry.ts';
 import type { CoreServices } from '../src/core/services.ts';
 import type { DemoResult } from '../src/demo/main.ts';
 import { signupEnrolledCookie, tempDataDir } from './helpers.ts';
+import {
+  councilEndorseResponse,
+  departmentBossResponse,
+  departmentStructuralResponse,
+  departmentUnderstandingResponse,
+  discoveryResponse,
+} from './helpers/test-services.ts';
 
 /** Minimal fetch mock returning canned responses per URL (same shape as tests). */
 function mockFetch(
-  responder: (url: string, init: { method: string; headers: Record<string, string> }) => {
+  responder: (url: string, init: { method: string; headers: Record<string, string>; body?: string }) => {
     status: number;
     body: unknown;
   },
 ): { calls: { url: string; method: string }[]; fetch: unknown } {
   const calls: { url: string; method: string }[] = [];
-  const fetch = (url: string, init: { method: string; headers: Record<string, string> }) => {
+  const fetch = (url: string, init: { method: string; headers: Record<string, string>; body?: string }) => {
     calls.push({ url, method: init.method });
     const r = responder(url, init);
     return Promise.resolve({
@@ -79,6 +86,23 @@ function localModelsPayload(): unknown {
     object: 'list',
     data: [{ id: 'llama3.2', object: 'model' }, { id: 'qwen2.5-coder', object: 'model' }],
   };
+}
+
+/**
+ * Real discovery routed through the local runtime adapter: the department's
+ * prompt markers select the same deterministic responses the scripted harness
+ * uses; any unmarked prompt keeps the legacy single-shot canned body.
+ */
+function localCompletionBody(init: { body?: string }): unknown {
+  const parsed = init.body !== undefined ? (JSON.parse(init.body) as { messages?: { content?: string }[] }) : {};
+  const text = (parsed.messages ?? []).map((m) => m.content ?? '').join('\n');
+  const canned = (content: string) => ({ choices: [{ message: { content }, finish_reason: 'stop' }] });
+  if (text.includes('[DISCOVERY:CLUSTER-A]')) return canned(departmentUnderstandingResponse());
+  if (text.includes('[DISCOVERY:CLUSTER-B]')) return canned(departmentStructuralResponse());
+  if (text.includes('[DISCOVERY:BOSS-RECONSTRUCTION]')) return canned(departmentBossResponse());
+  if (text.includes('[COUNCIL]')) return canned(councilEndorseResponse());
+  if (text.includes('[DISCOVERY')) return canned(discoveryResponse());
+  return canned('stage deliverable content');
 }
 
 interface RunServer {
@@ -135,10 +159,10 @@ describe('provider hub + real stage execution API (honest surface)', () => {
     });
     const manager = new ProviderManager();
     const keyFetch = mockFetch(() => ({ status: 200, body: { data: { label: 'k' } } }));
-    const localUp = mockFetch((url) =>
+    const localUp = mockFetch((url, init) =>
       url.endsWith('/models')
         ? { status: 200, body: localModelsPayload() }
-        : { status: 200, body: { choices: [{ message: { content: 'stage deliverable content' } }] } },
+        : { status: 200, body: localCompletionBody(init) },
     );
     manager.setLocalRuntime({ baseUrl: 'http://127.0.0.1:11434/v1' }, localUp.fetch);
     const { result, close: closeEngine } = await buildEngineFixture();
@@ -323,7 +347,7 @@ describe('provider hub + real stage execution API (honest surface)', () => {
       const created = await fetch(`${s.url}/api/projects`, {
         method: 'POST',
         headers: { 'content-type': 'application/json', cookie: alice },
-        body: JSON.stringify({ name: 'Executed project', vision: 'A real execution vision for the run test here.' }),
+        body: JSON.stringify({ name: 'TeamTask', vision: 'A lightweight task tracker for small teams.' }),
       });
       const { project } = (await created.json()) as { project: { id: string } };
       // Bind the project's OWN authoritative AI configuration (local/llama3.2),
@@ -341,32 +365,22 @@ describe('provider hub + real stage execution API (honest surface)', () => {
       assert.equal(run.status, 200);
       const body = (await run.json()) as {
         status: string;
-        providerId: string;
-        modelId: string;
-        content: string;
-        evidenceId: string;
-        latencyMs: number;
+        artifactIds: string[];
+        evidenceIds: string[];
+        error: unknown;
       };
-      assert.equal(body.status, 'EXECUTED');
-      assert.equal(body.providerId, 'local');
-      assert.equal(body.modelId, 'llama3.2');
-      assert.equal(body.content, 'stage deliverable content');
-      assert.match(body.evidenceId, /^EV-\d+$/);
-      assert.ok(body.latencyMs >= 0);
+      assert.equal(body.status, 'completed');
+      assert.ok(body.artifactIds.length > 0, 'real discovery through the local runtime produced artifacts');
+      assert.equal(body.error, null);
       assert.ok(s.localCalls().some((c) => c.url.endsWith('/chat/completions')));
 
       const detail = (await fetch(`${s.url}/api/projects/${project.id}`, {
         headers: { cookie: alice },
       }).then((r) => r.json())) as {
-        stages: { stageId: string; status: string; providerId: string | null; modelId: string | null }[];
-        aiOutputs: Record<string, { content: string; evidenceId: string }>;
+        stages: { stageId: string; status: string }[];
       };
       const discovery = detail.stages.find((st) => st.stageId === 'discovery');
       assert.equal(discovery?.status, 'EXECUTED');
-      assert.equal(discovery?.providerId, 'local');
-      assert.equal(discovery?.modelId, 'llama3.2');
-      assert.equal(detail.aiOutputs['discovery']?.content, 'stage deliverable content');
-      assert.ok(detail.aiOutputs['discovery']?.evidenceId);
 
       const repeated = await fetch(`${s.url}/api/projects/${project.id}/run/discovery`, {
         method: 'POST',
@@ -378,7 +392,7 @@ describe('provider hub + real stage execution API (honest surface)', () => {
     }
   });
 
-  it('run failure returns an honest 502 and does NOT mark the stage completed', async () => {
+  it('run failure records an honest failed stage without fabricating output', async () => {
     const md = mockFetch(() => ({ status: 200, body: modelsDevPayload() }));
     const catalogue = new ModelCatalogue({
       modelsDevSource: new ModelsDevSource({ fetchImpl: md.fetch as never }),
@@ -423,14 +437,17 @@ describe('provider hub + real stage execution API (honest surface)', () => {
         method: 'POST',
         headers: { cookie: alice },
       });
-      assert.equal(run.status, 502);
+      assert.equal(run.status, 422);
+      const failed = (await run.json()) as { status: string; error: { message?: string } | null };
+      assert.equal(failed.status, 'failed');
+      assert.ok(failed.error, 'the honest failure reason is reported');
       const detail = (await fetch(`${url}/api/projects/${project.id}`, {
         headers: { cookie: alice },
       }).then((r) => r.json())) as {
         stages: { stageId: string; status: string }[];
         aiOutputs: Record<string, unknown>;
       };
-      assert.equal(detail.stages.find((st) => st.stageId === 'discovery')?.status, 'PENDING');
+      assert.equal(detail.stages.find((st) => st.stageId === 'discovery')?.status, 'FAILED');
       assert.equal(Object.keys(detail.aiOutputs).length, 0);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));

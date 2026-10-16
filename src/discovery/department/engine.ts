@@ -113,7 +113,10 @@ export class DiscoveryDepartment {
     this.services = services;
   }
 
-  async discover(brief: ProductUnderstandingBrief): Promise<DepartmentRunResult> {
+  async discover(
+    brief: ProductUnderstandingBrief,
+    options: { projectId?: string } = {},
+  ): Promise<DepartmentRunResult> {
     const services = this.services;
     validateBrief(brief);
 
@@ -273,6 +276,7 @@ export class DiscoveryDepartment {
         services,
         planDiscoveryMaterialization(inventory, STRUCTURAL_WORKER),
         STRUCTURAL_WORKER,
+        options,
       );
       const projectId = baseline.projectId;
 
@@ -422,6 +426,7 @@ export class DiscoveryDepartment {
         status: bossDecision.decision === 'accepted' ? 'accepted' : 'rejected',
         baseline,
         inventory,
+        domainProfile: understanding.domainProfile ?? '',
         understandingReport,
         structuralReport,
         bossDecision,

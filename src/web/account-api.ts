@@ -68,8 +68,32 @@ export function registerAccountApi(app: Express, options: AccountApiOptions): vo
     }
   });
 
-  app.get('/api/account/preferences', (_req: Request, res: Response) => {
-    res.json({ preferences: {} });
+  app.get('/api/account/preferences', (req: Request, res: Response) => {
+    const identity = req.identity;
+    if (identity === undefined) {
+      res.status(401).json({ error: 'authentication required' });
+      return;
+    }
+    const account = identities.get(identity.id);
+    if (account === null) {
+      res.status(404).json({ error: 'account-not-found' });
+      return;
+    }
+    // Read path: return what was actually persisted by the write path, not a
+    // synthetic empty object. Unknown/stale keys are projected out on read so a
+    // hand-edited store cannot widen what the client is told is stored.
+    const stored: Readonly<Record<string, string | number | boolean>> = account.preferences ?? {};
+    const preferences: Record<string, string | number | boolean> = {};
+    for (const [key, kind] of Object.entries(ALLOWED_PREFERENCES)) {
+      const value = stored[key];
+      if (value === undefined) continue;
+      const matches =
+        kind === 'string' ? typeof value === 'string'
+        : kind === 'number' ? typeof value === 'number'
+        : typeof value === 'boolean';
+      if (matches) preferences[key] = value;
+    }
+    res.json({ preferences });
   });
 
   app.post('/api/account/preferences', async (req: Request, res: Response) => {

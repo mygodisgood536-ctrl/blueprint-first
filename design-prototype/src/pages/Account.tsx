@@ -121,7 +121,15 @@ export function Preferences() {
               </div>
               <div className="row-between">
                 <div><div>Reduce motion</div><div className="muted text-sm">Minimise animation across the workspace.</div></div>
-                <label className="switch"><input type="checkbox" checked={valueOf('reduceMotion')} onChange={e => toggle('reduceMotion', e.target.checked)} disabled={saving} /><span className="track" /></label>
+                <label className="switch"><input type="checkbox" checked={valueOf('reduceMotion')} onChange={e => toggle('reduceMotion', e.target.checked)} disabled={saving} /><span className="track"
+              <div className="row-between">
+                <div><div>Theme</div><div className="muted text-sm">Choose light, dark, or system theme.</div></div>
+                <select value={(preferences.theme as string) || 'system'} onChange={e => toggle('theme', e.target.value)} disabled={saving} style={{ padding: '6px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)' }}>
+                  <option value="system">System</option>
+                  <option value="light">Light</option>
+                  <option value="dark">Dark</option>
+                </select>
+              </div> /></label>
               </div>
             </div>
           )}
@@ -130,3 +138,4 @@ export function Preferences() {
     </Shell>
   )
 }
+

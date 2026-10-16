@@ -18,6 +18,13 @@ import { ProjectRegistry } from '../src/project/registry.ts';
 import type { CoreServices } from '../src/core/services.ts';
 import type { DemoResult } from '../src/demo/main.ts';
 import { signupEnrolledCookie, tempDataDir } from './helpers.ts';
+import {
+  councilEndorseResponse,
+  departmentBossResponse,
+  departmentStructuralResponse,
+  departmentUnderstandingResponse,
+  discoveryResponse,
+} from './helpers/test-services.ts';
 
 type Responder = (url: string, init: { method: string; headers: Record<string, string>; body?: string }) =>
   { status: number; body: unknown };
@@ -63,7 +70,26 @@ const OPENAI_LIVE = { data: [{ id: 'gpt-4o', owned_by: 'openai' }, { id: 'gpt-4o
 const MISTRAL_LIVE = { object: 'list', data: [{ id: 'mistral-large-latest' }] };
 const GOOGLE_LIVE = { models: [{ name: 'models/gemini-2.5-flash', displayName: 'Gemini 2.5 Flash' }] };
 const OPENAI_COMPLETION = { choices: [{ message: { content: 'openai-wired-deliverable' }, finish_reason: 'stop' }] };
-const MISTRAL_COMPLETION = { choices: [{ message: { content: 'mistral-wired-deliverable' }, finish_reason: 'stop' }] };
+
+/**
+ * Real discovery runs through the project's bound vendor adapter, whose prompt
+ * markers select the same deterministic department responses the scripted
+ * harness uses. A prompt with no department marker (the legacy single-shot
+ * completion) keeps its historical canned body.
+ */
+function completionBody(url: string, init: { body?: string }): unknown {
+  const parsed = init.body !== undefined ? (JSON.parse(init.body) as { messages?: { content?: string }[] }) : {};
+  const text = (parsed.messages ?? []).map((m) => m.content ?? '').join('\n');
+  const canned = (content: string) => ({ choices: [{ message: { content }, finish_reason: 'stop' }] });
+  if (text.includes('[DISCOVERY:CLUSTER-A]')) return canned(departmentUnderstandingResponse());
+  if (text.includes('[DISCOVERY:CLUSTER-B]')) return canned(departmentStructuralResponse());
+  if (text.includes('[DISCOVERY:BOSS-RECONSTRUCTION]')) return canned(departmentBossResponse());
+  if (text.includes('[COUNCIL]')) return canned(councilEndorseResponse());
+  if (text.includes('[DISCOVERY')) return canned(discoveryResponse());
+  // OpenAI's canned body backs the legacy single-shot completion; any other
+  // real run (mistral) falls back to a full discovery inventory for safety.
+  return url.includes('mistral') ? canned(discoveryResponse()) : OPENAI_COMPLETION;
+}
 
 interface AiServer {
   app: Express;
@@ -80,15 +106,15 @@ async function buildAiServer(): Promise<AiServer> {
     openRouterProvider: new OpenRouterProvider({ apiKey: 'k', fetchImpl: mockFetch(() => ({ status: 200, body: { data: [] } })).fetch as never }),
   });
   const manager = new ProviderManager();
-  const vendor = mockFetch((url) =>
+  const vendor = mockFetch((url, init) =>
     url.includes('api.openai.com/v1/models')
       ? { status: 200, body: OPENAI_LIVE }
       : url.includes('api.openai.com/v1/chat/completions')
-        ? { status: 200, body: OPENAI_COMPLETION }
+        ? { status: 200, body: completionBody(url, init) }
         : url.includes('api.mistral.ai/v1/models')
           ? { status: 200, body: MISTRAL_LIVE }
           : url.includes('api.mistral.ai/v1/chat/completions')
-            ? { status: 200, body: MISTRAL_COMPLETION }
+            ? { status: 200, body: completionBody(url, init) }
             : url.includes('generativelanguage.googleapis.com/v1beta/models')
               ? { status: 200, body: GOOGLE_LIVE }
               : { status: 404, body: { error: 'unexpected url' } },
@@ -281,8 +307,8 @@ describe('per-project AI configuration API (honest surface)', () => {
         method: 'POST',
         headers: { 'content-type': 'application/json', cookie },
         body: JSON.stringify({
-          name: 'Run resolved project',
-          vision: 'A project whose run resolves through the project-level AI configuration.',
+          name: 'TeamTask',
+          vision: 'A lightweight task tracker for small teams.',
           providerId: 'mistral',
           modelId: 'mistral-large-latest',
         }),
@@ -302,11 +328,17 @@ describe('per-project AI configuration API (honest surface)', () => {
         headers: { cookie },
       });
       assert.equal(run.status, 200);
-      const body = (await run.json()) as { status: string; providerId: string; modelId: string; content: string };
-      assert.equal(body.status, 'EXECUTED');
-      assert.equal(body.providerId, 'mistral');
-      assert.equal(body.modelId, 'mistral-large-latest');
-      assert.equal(body.content, 'mistral-wired-deliverable');
+      const body = (await run.json()) as { status: string; artifactIds: string[]; evidenceIds: string[]; error: unknown };
+      assert.equal(body.status, 'completed');
+      assert.ok(body.artifactIds.length > 0, 'real discovery via the bound mistral adapter produced artifacts');
+      assert.equal(body.error, null);
+      const calls = s.vendorCalls();
+      assert.ok(
+        calls.some((c) => c.url.includes('api.mistral.ai/v1/chat/completions')),
+        'the run really called the project-bound mistral adapter',
+      );
+      const p = await getProject(s.url, cookie, project.id);
+      assert.equal(p.stages.find((st) => st.stageId === 'discovery')?.status, 'EXECUTED');
     } finally {
       await s.close();
     }
