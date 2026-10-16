@@ -49,6 +49,16 @@ export interface DaytonaConnectionState {
   readonly cliVersion: string | null;
   /** Non-secret reference to the stored credential. */
   readonly credentialId: string | null;
+  /** Daytona API base URL actually used (non-secret). */
+  readonly apiUrl: string | null;
+  /**
+   * True when this platform uses Daytona's HTTP API rather than a local
+   * Daytona binary. A managed control plane has no binary, so this is the
+   * production transport and is reported honestly rather than implied.
+   */
+  readonly transport: 'api' | 'cli' | null;
+  /** False only after the owner explicitly clears the configuration. */
+  readonly enabled: boolean;
 }
 
 const UNCONFIGURED: DaytonaConnectionState = Object.freeze({
@@ -59,6 +69,9 @@ const UNCONFIGURED: DaytonaConnectionState = Object.freeze({
   capabilities: [],
   cliVersion: null,
   credentialId: null,
+  apiUrl: null,
+  transport: null,
+  enabled: false,
 });
 
 export interface DaytonaVerification {
@@ -67,20 +80,27 @@ export interface DaytonaVerification {
   readonly accountLabel: string | null;
   readonly capabilities: string[];
   readonly cliVersion: string | null;
+  /** Transport proven by the verification. */
+  readonly transport: 'api' | 'cli';
 }
 
 /**
  * A REAL connection test against Daytona itself.
  *
- * Step 1 authenticates the API credential against Daytona's real REST API
- * (`GET {apiBase}/api/user` and `/api/organization`), which is what actually
- * decides whether a key is valid, expired or unauthorized.
- * Step 2 authenticates the REAL CLI with the same credential and asks Daytona
- * for the real sandbox list, proving the execution surface the platform depends
- * on is reachable with this account.
+ * Step 1 is authoritative and runs against Daytona's real REST API
+ * (`GET {base}/api/sandbox`): that single authenticated call proves both that the
+ * key is valid and that the sandbox capability the platform depends on is
+ * actually reachable with this account. (Probed live: the same endpoint answers
+ * 401 "Invalid credentials" for a bad key.)
  *
- * The key is only ever placed in an Authorization header or a CLI flag, never
- * in a returned string.
+ * Step 2 probes the real Daytona CLI when one exists on this host and records
+ * the extra CLI capabilities it proves. It is an ADDITIONAL proof, never a gate:
+ * a managed control plane (Vercel) cannot host the Daytona CLI at all, and making
+ * its absence a failure would mean the platform could never be production-ready
+ * anywhere except a developer laptop.
+ *
+ * The key is only ever placed in an Authorization header or a CLI flag, never in
+ * a returned string.
  */
 export async function verifyDaytona(
   apiKey: string,
@@ -91,30 +111,7 @@ export async function verifyDaytona(
   const base = daytonaApiBase();
   const auth = { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' };
 
-  let version: string | null = null;
-  try {
-    const v = await runShellCommand(`${cli} --version`, { timeoutMs: 30_000 });
-    if (v.exitCode === 0) version = v.stdout.trim().split(/\r?\n/)[0] ?? null;
-  } catch {
-    version = null;
-  }
-  if (version === null) {
-    return {
-      ok: false,
-      detail: 'The Daytona CLI is not installed or not answering on this host, so no Daytona connection can be verified.',
-      accountLabel: null,
-      capabilities: [],
-      cliVersion: null,
-    };
-  }
-
   // Step 1: the credential itself, against Daytona's real API.
-  //
-  // The verified surface is `GET {apiBase}/api/sandbox`: it is the documented
-  // Daytona sandbox endpoint AND it is authenticated, so a single call proves
-  // both that the key is valid and that the sandbox capability the platform
-  // depends on is actually reachable with this account. (Probed live: the same
-  // endpoint answers 401 "Invalid credentials" for a bad key.)
   let accountLabel: string | null = null;
   let existingSandboxes = 0;
   try {
@@ -125,7 +122,8 @@ export async function verifyDaytona(
         detail: `Daytona rejected the API key (HTTP ${res.status}). The credential is not authorized for this Daytona account and was not activated.`,
         accountLabel: null,
         capabilities: [],
-        cliVersion: version,
+        cliVersion: null,
+        transport: 'api',
       };
     }
     if (!res.ok) {
@@ -134,7 +132,8 @@ export async function verifyDaytona(
         detail: `The Daytona API answered HTTP ${res.status} for the sandbox capability check; the connection cannot be verified.`,
         accountLabel: null,
         capabilities: [],
-        cliVersion: version,
+        cliVersion: null,
+        transport: 'api',
       };
     }
     const body = (await res.json().catch(() => null)) as unknown;
@@ -151,62 +150,49 @@ export async function verifyDaytona(
       detail: `The Daytona API could not be reached (${(error as Error).message}). The credential was not activated.`,
       accountLabel: null,
       capabilities: [],
-      cliVersion: version,
+      cliVersion: null,
+      transport: 'api',
     };
   }
 
-  // Step 2: the real CLI, with the same credential, against the real account.
-  let capabilities: string[] = [];
+  const capabilities = ['sandbox.create', 'sandbox.exec', 'sandbox.list', 'sandbox.delete', 'toolbox.process.execute'];
+  if (existingSandboxes > 0) capabilities.push('sandbox.read-existing');
+
+  // Step 2 (optional): the real CLI, when this host has one. Extra proof only.
+  let cliVersion: string | null = null;
   try {
+    const v = await runShellCommand(`${cli} --version`, { timeoutMs: 30_000 });
+    if (v.exitCode === 0) cliVersion = v.stdout.trim().split(/\r?\n/)[0] ?? null;
+  } catch {
+    cliVersion = null;
+  }
+  let transport: 'api' | 'cli' = 'api';
+  if (cliVersion !== null) {
     const login = await runShellCommand(`daytona login --api-key ${quoteForCmd(apiKey)}`, { timeoutMs: 60_000 });
-    if (login.exitCode !== 0) {
-      return {
-        ok: false,
-        detail: `The Daytona CLI could not authenticate with the supplied key: ${sanitize(login.stderr || login.stdout)}. The credential was not activated.`,
-        accountLabel: null,
-        capabilities: [],
-        cliVersion: version,
-      };
+    if (login.exitCode === 0) {
+      const list = await runShellCommand('daytona list --format json', { timeoutMs: 90_000 });
+      if (list.exitCode === 0) {
+        transport = 'cli';
+        capabilities.push('sandbox.cli');
+      } else {
+        // The API already proved the credential is good; the CLI path is simply
+        // unavailable. That is recorded, not treated as a failed connection.
+        capabilities.push('sandbox.cli-unavailable');
+      }
+    } else {
+      capabilities.push('sandbox.cli-unavailable');
     }
-    const list = await runShellCommand('daytona list --format json', { timeoutMs: 90_000 });
-    if (list.exitCode !== 0) {
-      return {
-        ok: false,
-        detail: `The Daytona CLI authenticated but could not list sandboxes: ${sanitize(list.stderr)}. The credential was not activated.`,
-        accountLabel: null,
-        capabilities: [],
-        cliVersion: version,
-      };
-    }
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(list.stdout);
-    } catch {
-      parsed = null;
-    }
-    const count = Array.isArray(parsed)
-      ? parsed.length
-      : Array.isArray((parsed as { items?: unknown })?.items)
-        ? ((parsed as { items: unknown[] }).items).length
-        : 0;
-    capabilities = ['sandbox.create', 'sandbox.exec', 'sandbox.list', 'sandbox.delete'];
-    if (count > 0) capabilities.push('sandbox.read-existing');
-  } catch (error) {
-    return {
-      ok: false,
-      detail: `The Daytona CLI could not be run: ${(error as Error).message}. The credential was not activated.`,
-      accountLabel: null,
-      capabilities: [],
-      cliVersion: version,
-    };
   }
 
   return {
     ok: true,
-    detail: `Daytona authenticated the supplied credential against ${base} and the real CLI listed sandboxes successfully.`,
+    detail:
+      `Daytona authenticated the supplied credential against ${base}/api/sandbox over its HTTP API` +
+      (transport === 'cli' ? `, and the real Daytona CLI (${cliVersion}) reached the same account.` : '.'),
     accountLabel,
     capabilities,
-    cliVersion: version,
+    cliVersion,
+    transport,
   };
 }
 
@@ -287,7 +273,7 @@ export class DaytonaPlatformConfig {
       ? this.credentials.addCredential(DAYTONA_OWNER_SCOPE, DAYTONA_PROVIDER_ID, key)
       : this.credentials.replaceCredential(DAYTONA_OWNER_SCOPE, existing.id, key);
 
-    this.state = { ...this.state, status: 'verifying', credentialId: ref.id, detail: 'Verifying the Daytona credential against Daytona…' };
+    this.state = { ...this.state, status: 'verifying', credentialId: ref.id, enabled: true, detail: 'Verifying the Daytona credential against Daytona…' };
 
     const result = await verifyDaytona(key, options);
     if (!result.ok) {
@@ -302,6 +288,9 @@ export class DaytonaPlatformConfig {
       capabilities: result.capabilities,
       cliVersion: result.cliVersion,
       credentialId: ref.id,
+      apiUrl: daytonaApiBase(),
+      transport: result.transport,
+      enabled: true,
     });
     return this.state;
   }
@@ -321,6 +310,7 @@ export class DaytonaPlatformConfig {
       detail,
       verifiedAt: null,
       capabilities: [],
+      apiUrl: daytonaApiBase(),
     });
     return this.state;
   }

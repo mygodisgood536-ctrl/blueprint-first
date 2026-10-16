@@ -103,6 +103,13 @@ export interface CommandResultLike {
  */
 export interface EnvAdapter {
   readonly kind: 'local-workspace' | 'daytona';
+  /**
+   * How a Daytona environment is actually reached. `cli` is the real Daytona
+   * binary (development hosts); `api` is Daytona's documented HTTP API, which is
+   * the only path available on a managed control plane where no binary can
+   * exist. Both are real Daytona; only the transport differs.
+   */
+  readonly transport?: 'cli' | 'api';
   /** Provisions the real workspace and reports real health. */
   provision(spec: EnvSpec): Promise<EnvHealth>;
   /** Verifies the workspace is still really healthy. */

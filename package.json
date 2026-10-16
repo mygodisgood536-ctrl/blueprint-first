@@ -1,7 +1,7 @@
 {
-  "name": "oluwasegunfunmi-project",
-  "version": "0.1.0",
-  "description": "Blueprint-First AI Software Engineering Architecture 2.0 - foundational implementation (Level 1a prerequisites)",
+  "name": "blueprint-first",
+  "version": "3.3.0",
+  "description": "Blueprint-First — an AI software engineering platform that discovers, designs, builds, verifies, certifies and operates software through a governed, evidence-backed engineering organization.",
   "private": true,
   "type": "module",
   "engines": {
@@ -12,7 +12,9 @@
     "build": "tsc -p tsconfig.build.json",
     "test": "node --test",
     "demo": "node src/demo/main.ts",
-    "dev": "node src/web/server.ts"
+    "dev": "node src/web/server.ts",
+    "dev:web": "npm --prefix design-prototype run dev",
+    "build:frontend": "npm --prefix design-prototype run build:serve"
   },
   "devDependencies": {
     "@types/express": "^5.0.6",

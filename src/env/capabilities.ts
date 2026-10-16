@@ -16,6 +16,7 @@
 import { join } from 'node:path';
 import { runShellCommand } from '../runtime/shell.ts';
 import { JsonFileStore } from '../web/durable.ts';
+import { DaytonaApiClient } from './daytona-api.ts';
 
 /** The mandatory execution capabilities of the finished platform. */
 export type ExecutionCapability = 'opencode' | 'cline' | 'daytona' | 'local-workspace';
@@ -144,13 +145,63 @@ export class CapabilityDiscovery {
   private loaded = false;
   /** Live OpenCode reachability probe (provider wired + reachable); default false. */
   private readonly probeOpenCode: () => Promise<boolean>;
+  /** Live Daytona API credential probe; returns `configured: false` when unset. */
+  private readonly daytonaCredential: () => { apiKey: string; apiUrl?: string } | null;
 
-  constructor(options: { filePath: string; probeOpenCode?: () => Promise<boolean> }) {
+  constructor(options: {
+    filePath: string;
+    probeOpenCode?: () => Promise<boolean>;
+    daytonaCredential?: () => { apiKey: string; apiUrl?: string } | null;
+  }) {
     this.file = new JsonFileStore<CapabilitySnapshot>({
       filePath: options.filePath,
       schemaVersion: SCHEMA_VERSION,
     });
     this.probeOpenCode = options.probeOpenCode ?? (async () => false);
+    this.daytonaCredential = options.daytonaCredential ?? (() => null);
+  }
+
+  /**
+   * Probes Daytona's real HTTP API with the owner-configured credential.
+   *
+   * Returns `configured: false` when no credential exists at all (so the caller
+   * falls through to the CLI probe), and an honest usable/degraded verdict when
+   * one does. The credential itself never appears in the result.
+   */
+  private async probeDaytonaApi(): Promise<{
+    configured: boolean;
+    usable: boolean;
+    detail: string;
+    version: string | null;
+    apiUrl: string;
+  }> {
+    const credential = this.daytonaCredential();
+    const apiUrl = credential?.apiUrl ?? 'https://app.daytona.io/api';
+    if (credential === null || credential.apiKey.trim().length === 0) {
+      return { configured: false, usable: false, detail: 'no Daytona credential configured', version: null, apiUrl };
+    }
+    const client = new DaytonaApiClient({
+      apiKey: credential.apiKey,
+      apiUrl,
+      timeoutMs: 15_000,
+    });
+    const verified = await client.verifyCredential();
+    if (!verified.ok) {
+      return { configured: true, usable: false, detail: verified.detail, version: null, apiUrl };
+    }
+    // READY requires that Daytona can actually perform the required operation,
+    // not merely that the credential is accepted: list the real sandboxes.
+    const listing = await client.listSandboxes().then(
+      (items) => ({ ok: true as const, detail: `${items.length} sandbox(es) visible` }),
+      (error: Error) => ({ ok: false as const, detail: error.message }),
+    );
+    return {
+      configured: true,
+      usable: listing.ok,
+      detail: listing.detail,
+      version: 'api',
+      apiUrl,
+    };
   }
 
   async init(): Promise<void> {
@@ -197,11 +248,40 @@ export class CapabilityDiscovery {
           discoveredAt: now,
         });
 
+    // Daytona: the mandatory real project execution environment (LAW - DAYTONA).
+    //
+    // Two real transports are probed, API first because it is the only one a
+    // managed control plane can use:
+    //   1. Daytona's HTTP API with a verified credential (production)
+    //   2. the `daytona` CLI (a development host that has Daytona installed)
+    // A configured record, a stored key or a resolvable binary are each
+    // insufficient: READY is reported only when Daytona itself answers a real
+    // request for this platform.
+    const apiProbe = await this.probeDaytonaApi();
+    let daytonaUsable = false;
+    let daytonaVersion: string | null = null;
+    if (apiProbe.configured) {
+      daytonaUsable = apiProbe.usable;
+      daytonaVersion = apiProbe.version;
+    } else {
+      const daytona = await probeBinary('daytona', ['--version']);
+      if (daytona !== null && daytona.exitCode === 0) {
+        const versionLine: string | null = daytona.stdout.trim().split(/\r?\n/)[0] ?? null;
+        daytonaVersion = versionLine !== null && versionLine.length > 0 ? versionLine : null;
+        const usable = await probeBinary('daytona', ['list', '--format', 'json'], { timeoutMs: 30_000 });
+        daytonaUsable = usable !== null && usable.exitCode === 0;
+      }
+    }
+
     // Cline: the real Worker/agent execution boundary (LAW - MANDATORY CLINE).
-    // The `cline` CLI, when present, is the mechanism; a missing CLI is a real,
-    // recorded NOT_INSTALLED state - never a fake execution. The real CLI is a
-    // large Node bundle with a multi-second cold start, so it gets a generous
-    // probe deadline rather than being reported absent under load.
+    //
+    // Cline executes INSIDE the project execution environment (the Daytona
+    // sandbox), not on the control plane. A managed control plane therefore
+    // never has a `cline` binary on its PATH, and that is not a fault: probing
+    // the control plane for Cline measures the wrong host. The control-plane
+    // probe below therefore reports only what it can actually prove, and the real
+    // Cline presence check happens per session inside the bound environment
+    // before any Cline-bound work is claimed.
     const cline = await probeBinary('cline', ['--version'], { timeoutMs: 60_000 });
     if (cline !== null && cline.exitCode === 0) {
       const versionLine: string | null = cline.stdout.trim().split(/\r?\n/)[0] ?? null;
@@ -211,17 +291,30 @@ export class CapabilityDiscovery {
         status: 'READY',
         mechanism: 'cline-cli',
         version: clineVersion,
-        rationale: 'The `cline` CLI is installed and answers; Cline-bound sessions can run through it.',
+        rationale: 'The `cline` CLI is installed on this host and answers; Cline-bound sessions can run through it directly.',
         discoveredAt: now,
       });
-} else if (cline === null) {
+} else if (daytonaUsable) {
+      // A real Daytona environment is available, so Cline can be provisioned and
+      // verified inside the sandbox. The control plane still does not claim the
+      // CLI is READY here — it is not — it records where the real check happens.
+      this.record({
+        capability: 'cline',
+        status: 'DEGRADED',
+        mechanism: 'cline-cli-in-execution-environment',
+        version: null,
+        rationale:
+          'No `cline` binary exists on the control plane, which is expected: Cline executes inside the project execution environment. Daytona is reachable, so a Cline CLI is provisioned into each project sandbox and its `--version` is verified before any Cline-bound session is claimed. Until that per-session check passes, no Cline execution is reported.',
+        discoveredAt: now,
+      });
+    } else if (cline === null) {
     this.record({
       capability: 'cline',
       status: 'NOT_INSTALLED',
       mechanism: null,
       version: null,
       rationale:
-        'The `cline` CLI is not present on this host, so no Cline execution exists here. The platform never fabricates a Cline-session. Local Worker/agent sessions run through the platform Worker Runtime and are labelled platform-agentic (never Cline). Install and health-check Cline to lift this state.',
+        'No `cline` CLI is present on this host and no remote project execution environment is reachable, so no Cline execution exists anywhere for this platform. The platform never fabricates a Cline session. Worker/agent sessions run through the platform Worker Runtime and are labelled platform-agentic (never Cline). Make Daytona reachable, or install Cline here, to lift this state.',
       discoveredAt: now,
     });
   } else {
@@ -236,45 +329,43 @@ export class CapabilityDiscovery {
       status: 'DEGRADED',
       mechanism: 'cline-cli',
       version: null,
-      rationale: `The \`cline\` CLI is present on this host but did not answer \`cline --version\` within the probe deadline (exit code ${cline.exitCode}). This is an unresponsive installed CLI, not an absent one. Cline-bound sessions will not run until it answers; the platform never fabricates a Cline-session.`,
+      rationale: `The \`cline\` CLI is present on this host but did not answer \`cline --version\` within the probe deadline (exit code ${cline.exitCode}). This is an unresponsive installed CLI, not an absent one. Cline-bound sessions will not run until it answers; the platform never fabricates a Cline session.`,
       discoveredAt: now,
     });
   }
 
-    // Daytona: the mandatory real project execution environment (LAW - DAYTONA).
-    // A CLI that answers `--version` proves the BINARY is installed, but §75 is
-    // explicit that a component which "cannot perform the required operation is
-    // not READY". Creating and using a real sandbox additionally requires an
-    // authenticated Daytona account, so the capability probe performs the real
-    // usability check (list sandboxes through the CLI) and only reports READY
-    // when Daytona itself actually answers for this platform.
-    const daytona = await probeBinary('daytona', ['--version']);
-    if (daytona !== null && daytona.exitCode === 0) {
-      const versionLine: string | null = daytona.stdout.trim().split(/\r?\n/)[0] ?? null;
-      const daytonaVersion = versionLine !== null && versionLine.length > 0 ? versionLine : null;
-      // Real usability probe: can this platform actually reach Daytona?
-      const usable = await probeBinary('daytona', ['list', '--format', 'json'], { timeoutMs: 30_000 });
-      if (usable !== null && usable.exitCode === 0) {
-        this.record({
-          capability: 'daytona',
-          status: 'READY',
-          mechanism: 'daytona-cli',
-          version: daytonaVersion,
-          rationale:
-            'The `daytona` CLI is installed and Daytona answered a real sandbox listing for this platform, so real Daytona sandboxes can be created and used.',
-          discoveredAt: now,
-        });
-      } else {
-        this.record({
-          capability: 'daytona',
-          status: 'DEGRADED',
-          mechanism: 'daytona-cli',
-          version: daytonaVersion,
-          rationale:
-            'The `daytona` CLI is installed, but Daytona has no usable account for this platform yet, so no sandbox can actually be created. This is a genuine degraded state, not a ready one: configure and verify a Daytona credential in the owner area. Until then, environments are backed by the real local-workspace adapter and no Daytona workspace is claimed.',
-          discoveredAt: now,
-        });
-      }
+    // Daytona: record the decision from the probe already performed above.
+    if (apiProbe.configured) {
+      this.record({
+        capability: 'daytona',
+        status: daytonaUsable ? 'READY' : 'DEGRADED',
+        mechanism: 'daytona-api',
+        version: daytonaVersion,
+        rationale: daytonaUsable
+          ? `A Daytona credential is configured and the Daytona API (${apiProbe.apiUrl}) answered a real authenticated request for this platform, so real Daytona sandboxes can be created, executed in and destroyed over the API. This is the production transport: no local Daytona binary is required.`
+          : `A Daytona credential is configured but the Daytona API did not accept it: ${apiProbe.detail}. This is a genuine degraded state, not a ready one. Environments are backed by the real local-workspace adapter and no Daytona workspace is claimed.`,
+        discoveredAt: now,
+      });
+    } else if (daytonaUsable) {
+      this.record({
+        capability: 'daytona',
+        status: 'READY',
+        mechanism: 'daytona-cli',
+        version: daytonaVersion,
+        rationale:
+          'The `daytona` CLI is installed and Daytona answered a real sandbox listing for this platform, so real Daytona sandboxes can be created and used. For production, configure a Daytona credential so the platform uses the Daytona API instead of a local binary.',
+        discoveredAt: now,
+      });
+    } else if (daytonaVersion !== null) {
+      this.record({
+        capability: 'daytona',
+        status: 'DEGRADED',
+        mechanism: 'daytona-cli',
+        version: daytonaVersion,
+        rationale:
+          'The `daytona` CLI is installed, but Daytona has no usable account for this platform yet, so no sandbox can actually be created. This is a genuine degraded state, not a ready one: configure and verify a Daytona credential in the owner area. Until then, environments are backed by the real local-workspace adapter and no Daytona workspace is claimed.',
+        discoveredAt: now,
+      });
     } else {
       this.record({
         capability: 'daytona',
@@ -282,9 +373,7 @@ export class CapabilityDiscovery {
         mechanism: null,
         version: null,
         rationale:
-          daytona === null
-            ? 'The `daytona` CLI is not present on this host. Environments are backed by the real local-workspace adapter; no Daytona workspace is claimed to exist. Install and authenticate the Daytona CLI to lift this state.'
-            : stderrToDetail('`daytona --version`', daytona.stderr, daytona.exitCode),
+          'No Daytona credential is configured and the `daytona` CLI is not present on this host. Environments are backed by the real local-workspace adapter; no Daytona workspace is claimed to exist. Configure and verify a Daytona credential (owner area) or install the CLI to lift this state.',
         discoveredAt: now,
       });
     }

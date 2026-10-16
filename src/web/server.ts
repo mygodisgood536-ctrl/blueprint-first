@@ -48,10 +48,11 @@ import { DurableEventBus, eventsFilePath } from '../events/bus.ts';
 import { EnvironmentManager, environmentsFilePath, workspacesRootPath } from '../env/manager.ts';
 import { CapabilityDiscovery, capabilitiesFilePath } from '../env/capabilities.ts';
 import { DaytonaWorkspaceAdapter } from '../env/daytona-adapter.ts';
+import { DaytonaApiWorkspaceAdapter } from '../env/daytona-api-adapter.ts';
 import { LocalWorkspaceEnvAdapter } from '../env/local-workspace.ts';
 import { assessFoundation, type FoundationReport } from '../env/foundation.ts';
 import { probeControlPlane } from '../env/control-plane-probes.ts';
-import { DaytonaPlatformConfig, daytonaPlatformConfigFilePath } from '../env/daytona-platform-config.ts';
+import { DaytonaPlatformConfig, daytonaPlatformConfigFilePath, daytonaApiBase, DAYTONA_OWNER_SCOPE } from '../env/daytona-platform-config.ts';
 import { prepareClineAi, clineProfileDirs, clineRootDir, runClineTask } from '../env/cline-bridge.ts';
 import type { EnvAdapter } from '../env/types.ts';
 import type { JobRecord } from '../jobs/types.ts';
@@ -67,6 +68,7 @@ import type { SupervisorTarget } from '../supervisor/types.ts';
 import { evaluateApproval } from '../design/approval.ts';
 import { isBaseArtifactId } from '../core/ids.ts';
 import { lineageStatus } from '../traceability/trace.ts';
+import { runWatchdogTick } from './watchdog.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, 'public', 'nexona');
@@ -2736,6 +2738,45 @@ execution.router.complete({
   // decision + rationale is durable evidence, and the backend for new
   // environments is chosen from what REALLY exists. A mandatory component that
   // is absent is recorded as NOT_INSTALLED - never faked or claimed.
+  // Daytona is configured ONCE by the platform owner in an owner-only area and
+  // is then used by the whole platform. The credential lives in the platform's
+  // real secret boundary and is never returned by any endpoint. It is created
+  // BEFORE capability discovery because the Daytona probe is API-first: on a
+  // managed control plane an owner-verified credential is the only thing that can
+  // make Daytona genuinely READY.
+  // The credential is stored in the SAME provider credential store the rest of the
+  // platform uses, so the Daytona key and per-user AI keys share one secret
+  // boundary and one revocation path.
+  const daytonaPlatform = new DaytonaPlatformConfig(
+    providerManager.credentials,
+    daytonaPlatformConfigFilePath(dataDir),
+  );
+  // Provision from the environment secret boundary when one is supplied, so a
+  // managed deployment is Daytona-ready on the very first request. The SAME real
+  // verification the owner path performs is used, so an unusable key still fails
+  // honestly and the platform is never marked connected on a value merely being
+  // present.
+  await daytonaPlatform.configureFromEnvironment().catch(() => null);
+
+  // The Platform Owner's verified Daytona credential, resolved server-side from
+  // the credential store. The secret itself never leaves this function: it is
+  // handed only to the Daytona client, never returned, logged or written to a
+  // response.
+  const daytonaCredentialForOwner = (): { apiKey: string; apiUrl?: string } | null => {
+    const configured = daytonaPlatform.current();
+    if (configured === null || configured.status !== 'connected' || configured.enabled !== true) return null;
+    if (configured.credentialId === null) return null;
+    const secret = providerManager.credentials.resolveSecret(
+      DAYTONA_OWNER_SCOPE,
+      configured.credentialId,
+    );
+    if (secret === null || secret.trim().length === 0) return null;
+    return {
+      apiKey: secret,
+      apiUrl: `${daytonaApiBase()}/api`,
+    };
+  };
+
   const capabilityDiscovery = new CapabilityDiscovery({
     filePath: capabilitiesFilePath(dataDir),
     // OpenCode is READY only when a real opencode executable resolves on this
@@ -2749,6 +2790,10 @@ execution.router.complete({
         return false;
       }
     },
+    // Daytona is probed over its HTTP API when the Platform Owner has configured
+    // a verified credential. This is the production transport: a managed control
+    // plane has no Daytona binary, and pretending otherwise would be a fake.
+    daytonaCredential: () => daytonaCredentialForOwner(),
   });
   const capabilityDecisions = await capabilityDiscovery.discover();
   const daytonaReady = capabilityDecisions.some((c) => c.capability === 'daytona' && c.status === 'READY');
@@ -2772,7 +2817,15 @@ execution.router.complete({
     // which backend NEW environments bind; existing workspaces keep theirs.
     adapterFactories: {
       localWorkspace: (root) => new LocalWorkspaceEnvAdapter(root),
-      daytona: (root) => new DaytonaWorkspaceAdapter(root),
+      // Real Daytona, over whichever transport this platform can genuinely use:
+      // the HTTP API when an owner-verified credential exists (production), the
+      // real Daytona CLI otherwise (a development host with Daytona installed).
+      daytona: (root) => {
+        const credential = daytonaCredentialForOwner();
+        return credential === null
+          ? new DaytonaWorkspaceAdapter(root)
+          : new DaytonaApiWorkspaceAdapter(root, credential);
+      },
     },
     defaultAdapterKind: activeBackend,
   });
@@ -2839,11 +2892,6 @@ execution.router.complete({
   // Daytona is configured ONCE by the platform owner in an owner-only area and
   // is then used by the whole platform. The credential lives in the platform's
   // real secret boundary and is never returned by any endpoint.
-  const daytonaPlatform = new DaytonaPlatformConfig(
-    new CredentialStore(),
-    daytonaPlatformConfigFilePath(dataDir),
-  );
-
   /** Applies a verified Daytona connection to the LIVE execution configuration. */
   const activateDaytonaBackend = async (): Promise<void> => {
     if (activeBackend === 'daytona') return;
@@ -2905,7 +2953,16 @@ execution.router.complete({
   });
   jobEngineRef = jobEngine;
   await jobEngine.init();
-  supervisor.start();
+  // Supervision driver selection (Decision D4).
+  //
+  // A long-lived local process runs the supervisor's interval loops. A serverless
+  // control plane must NOT: every request would otherwise spawn a competing
+  // supervisor in a container that may be frozen seconds later. There, the
+  // platform's scheduled watchdog drives the SAME scans instead, against the
+  // durable supervision trace, so the three-minute timeout, crash recovery and
+  // network-restore resume all keep working with nobody browsing.
+  const runSupervisorLoops = process.env['BF_SUPERVISOR_MODE'] !== 'serverless';
+  if (runSupervisorLoops) supervisor.start();
 
   //LAW - DEPENDENCY-GATED SCHEDULING / GOVERNED WAIT STATES /
   // NO MANUAL CONTINUE FOR ORDINARY RECOVERY (§83, §116, §132).
@@ -4244,6 +4301,55 @@ execution.router.complete({
 
   // â”€â”€ SPA entry point â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Serve the NEXORA shell for the root path so the hash-router app loads.
+  // --- scheduled supervision watchdog (platform-internal) ----------------------
+  // On a managed control plane there is no long-lived daemon, so the platform's
+  // scheduler invokes this route. It runs the SAME supervisor scans the local
+  // process runs on a timer, so the three-minute no-progress timeout, crash
+  // recovery and network-restore resume keep working with nobody browsing. The
+  // durable supervision trace, not this process, is the source of truth.
+  app.post('/api/internal/watchdog', async (req, res) => {
+    // Authorization: Vercel's scheduler sends `Authorization: Bearer $CRON_SECRET`
+    // automatically when CRON_SECRET is set, which keeps the secret out of the
+    // repository entirely. A dedicated BF_WATCHDOG_SECRET and an explicit
+    // `x-watchdog-secret` header are also honoured for other schedulers.
+    const configured = [
+      process.env['CRON_SECRET']?.trim(),
+      process.env['BF_WATCHDOG_SECRET']?.trim(),
+    ].filter((v): v is string => typeof v === 'string' && v.length > 0);
+    const authHeader = typeof req.headers['authorization'] === 'string' ? req.headers['authorization'] : '';
+    const headerSecret = typeof req.headers['x-watchdog-secret'] === 'string' ? req.headers['x-watchdog-secret'] : '';
+    const bearer = /^Bearer\s+(.+)$/.exec(authHeader)?.[1] ?? '';
+    const supplied = headerSecret.length > 0 ? headerSecret : bearer;
+    if (configured.length === 0) {
+      res.status(503).json({
+        error: 'watchdog-not-configured',
+        detail:
+          'No watchdog secret is configured, so the scheduled supervision tick is refused rather than exposed publicly.',
+      });
+      return;
+    }
+    if (!configured.includes(supplied)) {
+      res.status(401).json({ error: 'unauthorized' });
+      return;
+    }
+    try {
+      const history = await bus.history();
+      const report = await runWatchdogTick(
+        { tick: () => supervisor.tick(), watchdogCheck: () => supervisor.watchdogCheck() },
+        history.slice(0),
+      );
+      await result.evidence.append({
+        kind: 'inspection',
+        summary: `Scheduled supervision tick: ${report.detail}`,
+        artifactIds: [],
+        producer: { kind: 'system', id: 'scheduled-watchdog' },
+      });
+      res.json({ ...report, eventsConsidered: history.length });
+    } catch (error) {
+      res.status(500).json({ error: 'watchdog-failed', detail: (error as Error).message });
+    }
+  });
+
   app.get('/', async (_req, res) => {
     try {
       const html = await fs.readFile(join(PUBLIC_DIR, 'index.html'), 'utf8');

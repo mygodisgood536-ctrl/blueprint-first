@@ -24,6 +24,7 @@ import { writeDaytonaStub } from './env-stub.ts';
 import { reconcileHostPath } from '../src/runtime/host-path.ts';
 import { tempDataDir, signupEnrolledCookie } from './helpers.ts';
 import { buildWorkingServer } from './working-harness.ts';
+import { OpenCodeRuntime } from '../src/ai/opencode/opencode-runtime.ts';
 
 function decisionFor(capability: ExecutionCapability, status: CapabilityDecision['status']): CapabilityDecision {
   return {
@@ -82,7 +83,10 @@ describe('capability-first discovery (LAW - CAPABILITY-FIRST)', () => {
       assert.ok((cline.version ?? '').length > 0, 'a READY cline decision records the real reported version');
     } else {
       assert.equal(cline.mechanism, null);
-      assert.match(cline.rationale, /not present|not recognized/i);
+      // The rationale must state the real absence AND that the platform will not
+      // fabricate a Cline session in its place.
+      assert.match(cline.rationale, /not present|not recognized|no `cline` CLI is present/i);
+      assert.match(cline.rationale, /never fabricates a Cline session/i);
     }
 
     // daytona (§75): a CLI that is installed but has no usable account is
@@ -96,7 +100,9 @@ describe('capability-first discovery (LAW - CAPABILITY-FIRST)', () => {
     assert.equal(daytona.status, expectedDaytona);
     if (daytona.status === 'NOT_INSTALLED') {
       assert.equal(daytona.mechanism, null);
-      assert.match(daytona.rationale, /not present|not recognized/i);
+      assert.match(daytona.rationale, /not present|not recognized|No Daytona credential is configured/i);
+      // No Daytona workspace may be claimed to exist.
+      assert.match(daytona.rationale, /no Daytona workspace is claimed/i);
     } else {
       assert.equal(daytona.mechanism, 'daytona-cli');
       assert.ok((daytona.version ?? '').length > 0);
@@ -259,7 +265,9 @@ describe('GET /api/system/foundation (platform startup gate)', () => {
         capabilities: CapabilityDecision[];
       };
       // The report must be exactly in sync with the LIVE host probe, and a
-      // degraded foundation must never be represented as ready.
+      // degraded foundation must never be represented as ready. Every
+      // expectation is derived from the same real probes the platform performs,
+      // so the assertion is honest on ANY host instead of hard-coding one.
       const clineProbe = await probeBinary('cline', ['--version'], { timeoutMs: 60_000 });
       const daytonaProbe = await probeBinary('daytona', ['--version'], { timeoutMs: 30_000 });
       const clineReallyReady = clineProbe !== null && clineProbe.exitCode === 0;
@@ -267,24 +275,39 @@ describe('GET /api/system/foundation (platform startup gate)', () => {
       const daytonaUsable = daytonaInstalled
         ? await probeBinary('daytona', ['list', '--format', 'json'], { timeoutMs: 30_000 }).then((r) => r !== null && r.exitCode === 0)
         : false;
+      // An owner-verified Daytona credential is probed FIRST by the platform, so
+      // when one is present the API transport is authoritative for readiness even
+      // though no `daytona` binary exists on this host.
+      const daytonaCredentialConfigured =
+        typeof process.env['BF_DAYTONA_API_KEY'] === 'string' && process.env['BF_DAYTONA_API_KEY'].trim().length > 0;
+      const expectedDaytonaReady = daytonaCredentialConfigured ? true : daytonaUsable;
+      // OpenCode readiness follows the live runtime probe, not a host assumption.
+      const openCodeRuntime = new OpenCodeRuntime();
+      const openCodeResolvable = await openCodeRuntime.available();
       // `daytonaReady` is true only when the capability is genuinely READY
       // (§75): an installed-but-unusable CLI is DEGRADED, not ready.
       assert.equal(body.clineReady, clineReallyReady);
-      assert.equal(body.daytonaReady, daytonaUsable);
-      // OpenCode is never claimable here: this build host has no reachable
-      // OpenCode provider, so the gate must stay shut and say why.
-      assert.equal(body.opencodeReady, false);
-      assert.equal(body.productionReady, false);
+      assert.equal(body.daytonaReady, expectedDaytonaReady);
+      assert.equal(body.opencodeReady, openCodeResolvable);
+      // Production readiness requires the whole mandatory foundation, so a host
+      // without a reachable OpenCode provider can never report ready.
+      assert.equal(body.productionReady, body.opencodeReady && body.clineReady && body.daytonaReady);
       assert.equal(body.policy, 'development-local');
-      assert.equal(body.startupGateOpen, false);
-      assert.match(body.summary, /Not production-ready/);
+      assert.equal(body.startupGateOpen, body.productionReady);
+      assert.match(body.summary, body.productionReady ? /production-ready/ : /Not production-ready/);
       // Every control-plane foundation was probed for real at boot.
       assert.equal(body.controlPlane.length, 6);
       assert.ok(body.capabilities.some((c) => c.capability === 'local-workspace' && c.status === 'READY'));
-      const expectedDaytonaStatus = !daytonaInstalled ? 'NOT_INSTALLED' : daytonaUsable ? 'READY' : 'DEGRADED';
+      const expectedDaytonaStatus = daytonaCredentialConfigured
+        ? 'READY'
+        : !daytonaInstalled
+          ? 'NOT_INSTALLED'
+          : daytonaUsable
+            ? 'READY'
+            : 'DEGRADED';
       assert.ok(body.capabilities.some((c) => c.capability === 'daytona' && c.status === expectedDaytonaStatus));
       // The reported environment backend follows genuine daytona readiness.
-      assert.equal(body.environmentBackend, daytonaUsable ? 'daytona' : 'local-workspace');
+      assert.equal(body.environmentBackend, expectedDaytonaReady ? 'daytona' : 'local-workspace');
     } finally {
       await server.close();
     }
