@@ -2059,11 +2059,15 @@ res.json({ project: projectSummary(updated) });
       });
       return;
     }
+    // Unscoped read. A neutral boot result deliberately carries no lineage yet
+    // (the field is declared as always-present but is undefined until work has
+    // actually run), so this must not assume it exists - doing so answered 500.
+    const lineage = result.lineage;
     res.json({
-      firstPageId: result.firstPageId,
-      links: result.lineage.links,
-      completeThrough: result.lineage.completeThrough,
-      gaps: result.lineage.gaps,
+      firstPageId: lineage?.baseId ?? null,
+      links: lineage?.links ?? [],
+      completeThrough: lineage?.completeThrough ?? null,
+      gaps: lineage?.gaps ?? [],
     });
   });
 
@@ -4347,6 +4351,41 @@ execution.router.complete({
       res.json({ ...report, eventsConsidered: history.length });
     } catch (error) {
       res.status(500).json({ error: 'watchdog-failed', detail: (error as Error).message });
+    }
+  });
+
+  /* An unknown API path is a client error, and must be answered as JSON like every
+   other API response rather than as Express's default HTML page. */
+  app.use((req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (req.path.startsWith('/api/')) {
+      res.status(404).json({ error: 'not-found' });
+      return;
+    }
+    next();
+  });
+
+  /* Terminal error handler.
+   *
+   * Anything a route forgets to catch used to fall through to Express's default
+   * handler, which answers an HTML page containing the stack trace and absolute
+   * file paths. That is an information disclosure, not a helpful error, so every
+   * unhandled failure is turned into a JSON body that says only that the request
+   * failed. The full cause is logged server-side and never returned.
+   *
+   * Registered after every route so it only sees what nothing else handled.
+   */
+  app.use((err: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (res.headersSent) {
+      next(err);
+      return;
+    }
+    const detail = err instanceof Error ? (err.stack ?? err.message) : String(err);
+    console.error(`[web] unhandled ${req.method} ${req.path}: ${detail}`);
+    const isApi = req.path.startsWith('/api/');
+    if (isApi) {
+      res.status(500).json({ error: 'internal-error' });
+    } else {
+      res.status(500).type('text/plain').send('Internal error');
     }
   });
 

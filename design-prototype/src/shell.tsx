@@ -29,6 +29,7 @@ const engineeringNav: NavItem[] = [
   { icon: 'checkCircle', label: 'Verification', route: '#/verification' },
   { icon: 'award', label: 'Certification', route: '#/certification' },
   { icon: 'flask', label: 'Testing', route: '#/testing' },
+  { icon: 'key', label: 'Providers', route: '#/providers' },
   { icon: 'activity', label: 'Operations', route: '#/operations' },
   { icon: 'refresh', label: 'Continuous', route: '#/continuous' },
   { icon: 'database', label: 'System', route: '#/system' },

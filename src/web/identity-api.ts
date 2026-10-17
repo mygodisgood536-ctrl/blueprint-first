@@ -183,7 +183,7 @@ export function registerIdentityApi(app: Express, options: IdentityApiOptions): 
 
   app.post('/api/auth/logout', async (req, res) => {
     try {
-      const token = (req as Request & { sessionToken?: string }).sessionToken;
+      const token = req.sessionToken;
       if (token !== undefined) await identities.logout(token);
       res.setHeader('set-cookie', clearedCookie());
       res.status(204).end();
@@ -196,7 +196,7 @@ export function registerIdentityApi(app: Express, options: IdentityApiOptions): 
 
   /** Resolved server-side from the session cookie; never from a client field. */
   app.get('/api/auth/session', (req, res) => {
-    const token = (req as Request & { sessionToken?: string }).sessionToken;
+    const token = req.sessionToken;
     if (token === undefined) {
       res.json({ account: null });
       return;

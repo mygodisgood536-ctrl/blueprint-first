@@ -85,6 +85,16 @@ const ANONYMOUS: AuthState = {
 
 interface StoreContextType {
   auth: AuthState
+  /**
+   * False until the server has answered "who am I?". Routing MUST wait for this.
+   *
+   * The session is an HttpOnly cookie, so it cannot be read synchronously. If
+   * the router decides before the server replies it will see an anonymous
+   * visitor, redirect to the entry screen, and that redirect is permanent - a
+   * signed-in user who simply refreshes the page would be stranded outside the
+   * product with no way back in.
+   */
+  authResolved: boolean
   /** Creates an account. Issues NO session - the caller must then sign in. */
   signup: (fields: SignupFields) => Promise<{ ok: boolean; reason: string }>
   /** The one sign-in route, used by every account including the privileged one. */
@@ -119,6 +129,7 @@ const StoreContext = createContext<StoreContextType | null>(null)
 let toastId = 0
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [auth, setAuth] = useState<AuthState>(ANONYMOUS)
+  const [authResolved, setAuthResolved] = useState(false)
   const [toasts, setToasts] = useState<Toast[]>([])
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
   const [projects, setProjects] = useState<Project[]>([])
@@ -177,6 +188,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         if (res.account) void fetchPreferences()
       } catch {
         if (alive) setAuth(ANONYMOUS)
+      } finally {
+        // Routing is released here and not before, so the server always has the
+        // final say about who is signed in.
+        if (alive) setAuthResolved(true)
       }
       void loadSecurityQuestions()
     }
@@ -428,7 +443,7 @@ const startStageRun = useCallback((projectId: string, stage: string) => setRunni
 
   return (
     <StoreContext.Provider value={{
-      auth, signup, login, logout, updateProfile,
+      auth, authResolved, signup, login, logout, updateProfile,
       securityQuestions, loadSecurityQuestions,
       toasts, pushToast,
       sidebarCollapsed, toggleSidebar,

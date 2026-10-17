@@ -18,6 +18,15 @@ declare module 'express-serve-static-core' {
   interface Request {
     /** Set when the session cookie resolves to a live account; undefined otherwise. */
     identity?: IdentityView;
+    /**
+     * The raw session token carried by this request, set whenever a cookie was
+     * present - whether or not it resolved to a live account.
+     *
+     * This exists so routes that need the token itself (resolving the current
+     * session, revoking it on sign-out) read the same value the middleware saw,
+     * instead of re-parsing the header and risking a different answer.
+     */
+    sessionToken?: string;
   }
 }
 
@@ -36,6 +45,9 @@ export function attachIdentity(identities: SessionResolver): (req: Request, _res
   return (req: Request, _res: Response, next: NextFunction): void => {
     const token = parseCookies(req.headers.cookie)[SESSION_COOKIE];
     if (token !== undefined) {
+      // The token is recorded whether or not it resolves, so sign-out can
+      // revoke exactly what was presented.
+      req.sessionToken = token;
       const account = identities.accountForToken(token);
       if (account !== null) req.identity = account;
     }

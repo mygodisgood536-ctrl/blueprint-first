@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import express from 'express';
 import { registerIdentityApi } from '../src/web/identity-api.ts';
 import { DurableIdentityRegistry } from '../src/account/durable-identity.ts';
-import { parseCookies } from '../src/web/cookies.ts';
+import { attachIdentity } from '../src/web/auth.ts';
 
 const Q = 'What city did my parents meet?';
 const BOOTSTRAP_ENV = { BF_BOOTSTRAP_SECURITY_ANSWER: 'Ore' } as NodeJS.ProcessEnv;
@@ -22,14 +22,17 @@ let server: ReturnType<express.Express['listen']>;
 let url: string;
 let identities: DurableIdentityRegistry;
 
-/** Mirrors the production middleware: resolve the account from the cookie only. */
-function attachIdentity(a: express.Express): void {
-  a.use((req, _res, next) => {
-    const cookies = parseCookies(req.headers.cookie);
-    const token = cookies['bf_session'];
-    if (token !== undefined) (req as unknown as { sessionToken?: string }).sessionToken = token;
-    next();
-  });
+/**
+ * The REAL production middleware is used here on purpose.
+ *
+ * This suite used to install a hand-written stand-in that set req.sessionToken
+ * itself, which meant it exercised a middleware that never existed: the shipped
+ * one left req.sessionToken unset, so /api/auth/session always answered null and
+ * sign-out never revoked anything - and the suite still passed. Testing the real
+ * thing is the only way that class of bug can be caught here.
+ */
+function installIdentityMiddleware(a: express.Express): void {
+  a.use(attachIdentity(identities));
 }
 
 before(async () => {
@@ -38,7 +41,7 @@ before(async () => {
   await identities.ensurePrivilegedAccount(BOOTSTRAP_ENV);
   const app = express();
   app.use(express.json());
-  attachIdentity(app);
+  installIdentityMiddleware(app);
   registerIdentityApi(app, {
     identities,
     sessionTtlMs: 60 * 60 * 1000,
@@ -48,8 +51,7 @@ before(async () => {
   });
   // A privileged resource, enforced ONLY server-side.
   app.get('/api/platform/config', (req, res) => {
-    const token = (req as unknown as { sessionToken?: string }).sessionToken;
-    const account = token === undefined ? null : identities.accountForToken(token);
+    const account = req.identity ?? null;
     if (account === null) {
       res.status(401).json({ error: 'authentication required' });
       return;
@@ -170,6 +172,39 @@ describe('HTTP — login and session', () => {
     const c = await login({ securityAnswer: 'wrong' });
     for (const r of [a, b, c]) assert.equal(r.res.status, 401);
     assert.equal(new Set([a.text, b.text, c.text]).size, 1, 'failures must be indistinguishable');
+  });
+
+  /* Regression: the shipped middleware recorded req.identity but not
+     req.sessionToken, while /api/auth/session and /api/auth/logout read
+     req.sessionToken. Every session therefore resolved as anonymous and no
+     token was ever revoked. This asserts both halves against real middleware. */
+  it('resolves the session from the middleware token, not a re-parse', async () => {
+    const { res } = await login();
+    assert.equal(res.status, 200);
+    const cookie = cookieFrom(res);
+
+    const session = await getJson('/api/auth/session', cookie);
+    assert.ok(session.account, 'a valid cookie must resolve to an account');
+    assert.equal(session.account.username, 'ada');
+  });
+
+  it('signing out revokes the token server-side', async () => {
+    const { res } = await login();
+    const cookie = cookieFrom(res);
+
+    const before = await getJson('/api/auth/session', cookie);
+    assert.ok(before.account, 'precondition: the session is live');
+
+    const out = await fetch(`${url}/api/auth/logout`, { method: 'POST', headers: { cookie } });
+    assert.equal(out.status, 204);
+
+    // The same cookie must now be worth nothing, even if the browser still
+    // holds it. Clearing the cookie in the browser is not enough on its own.
+    const after = await getJson('/api/auth/session', cookie);
+    assert.equal(after.account, null, 'a revoked token must not resolve to an account');
+
+    const privileged = await fetch(`${url}/api/platform/config`, { headers: { cookie } });
+    assert.equal(privileged.status, 401, 'a revoked token must not reach a protected route');
   });
 
   it('accepts the answer case-insensitively', async () => {
