@@ -30,7 +30,8 @@ export function ToastHost() {
   return (
     <div className="toast-wrap">
       {toasts.map(t => (
-        <div key={t.id} className={`toast toast-${t.type}`}>
+          // The variant is a modifier class on .toast (see .toast.success etc).
+          <div key={t.id} className={`toast ${t.type}`} role={t.type === 'error' ? 'alert' : 'status'}>
           {t.type === 'success' ? <I name="check" size={16} /> : t.type === 'error' ? <I name="alert" size={16} /> : null}
           {t.message}
         </div>

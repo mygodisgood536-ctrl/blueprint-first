@@ -1,4 +1,4 @@
-// API client for NEXORA frontend to communicate with the real backend
+// API client for Blueprint-First frontend to communicate with the real backend
 
 const API_BASE = ''
 
@@ -21,7 +21,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   return res.json()
 }
 
-// Â§ 3.3 TRANSPARENCY â€” the transparency interface is a PROJECTION of persisted
+// § 3.3 TRANSPARENCY — the transparency interface is a PROJECTION of persisted
 // backend execution state. This client only ever reads what the Execution
 // Supervisor, the Job State Manager, the durable event bus and the real
 // execution environment actually recorded; it never manufactures a Worker,
@@ -604,7 +604,7 @@ export const stagesApi = {
   traceability: () =>
     request<unknown>('/api/traceability'),
 
-  // Â§0.6 Recursive Page Expansion â€” 14-layer determination, Pass 10.
+  // §0.6 Recursive Page Expansion — 14-layer determination, Pass 10.
   expansion: () =>
     request<{
       status: string
@@ -627,7 +627,7 @@ export const stagesApi = {
       } | null
     }>('/api/expansion'),
 
-  // Â§1.4 Interactive Digital Twin â€” element -> DESIGN -> Discovery -> evidence.
+  // §1.4 Interactive Digital Twin — element -> DESIGN -> Discovery -> evidence.
   twin: () =>
     request<{
       projectId: string | null

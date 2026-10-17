@@ -61,9 +61,9 @@ export function ArtifactsList() {
       <div className="page-head"><div><h1>Artifacts</h1><p className="subtitle">{artifacts.length} artifacts across your projects.</p></div></div>
       <div className="card mb-16"><div className="row" style={{ gap: 12, flexWrap: 'wrap' }}>
         <div className="grow" style={{ minWidth: 220 }}><input placeholder="Search by title or ID prefix…" value={search} onChange={e => setSearch(e.target.value)} style={{ width: '100%', padding: '10px 14px', border: '1px solid var(--border)', borderRadius: 10, outline: 'none' }} /></div>
-        <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)} style={{ padding: '10px 14px', border: '1px solid var(--border)', borderRadius: 10, background: 'var(--surface)' }}>{types.map(t => <option key={t} value={t}>{t === 'all' ? 'All types' : t}</option>)}</select>
-        <select value={phaseFilter} onChange={e => setPhaseFilter(e.target.value)} style={{ padding: '10px 14px', border: '1px solid var(--border)', borderRadius: 10, background: 'var(--surface)' }}><option value="all">All phases</option>{PHASES.map(t => <option key={t} value={t}>{t}</option>)}</select>
-        <select value={sortKey} onChange={e => setSortKey(e.target.value as 'id' | 'type' | 'version')} style={{ padding: '10px 14px', border: '1px solid var(--border)', borderRadius: 10, background: 'var(--surface)' }} aria-label="Sort artifacts">{SORTS.map(s => <option key={s.key} value={s.key}>Sort: {s.label}</option>)}</select>
+        <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)} style={{ padding: '10px 14px', border: '1px solid var(--border)', borderRadius: 10, background: 'rgb(var(--surface))' }}>{types.map(t => <option key={t} value={t}>{t === 'all' ? 'All types' : t}</option>)}</select>
+        <select value={phaseFilter} onChange={e => setPhaseFilter(e.target.value)} style={{ padding: '10px 14px', border: '1px solid var(--border)', borderRadius: 10, background: 'rgb(var(--surface))' }}><option value="all">All phases</option>{PHASES.map(t => <option key={t} value={t}>{t}</option>)}</select>
+        <select value={sortKey} onChange={e => setSortKey(e.target.value as 'id' | 'type' | 'version')} style={{ padding: '10px 14px', border: '1px solid var(--border)', borderRadius: 10, background: 'rgb(var(--surface))' }} aria-label="Sort artifacts">{SORTS.map(s => <option key={s.key} value={s.key}>Sort: {s.label}</option>)}</select>
       </div></div>
       {filtered.length === 0 ? (
         <div className="empty-state"><div className="empty-icon">&#128230;</div><h3>No artifacts found</h3><p>No artifacts match the current search or filters. Clear them to see everything again.</p></div>
@@ -182,7 +182,7 @@ export function ArtifactDetail({ id }: { id: string }) {
 
         <div className="card"><h4 className="mb-12">Provenance</h4>
           <div style={{ display: 'grid', gap: 8 }}>
-            <div className="row-between text-sm"><span className="muted">Produced by</span>the NEXORA engine</div>
+            <div className="row-between text-sm"><span className="muted">Produced by</span>the Blueprint-First engine</div>
             <div className="row-between text-sm"><span className="muted">Evidence</span>{linkedEvidence.length > 0 ? (
               <span>{linkedEvidence.map((e: any, i: number) => (
                 <span key={e.id}>{i > 0 ? ', ' : ''}<a href={'#/evidence/' + e.id} className="id-mono">{e.id}</a></span>
@@ -226,11 +226,11 @@ export function ArtifactDetail({ id }: { id: string }) {
       <div className="card mt-16">
         <h4 className="mb-8">Evidence supporting this artifact</h4>
         {linkedEvidence.length === 0 ? (
-          <p className="text-sm muted">No evidence linked yet. Evidence answers "why does NEXORA believe this?" — see <a href="#/evidence">Evidence</a>.</p>
+          <p className="text-sm muted">No evidence linked yet. Evidence answers "why does Blueprint-First believe this?" — see <a href="#/evidence">Evidence</a>.</p>
         ) : (
           <div style={{ display: 'grid', gap: 8 }}>
             {linkedEvidence.map((e: any) => (
-              <div key={e.id} className="row-between text-sm" style={{ padding: '10px 14px', borderRadius: 8, background: 'var(--surface-2)' }}>
+              <div key={e.id} className="row-between text-sm" style={{ padding: '10px 14px', borderRadius: 8, background: 'rgb(var(--surface-2))' }}>
                 <span>{e.summary}</span>
                 <span className="row" style={{ gap: 8 }}><span className="badge badge-blue">{e.kind}</span><span className="id-mono text-xs muted">{e.id}</span><a href={`#/evidence/${e.id}`} className="btn btn-sm btn-ghost">View</a></span>
               </div>

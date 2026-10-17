@@ -124,7 +124,7 @@ export function Traceability() {
           <thead><tr><th>Requirement</th><th>Status</th><th>Design</th><th>Design evidence</th><th>Implementation</th><th>Impl evidence</th><th>Missing</th><th>Unsupported</th></tr></thead>
           <tbody>
             {rows.map((r) => (
-              <tr key={r.requirementId} style={{ cursor: 'pointer', background: r.requirementId === row.requirementId ? 'var(--surface-2)' : undefined }}
+              <tr key={r.requirementId} style={{ cursor: 'pointer', background: r.requirementId === row.requirementId ? 'rgb(var(--surface-2))' : undefined }}
                 onClick={() => setSelected(r.requirementId)}>
                 <td><a href={`#/artifacts/${r.requirementId}`} onClick={e => e.stopPropagation()} className="id-mono">{r.requirementId}</a></td>
                 <td className="text-sm"><Status status={r.requirementStatus} /></td>

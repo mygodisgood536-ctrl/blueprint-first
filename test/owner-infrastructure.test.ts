@@ -1,6 +1,6 @@
 ﻿/**
  * OWNER / USER SEPARATION and the real Daytona credential flow
- * (ARCHITECTURE 3.3 Â§69-Â§70, Â§75, Â§81, Â§121, Â§123).
+ * (ARCHITECTURE 3.3 §69-§70, §75, §81, §121, §123).
  *
  * Daytona is PLATFORM infrastructure: configured once by the owner, then used by
  * every project. These tests prove the separation is enforced by the BACKEND

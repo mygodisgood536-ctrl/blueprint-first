@@ -1,5 +1,5 @@
 ﻿/**
- * Stage 8 â€” Blueprint-First Workspace: per-stage endpoint surface.
+ * Stage 8 — Blueprint-First Workspace: per-stage endpoint surface.
  *
  * Exercises the real Blueprint-First engine-backed endpoints that back
  * the per-stage views in `views/project-stage.js`:
@@ -112,7 +112,7 @@ const STAGE_ENDPOINTS = [
   '/api/peo',
 ];
 
-describe('Stage 8 â€” Blueprint-First Workspace endpoints', () => {
+describe('Stage 8 — Blueprint-First Workspace endpoints', () => {
   it('every per-stage GET endpoint returns 200 for an authenticated user', async () => {
     const { url, close } = await buildStage8Server();
     try {

@@ -41,7 +41,7 @@ export function Credentials() {
     setAdding(true)
     try {
       await api.credentials.add(providerId, key.trim())
-      pushToast('Credential added â€” verify it with the provider to make its models selectable', 'success')
+      pushToast('Credential added — verify it with the provider to make its models selectable', 'success')
       setShowAdd(false); setKey('')
       load().catch(() => {})
     } catch (err) {
@@ -61,7 +61,7 @@ export function Credentials() {
     }
   }
 
-  /* Re-verification (Â§31): the system calls the provider's verify endpoint;
+  /* Re-verification (§31): the system calls the provider's verify endpoint;
      the user sees the real result. */
   const verify = async (id: string) => {
     if (verifying) return
@@ -83,7 +83,7 @@ export function Credentials() {
   return (
     <Shell breadcrumb={[{ label: 'Providers', route: '#/providers' }, { label: 'Credentials' }]}>
 <Modal open={showAdd} onClose={() => setShowAdd(false)} title="Add credential"
-          footer={<><button className="btn btn-ghost" onClick={() => setShowAdd(false)}>Cancel</button><button className="btn btn-primary" onClick={add} disabled={!key || !providerId || adding}>{adding ? <><span className="spin" /> Addingâ€¦</> : 'Add credential'}</button></>}>
+          footer={<><button className="btn btn-ghost" onClick={() => setShowAdd(false)}>Cancel</button><button className="btn btn-primary" onClick={add} disabled={!key || !providerId || adding}>{adding ? <><span className="spin" /> Adding…</> : 'Add credential'}</button></>}>
           <div className="field"><label>Provider</label><select value={providerId} onChange={e => setProviderId(e.target.value)}>
             {providers.length === 0 ? <option value="">No credential-required providers available</option> : providers.map(p => <option key={p.providerId} value={p.providerId}>{p.providerName} ({p.providerId})</option>)}
           </select></div>
@@ -97,9 +97,9 @@ export function Credentials() {
             <tr key={c.id}><td style={{ fontWeight: 600 }}>{providers.find(p => p.providerId === c.providerId)?.providerName || c.providerId}</td>
               <td className="text-sm muted">{fmtDate(c.createdAt)}</td>
               <td><Status status={c.verified ? 'connected' : 'auth_required'} /></td>
-              <td className="text-sm muted">{c.lastError ? <span className="badge badge-red">failed</span> : 'â€”'}</td>
+              <td className="text-sm muted">{c.lastError ? <span className="badge badge-red">failed</span> : '—'}</td>
               <td><div className="row" style={{ gap: 6 }}>
-                <button className="btn btn-ghost btn-sm" onClick={() => verify(c.id)} disabled={verifying === c.id || c.providerId !== 'openrouter'} title={c.providerId !== 'openrouter' ? 'Verification is only implemented for OpenRouter' : undefined}>{verifying === c.id ? 'Verifyingâ€¦' : 'Verify'}</button>
+                <button className="btn btn-ghost btn-sm" onClick={() => verify(c.id)} disabled={verifying === c.id || c.providerId !== 'openrouter'} title={c.providerId !== 'openrouter' ? 'Verification is only implemented for OpenRouter' : undefined}>{verifying === c.id ? 'Verifying…' : 'Verify'}</button>
                 <button className="btn btn-ghost btn-sm" onClick={() => remove(c.id)} aria-label={'Remove ' + c.providerId}><I name="trash" size={14} /></button>
               </div></td></tr>
           ))}</tbody></table></div>
@@ -112,7 +112,7 @@ export function ModelSelection() {
   return (
     <ProviderHub
       title="Select a model"
-      subtitle="Choose the active model. A model must have a connection verified against its provider before stages run for real â€” otherwise stages are recorded as checkpoints only."
+      subtitle="Choose the active model. A model must have a connection verified against its provider before stages run for real — otherwise stages are recorded as checkpoints only."
       breadcrumb={[{ label: 'Providers', route: '#/providers' }, { label: 'Selection' }]}
     />
   )

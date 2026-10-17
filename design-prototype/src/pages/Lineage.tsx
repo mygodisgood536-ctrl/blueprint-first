@@ -89,7 +89,7 @@ export function Lineage() {
             </table></div>
           </div>
 
-          <div className="card" style={{ borderColor: gaps.length ? 'var(--warning)' : 'var(--green-200)' }}>
+          <div className="card" style={{ borderColor: gaps.length ? 'rgb(var(--warning))' : 'var(--green-200)' }}>
             <h4 className="mb-8">Lineage gaps</h4>
             {gaps.length === 0 ? (
               <p className="text-sm muted">No gaps — the chain is contiguous.</p>

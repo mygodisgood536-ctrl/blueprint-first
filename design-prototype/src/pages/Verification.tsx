@@ -38,20 +38,20 @@ export function Verification() {
         <button className="btn btn-primary" onClick={refresh} disabled={loading}><I name="refresh" /> Re-verify</button></div>
       <div className="card"><div style={{ display: 'grid', gap: 8 }}>
         {dims.map((d: any) => (
-          <div key={d.id} className="row-between text-sm" style={{ padding: '10px 14px', borderRadius: 8, background: 'var(--surface-2)' }}>
+          <div key={d.id} className="row-between text-sm" style={{ padding: '10px 14px', borderRadius: 8, background: 'rgb(var(--surface-2))' }}>
             <div className="row" style={{ gap: 10 }}><Status status={d.state} /><span style={{ fontWeight: 600 }}>{d.label}</span><span className="id-mono">({d.id})</span></div>
             {d.finding && <span className="text-xs muted">{d.finding}</span>}
           </div>
         ))}
       </div></div>
       {dims.some((d: any) => d.state === 'failed') && (
-        <div className="card mt-16" style={{ borderColor: 'var(--danger)', background: 'var(--danger-soft)' }}>
-          <h4 className="mb-8" style={{ color: 'var(--danger)' }}>Failed checks</h4>
+        <div className="card mt-16" style={{ borderColor: 'rgb(var(--danger))', background: 'var(--danger-soft)' }}>
+          <h4 className="mb-8" style={{ color: 'rgb(var(--danger))' }}>Failed checks</h4>
           <p className="text-sm muted mb-8">These dimensions failed. The verification engine reports what failed and what would unblock it.</p>
           {dims.filter((d: any) => d.state === 'failed').map((d: any) => (
             <div key={d.id} className="text-sm"><strong>{d.label}:</strong> {d.finding || 'No finding recorded'}</div>
           ))}
-          <div className="text-sm mt-8" style={{ color: 'var(--danger)' }}>To resolve: record the missing evidence, then re-run verification.</div>
+          <div className="text-sm mt-8" style={{ color: 'rgb(var(--danger))' }}>To resolve: record the missing evidence, then re-run verification.</div>
         </div>
       )}
     </Shell>

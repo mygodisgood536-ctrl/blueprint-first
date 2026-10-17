@@ -42,7 +42,7 @@ function builtBundle(): string | null {
   return js === undefined ? null : readFileSync(join(dir, js), 'utf8');
 }
 
-// â”€â”€ 1. The shared secret input must keep its id and label association â”€â”€â”€â”€â”€â”€â”€
+// ── 1. The shared secret input must keep its id and label association ───────
 
 test('the shared secret input forwards its id so every label stays associated', () => {
   const control = read('components/SecretField.tsx');
@@ -144,7 +144,7 @@ test('sign-up does not sign the new account in or navigate into the product', ()
   assert.match(signupBody, /sign in/i, 'sign-up must direct the user to sign in');
 });
 
-// â”€â”€ 4. A non-administrator must not be left on an administration URL â”€â”€â”€â”€â”€â”€
+// ── 4. A non-administrator must not be left on an administration URL ──────
 
 test('a non-administrator is moved off an administration URL they cannot use', () => {
   const decision = resolveRoute('#/settings/infrastructure', READY);
@@ -157,22 +157,24 @@ test('a non-administrator is moved off an administration URL they cannot use', (
   assert.equal(resolveRoute('#/settings/infrastructure', ADMIN).kind, 'ownerSettings');
 });
 
-// â”€â”€ 5. The entry URL is a real, loadable page â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── 5. The entry URL is a real, loadable page ─────────────────────────────
 
 test('the public entry is the application root and the built bundle ships it', () => {
   assert.equal(resolveRoute('#/', ANONYMOUS).kind, 'splash');
   assert.equal(resolveRoute('#/welcome', ANONYMOUS).kind, 'welcome');
   const bundle = builtBundle();
   if (bundle === null) return; // not built in this environment
-  // The bundle must actually contain the entry surfaces, not just the route table.
-  assert.ok(bundle.includes('Ship software from a blueprint'), 'the welcome screen must ship in the bundle');
-  assert.ok(bundle.includes('Get started'), 'the entry action must ship in the bundle');
+  // The bundle must actually contain the entry surfaces, not just the route
+  // table. These are probe strings drawn from the copy the entry screens
+  // currently render, so they track the real screens.
+  assert.ok(bundle.includes('Software is engineered'), 'the welcome screen must ship in the bundle');
+  assert.ok(bundle.includes('Create an account'), 'the entry action must ship in the bundle');
   assert.ok(bundle.includes('Security Answer'), 'the security-answer field must ship in the bundle');
   // The splash must hand off automatically to the welcome screen.
   assert.match(read('pages/Welcome.tsx'), /navigate\('#\/welcome'\)/);
 });
 
-// â”€â”€ 6. No shipped page may link to a retired route â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── 6. No shipped page may link to a retired route ─────────────────────────
 
 test('no shipped page links to a retired route', () => {
   const retired = ['#/user', '#/user/signin', '#/user/entry', '#/intro', '#/login', '#/signup', '#/forgot', '#/splash', '#/signin/verify', '#/setup/authenticator', '#/settings/security'];
@@ -193,7 +195,7 @@ test('no shipped page links to a retired route', () => {
   assert.deepEqual(offenders, [], 'only the route table may reference a retired route');
 });
 
-// â”€â”€ 7. The public experience must not mention privileged concepts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ── 7. The public experience must not mention privileged concepts ──────────
 
 test('the public entry screens contain no privileged wording or link', () => {
   for (const file of ['pages/Welcome.tsx', 'pages/SignIn.tsx', 'router.ts']) {

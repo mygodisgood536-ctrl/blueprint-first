@@ -127,7 +127,7 @@ export function ProjectSettings({ id }: { id: string }) {
             ? ((project.config.visionDocumentIds as string[]).length > 0 ? (
                 <div style={{ display: 'grid', gap: 8 }}>
                   {(project.config.visionDocumentIds as string[]).map((did) => (
-                    <div key={did} className="row-between text-sm" style={{ padding: '8px 12px', borderRadius: 8, background: 'var(--surface-2)' }}>
+                    <div key={did} className="row-between text-sm" style={{ padding: '8px 12px', borderRadius: 8, background: 'rgb(var(--surface-2))' }}>
                       <span><a href={`#/documents/${did}`} style={{ fontWeight: 600 }}>Vision document</a> <span className="id-mono text-xs muted">{did}</span></span>
                     </div>
                   ))}
@@ -153,7 +153,7 @@ export function ProjectSettings({ id }: { id: string }) {
                 <button className="btn btn-danger" onClick={performDelete} disabled={deleting || !canConfirmDelete}>{deleting ? 'Deleting…' : 'Confirm deletion'}</button>
                 <button className="btn btn-ghost" onClick={() => { setDelOpen(false); setConfirmName(''); setDelError('') }}>Cancel</button>
               </div>
-              {delError && <p className="text-sm mt-8" style={{ color: 'var(--danger)' }}>{delError}</p>}
+              {delError && <p className="text-sm mt-8" style={{ color: 'rgb(var(--danger))' }}>{delError}</p>}
             </div>
           )}
         </div>

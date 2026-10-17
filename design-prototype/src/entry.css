@@ -1,0 +1,194 @@
+/*
+ * Entry experience: splash, welcome, the three-page introduction and the
+ * authentication surface.
+ *
+ * These screens carry the identity hardest — a fixed 72px header, a midnight
+ * substrate with a 64px grid, two blurred colour orbs, an editorial serif at
+ * display scale and a mono micro-label — so they are defined once here and
+ * reused by every public screen.
+ */
+
+.mb-0 { margin-bottom: 0; }
+
+/* --- shared entry frame --------------------------------------------------- */
+.auth-bg {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: clamp(1.25rem, 4vw, 3rem) var(--gutter);
+  overflow: hidden;
+  background: rgb(var(--bg));
+}
+.auth-bg .grid-backdrop { position: absolute; inset: 0; opacity: 0.55; }
+.auth-bg > .glow-orb { z-index: 0; }
+.auth-bg > *:not(.grid-backdrop):not(.glow-orb) { position: relative; z-index: 1; }
+
+.auth-card {
+  width: 100%;
+  padding: clamp(1.5rem, 3vw, 2.25rem);
+  border: 1px solid rgb(var(--line) / var(--line-alpha));
+  border-radius: var(--radius-xl);
+  background: rgb(var(--surface) / 0.72);
+  background-image: var(--panel-sheen);
+  box-shadow: var(--shadow-panel);
+}
+
+/* The credential form is a narrow, single column of controls: a comfortable
+   reading measure keeps the fields short and the whole card scannable. */
+.auth-card-wrap {
+  width: 100%;
+  max-width: 27rem;
+  margin-inline: auto;
+}
+.auth-brand {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 1.5rem;
+}
+
+/* Heading rhythm inside the credential card. */
+.auth-title {
+  font-family: var(--font-display);
+  font-size: 1.35rem;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: rgb(var(--fg));
+  margin: 0 0 0.35rem;
+}
+.auth-sub { margin: 0 0 1.5rem; line-height: 1.6; }
+.auth-switch {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: center;
+  gap: 0.35rem;
+  margin: 0;
+  text-align: center;
+}
+.auth-switch a { color: rgb(var(--accent)); font-weight: 500; }
+.auth-switch a:hover { text-decoration: underline; text-underline-offset: 2px; }
+
+/* A measured, state-coloured message. */
+.notice {
+  padding: 0.7rem 0.9rem;
+  border-radius: var(--radius-md);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  margin-bottom: 1rem;
+  border: 1px solid transparent;
+}
+.notice-error { background: rgb(var(--danger) / var(--danger-bg)); color: rgb(var(--danger)); border-color: rgb(var(--danger) / 0.28); }
+.notice-success { background: rgb(var(--success) / var(--success-bg)); color: rgb(var(--success)); border-color: rgb(var(--success) / 0.28); }
+.notice-info { background: rgb(var(--info) / var(--info-bg)); color: rgb(var(--info)); border-color: rgb(var(--info) / 0.28); }
+
+.entry-mark {
+  display: inline-flex; align-items: center; gap: 0.7rem;
+  padding: 0.4rem 0.4rem 0.4rem 0.4rem;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background-color var(--duration-base) var(--ease-standard);
+}
+.entry-mark:hover { background: rgb(var(--line) / 0.06); }
+
+/* --- splash --------------------------------------------------------------- */
+.splash-bg {
+  position: relative;
+  min-height: 100vh;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 1.5rem;
+  overflow: hidden;
+  background: rgb(var(--bg));
+  transition: opacity 700ms var(--ease-standard);
+}
+.splash-bg .grid-backdrop { position: absolute; inset: 0; opacity: 0.7; mask-image: radial-gradient(120% 85% at 50% 0%, #000 35%, transparent 78%); -webkit-mask-image: radial-gradient(120% 85% at 50% 0%, #000 35%, transparent 78%); }
+.splash-bg .glow-orb { z-index: 0; }
+.splash-inner { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; gap: 1.5rem; text-align: center; }
+
+.splash-monogram {
+  position: relative;
+  display: grid; place-items: center;
+  width: 84px; height: 84px;
+  border-radius: 24px;
+  font-family: var(--font-display);
+  font-size: 1.5rem; font-weight: 600; letter-spacing: 0.06em;
+  color: #fff;
+  background-image:
+    radial-gradient(120% 90% at 20% 0%, rgb(124 156 255 / 0.5) 0%, transparent 62%),
+    linear-gradient(150deg, #223056 0%, #131d38 52%, #0b1224 100%);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.15), 0 24px 60px -30px rgb(124 156 255 / 0.6);
+  animation: bf-splash-in 900ms var(--ease-expo) both;
+}
+@keyframes bf-splash-in { from { opacity: 0; transform: translateY(10px) scale(0.96); } to { opacity: 1; transform: none; } }
+
+.splash-word { font-family: var(--font-display); font-size: clamp(2rem, 6vw, 3rem); font-weight: 500; letter-spacing: -0.02em; color: rgb(var(--fg)); line-height: 1.05; }
+.splash-strap { font-family: var(--font-mono); font-size: clamp(0.62rem, 1.4vw, 0.78rem); text-transform: uppercase; letter-spacing: var(--tracking-label); color: rgb(var(--accent)); }
+.splash-sub { color: rgb(var(--fg-muted)); font-size: var(--text-body); max-width: 30rem; line-height: 1.7; }
+
+/* The progress rule under the splash word: motion only while it is real. */
+.splash-progress { width: min(260px, 60vw); height: 2px; border-radius: 2px; background: rgb(var(--line) / 0.14); overflow: hidden; }
+.splash-progress span { display: block; height: 100%; width: 0%; background: linear-gradient(90deg, rgb(var(--accent)), rgb(var(--teal))); transition: width 240ms linear; }
+
+/* --- welcome -------------------------------------------------------------- */
+.welcome-head { text-align: center; margin-bottom: 1.75rem; }
+.welcome-head h1 { margin-top: 1rem; }
+.welcome-head .lede { margin-top: 0.85rem; }
+
+/* --- three-page introduction ---------------------------------------------- */
+.intro-dots { display: flex; align-items: center; gap: 0.45rem; }
+.intro-dot { width: 0.45rem; height: 0.45rem; border-radius: 9999px; background: rgb(var(--line) / 0.25); border: 0; padding: 0; cursor: pointer; transition: background-color var(--duration-base) var(--ease-standard), width var(--duration-base) var(--ease-standard); }
+.intro-dot[aria-current='true'] { width: 1.5rem; background: rgb(var(--accent)); }
+
+.intro-step { min-height: 16rem; }
+.intro-step h2 { margin-top: 0.75rem; }
+.intro-step p { margin-top: 0.85rem; color: rgb(var(--fg-muted)); line-height: 1.75; }
+
+.intro-list { margin-top: 1.35rem; display: flex; flex-direction: column; gap: 0.85rem; }
+.intro-list li { display: flex; gap: 0.75rem; align-items: flex-start; }
+.intro-list .intro-num {
+  display: grid; place-items: center; flex: none;
+  width: 1.65rem; height: 1.65rem; border-radius: var(--radius-sm);
+  border: 1px solid rgb(var(--line) / var(--line-alpha));
+  background: rgb(var(--accent) / var(--accent-soft));
+  color: rgb(var(--accent-bright));
+  font-family: var(--font-mono); font-size: 0.62rem;
+}
+.intro-list .intro-title { color: rgb(var(--fg)); font-size: 0.92rem; font-weight: 500; }
+.intro-list .intro-desc { color: rgb(var(--fg-muted)); font-size: 0.86rem; line-height: 1.6; margin-top: 0.15rem; }
+
+.intro-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.75rem; margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid rgb(var(--line) / var(--line-alpha)); }
+.intro-actions .btn-group { display: flex; gap: 0.6rem; }
+
+/* --- comparison table on the introduction's "what changes" page ----------- */
+.compare { display: grid; gap: 1px; overflow: hidden; border-radius: var(--radius-lg); background: rgb(var(--line) / var(--line-alpha)); border: 1px solid rgb(var(--line) / var(--line-alpha)); grid-template-columns: 1fr; }
+@media (min-width: 768px) { .compare { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.compare > div { background: rgb(var(--bg-elevated) / 0.6); padding: 1.1rem 1.2rem; }
+.compare h3 { font-family: var(--font-mono); font-size: 0.65rem; text-transform: uppercase; letter-spacing: var(--tracking-label); margin-bottom: 0.7rem; }
+.compare li { display: flex; gap: 0.5rem; align-items: flex-start; color: rgb(var(--fg-muted)); font-size: 0.86rem; line-height: 1.6; }
+.compare li + li { margin-top: 0.45rem; }
+.compare .bad h3 { color: rgb(var(--danger-ink)); }
+.compare .good h3 { color: rgb(var(--success-ink)); }
+.compare .mark { flex: none; margin-top: 0.15rem; }
+.compare .bad .mark { color: rgb(var(--danger)); }
+.compare .good .mark { color: rgb(var(--teal)); }
+
+/* --- sign-in / sign-up ---------------------------------------------------- */
+.auth-narrow { width: 100%; max-width: 30rem; }
+.auth-wide { width: 100%; max-width: 54rem; }
+.auth-title { margin-top: 1.25rem; }
+.auth-lede { margin-top: 0.7rem; color: rgb(var(--fg-muted)); font-size: 0.95rem; line-height: 1.7; }
+.auth-switch { margin-top: 1.5rem; padding-top: 1.25rem; border-top: 1px solid rgb(var(--line) / var(--line-alpha)); display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; font-size: 0.86rem; color: rgb(var(--fg-subtle)); }
+
+.alert {
+  display: flex; gap: 0.6rem; align-items: flex-start;
+  padding: 0.7rem 0.85rem; border-radius: var(--radius-md);
+  font-size: 0.85rem; line-height: 1.55;
+  border: 1px solid transparent;
+}
+.alert-error { background: rgb(var(--danger) / var(--danger-bg)); border-color: rgb(var(--danger) / 0.4); color: rgb(var(--danger-ink)); }
+.alert-info { background: rgb(var(--info) / var(--info-bg)); border-color: rgb(var(--info) / 0.35); color: rgb(var(--info-ink)); }
+.alert-success { background: rgb(var(--success) / var(--success-bg)); border-color: rgb(var(--success) / 0.35); color: rgb(var(--success-ink)); }
+.alert-warning { background: rgb(var(--warning) / var(--warning-bg)); border-color: rgb(var(--warning) / 0.35); color: rgb(var(--warning-ink)); }
+.alert-err { margin-bottom: 1rem; }

@@ -143,6 +143,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  const fetchPreferences = useCallback(async () => {
+    try {
+      const res = await api.auth.getPreferences()
+      setPreferences(res.preferences)
+    } catch {
+      setPreferences({})
+    }
+  }, [])
+
+  const updatePreferences = useCallback(async (newPrefs: Record<string, unknown>) => {
+    try {
+      await api.auth.updatePreferences(newPrefs)
+      setPreferences(newPrefs)
+      pushToast('Preferences updated', 'success')
+    } catch {
+      pushToast('Failed to update preferences', 'error')
+    }
+  }, [pushToast])
+
   // The session is a server-resolved HttpOnly cookie. We ask the server who we
   // are; we never decide it here and never keep a copy of any credential.
   useEffect(() => {
@@ -152,10 +171,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const res = await api.auth.session()
         if (!alive) return
         setAuth(res.account ? authFromAccount(res.account, res.canManagePlatform) : ANONYMOUS)
+        // Preferences are account-scoped. Only ask for them when there is an
+        // account to ask about — otherwise the signed-out entry screens would
+        // only ever collect 401s.
+        if (res.account) void fetchPreferences()
       } catch {
         if (alive) setAuth(ANONYMOUS)
       }
-      void loadSecurityQuestions(); void fetchPreferences()
+      void loadSecurityQuestions()
     }
     void initAuth()
     return () => { alive = false }
@@ -195,6 +218,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         securityAnswer: fields.securityAnswer,
       })
       setAuth(authFromAccount(res.account, res.canManagePlatform))
+      // The session now exists, so the account-scoped preferences that were
+      // deliberately not requested while signed out can be loaded.
+      void fetchPreferences()
       pushToast('Welcome back', 'success')
       return { ok: true, reason: '' }
     } catch (err) {
@@ -206,7 +232,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     } finally {
       setLoading(false)
     }
-  }, [pushToast])
+  }, [pushToast, fetchPreferences])
 
   const logout = useCallback(async () => {
     try {
@@ -371,25 +397,6 @@ const startStageRun = useCallback((projectId: string, stage: string) => setRunni
       const message = err instanceof Error ? err.message : 'Approval failed'
       pushToast(message, 'error')
       throw err
-    }
-  }, [pushToast])
-
-  const fetchPreferences = useCallback(async () => {
-    try {
-      const res = await api.auth.getPreferences()
-      setPreferences(res.preferences)
-    } catch {
-      setPreferences({})
-    }
-  }, [])
-
-  const updatePreferences = useCallback(async (newPrefs: Record<string, unknown>) => {
-    try {
-      await api.auth.updatePreferences(newPrefs)
-      setPreferences(newPrefs)
-      pushToast('Preferences updated', 'success')
-    } catch {
-      pushToast('Failed to update preferences', 'error')
     }
   }, [pushToast])
 

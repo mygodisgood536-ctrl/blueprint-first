@@ -265,7 +265,7 @@ function ArtifactsTab({ project }: { project: any }) {
         mine.length === 0 ? <p className="text-sm muted">No recorded artifacts for this project yet — run lifecycle stages to produce them.</p> : (
           <div style={{ display: 'grid', gap: 6 }}>
             {mine.slice(0, 12).map((a: any) => (
-              <a key={a.id} href={`#/artifacts/${a.id}`} className="row-between text-sm" style={{ padding: '8px 12px', borderRadius: 8, background: 'var(--surface-2)' }}>
+              <a key={a.id} href={`#/artifacts/${a.id}`} className="row-between text-sm" style={{ padding: '8px 12px', borderRadius: 8, background: 'rgb(var(--surface-2))' }}>
                 <span><strong>{a.title || a.id}</strong> <span className="id-mono text-xs muted">{a.id}</span></span>
                 <span className="badge badge-gray">{a.type}</span>
               </a>
@@ -288,7 +288,7 @@ function EvidenceTab({ project }: { project: any }) {
             <p className="text-sm mb-8"><strong>{entries.length}</strong> evidence record(s) engine-wide.</p>
             <div style={{ display: 'grid', gap: 6 }}>
               {entries.slice(0, 8).map((e: any) => (
-                <div key={e.id} className="row-between text-sm" style={{ padding: '8px 12px', borderRadius: 8, background: 'var(--surface-2)' }}>
+                <div key={e.id} className="row-between text-sm" style={{ padding: '8px 12px', borderRadius: 8, background: 'rgb(var(--surface-2))' }}>
                   <span className="id-mono text-xs">{e.id}</span><span>{e.summary}</span>
                 </div>
               ))}

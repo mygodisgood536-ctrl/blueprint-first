@@ -49,7 +49,7 @@ export function Testing() {
       <div className="grid grid-4 mb-16">
         <div className="stat-card"><div className="stat-label">Total</div><div className="stat-value">{tests.length}</div></div>
         <div className="stat-card"><div className="stat-label">Passed</div><div className="stat-value" style={{ color: 'var(--green-600)' }}>{passed}</div></div>
-        <div className="stat-card"><div className="stat-label">Failed</div><div className="stat-value" style={{ color: failed ? 'var(--danger)' : 'var(--ink-700)' }}>{failed}</div></div>
+        <div className="stat-card"><div className="stat-label">Failed</div><div className="stat-value" style={{ color: failed ? 'rgb(var(--danger))' : 'var(--ink-700)' }}>{failed}</div></div>
         <div className="stat-card"><div className="stat-label">Queued / running</div><div className="stat-value">{queued + runCount}</div></div>
       </div>
 
@@ -75,8 +75,8 @@ export function Testing() {
       )}
 
       {failed > 0 && (
-        <div className="card" style={{ borderColor: 'var(--danger)', background: 'var(--danger-soft)' }}>
-          <h4 className="mb-8" style={{ color: 'var(--danger)' }}>Blocking failures</h4>
+        <div className="card" style={{ borderColor: 'rgb(var(--danger))', background: 'var(--danger-soft)' }}>
+          <h4 className="mb-8" style={{ color: 'rgb(var(--danger))' }}>Blocking failures</h4>
           <p className="text-sm muted mb-12">Failed tests block downstream stages until resolved. Re-run all to re-attempt them.</p>
           {failedArr.map((t: any) => (
             <div key={t.id} className="text-sm"><strong>{t.name}</strong> - {t.scope}</div>
@@ -117,7 +117,7 @@ export function Operations() {
 
       <div className="grid grid-2 mb-16">
         {passed ? (
-          <div className="card" style={{ borderColor: 'var(--green-200)', background: 'linear-gradient(135deg, var(--green-50), var(--surface))' }}>
+          <div className="card" style={{ borderColor: 'var(--green-200)', background: 'linear-gradient(135deg, var(--green-50), rgb(var(--surface)))' }}>
             <div className="row" style={{ gap: 10 }}><span style={{ width: 14, height: 14, borderRadius: '50%', background: 'var(--green-500)', flexShrink: 0 }} />
               <div><strong style={{ color: 'var(--green-700)' }}>Deployment passed</strong>
                 <div className="text-sm muted">{executedCount} unit(s) deployed · manifest <span className="mono">{deploy.manifestId ?? '—'}</span> · evidence <span className="mono">{deploy.evidenceId ?? '—'}</span></div>
@@ -126,7 +126,7 @@ export function Operations() {
             </div>
           </div>
         ) : (
-          <div className="card" style={{ borderColor: 'var(--warning)', background: 'var(--warning-soft)' }}>
+          <div className="card" style={{ borderColor: 'rgb(var(--warning))', background: 'var(--warning-soft)' }}>
             <div className="text-sm"><strong>No operations run recorded yet</strong> — the deployment stage has not executed for this environment.</div>
           </div>
         )}
@@ -135,7 +135,7 @@ export function Operations() {
           {!obs ? (
             <p className="text-sm muted">No telemetry observation has been recorded yet.</p>
           ) : obs.breach ? (
-            <p className="text-sm" style={{ color: 'var(--danger)' }}><strong>Runtime breach observed:</strong> {obs.metric} on <span className="mono">{obs.baseId}</span> is outside its threshold.</p>
+            <p className="text-sm" style={{ color: 'rgb(var(--danger))' }}><strong>Runtime breach observed:</strong> {obs.metric} on <span className="mono">{obs.baseId}</span> is outside its threshold.</p>
           ) : (
             <p className="text-sm muted">Latest {obs.metric} observation on <span className="mono">{obs.baseId}</span> is within range.</p>
           )}
@@ -201,10 +201,10 @@ export function Continuous() {
 
   return (
     <Shell breadcrumb={[{ label: 'Continuous engineering' }]}>
-      <div className="page-head"><div><h1>Continuous engineering</h1><p className="subtitle">NEXORA re-engineers the running system against its blueprint - honestly and with evidence.</p></div>
+      <div className="page-head"><div><h1>Continuous engineering</h1><p className="subtitle">Blueprint-First re-engineers the running system against its blueprint - honestly and with evidence.</p></div>
         <span className="badge badge-yellow">{pendingCount} drift item(s)</span></div>
 
-      <div className="card mb-16" style={{ borderColor: 'var(--warning)', background: 'var(--warning-soft)' }}>
+      <div className="card mb-16" style={{ borderColor: 'rgb(var(--warning))', background: 'var(--warning-soft)' }}>
         <h4 className="mb-8" style={{ color: 'var(--ink-800)' }}>Continuous run</h4>
         {run.materialization ? (
           <p className="text-sm">{run.rationale || 'Continuous engineering materialized a certified run.'}</p>
@@ -277,11 +277,11 @@ export function Certification() {
         <span className={`badge ${sum.certified === true ? 'badge-green' : sum.certified === false ? 'badge-red' : 'badge-gray'}`}>{sum.certified === true ? 'Certified' : sum.certified === false ? 'Denied' : 'Pending'}</span>
       </div>
       {isCertifiable ? (
-        <div className="card mb-16" style={{ borderColor: 'var(--green-200)', background: 'linear-gradient(135deg, var(--green-50), var(--surface))' }}>
+        <div className="card mb-16" style={{ borderColor: 'var(--green-200)', background: 'linear-gradient(135deg, var(--green-50), rgb(var(--surface)))' }}>
           <div className="row" style={{ gap: 10 }}><span style={{ fontSize: 20 }}>&#10003;</span><div><strong style={{ color: 'var(--green-700)' }}>Certified</strong><div className="text-sm muted">All {dims.length} required verification dimensions passed. Certification recorded.</div></div></div>
         </div>
       ) : (
-        <div className="card mb-16" style={{ borderColor: 'var(--warning)', background: 'var(--warning-soft)' }}>
+        <div className="card mb-16" style={{ borderColor: 'rgb(var(--warning))', background: 'var(--warning-soft)' }}>
           <div className="row" style={{ gap: 10 }}><span style={{ fontSize: 20 }}>&#9888;</span><div><strong>Not yet certified</strong><div className="text-sm muted">{failed.length} dimension(s) failed, {inconclusive.length} inconclusive. The certification authority requires every required dimension to be present.</div></div></div>
         </div>
       )}
@@ -295,7 +295,7 @@ export function Certification() {
           {REQUIRED_DIMENSIONS.map(d => {
             const dim = dims.find((x: any) => x.id === d)
             return (
-              <div key={d} className="row-between text-sm" style={{ padding: '8px 12px', borderRadius: 8, background: 'var(--surface-2)' }}>
+              <div key={d} className="row-between text-sm" style={{ padding: '8px 12px', borderRadius: 8, background: 'rgb(var(--surface-2))' }}>
                 <div className="row" style={{ gap: 10 }}>
                   <span className="id-mono">{d}</span>
                   {dim?.finding && <span className="text-xs muted">{dim.finding}</span>}
@@ -307,8 +307,8 @@ export function Certification() {
         </div>
       </div>
     {!isCertifiable && (
-      <div className="card" style={{ borderColor: 'var(--danger)', background: 'var(--danger-soft)' }}>
-        <h4 className="mb-12" style={{ color: 'var(--danger)' }}>Missing dimensions</h4>
+      <div className="card" style={{ borderColor: 'rgb(var(--danger))', background: 'var(--danger-soft)' }}>
+        <h4 className="mb-12" style={{ color: 'rgb(var(--danger))' }}>Missing dimensions</h4>
         {missingDims.length === 0 ? <p className="text-sm muted">All dimensions present.</p> : (
           <div style={{ display: 'grid', gap: 8 }}>
             {missingDims.map((d: any) => (

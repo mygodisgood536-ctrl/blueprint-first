@@ -14,7 +14,7 @@ import { SecretField } from './components/SecretField'
 
 const FREE_CATS = ['free_no_api_key', 'free_api_key_required', 'free_oauth', 'local']
 
-/* � V.5 APPROVED FREE-MODELS CONTRACT (Decision D6).
+/* § V.5 APPROVED FREE-MODELS CONTRACT (Decision D6).
    The approved set is fixed and ordered. Availability is NOT hard-coded: an
    entry is selectable only when the live, OpenCode-backed catalogue actually
    offers it right now, and an entry the catalogue does not offer is shown as

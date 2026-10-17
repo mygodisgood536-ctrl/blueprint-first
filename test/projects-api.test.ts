@@ -1,5 +1,5 @@
 ﻿/**
- * Stage 6 â€” Projects: list API, create, workspace detail, settings (PUT),
+ * Stage 6 — Projects: list API, create, workspace detail, settings (PUT),
  * stage run, isolation, delete, and iteration persistence.
  *
  * Exercises the REAL web layer over a durable artifact store + a real
@@ -128,7 +128,7 @@ async function j(url: string, method: string, path: string, cookie?: string | nu
 async function newUser(url: string, username: string): Promise<string> {
   return await signupEnrolledCookie(url, username);
 }
-describe('Stage 6 â€” Projects API (real registry + durable store)', () => {
+describe('Stage 6 — Projects API (real registry + durable store)', () => {
   it('full lifecycle: create, list, detail, update, run stage, delete', async () => {
     const dataDir = await tempDataDir();
     const s = await buildProjectServer(dataDir);
@@ -160,7 +160,7 @@ describe('Stage 6 â€” Projects API (real registry + durable store)', () => 
       assert.ok(Array.isArray(stages) && stages.length > 0);
       assert.ok(stages.some((st) => st.stageId === 'discovery' && st.inScope === true));
 
-      // Update title + mode (PUT â€” the 6.4 backend gap fix)
+      // Update title + mode (PUT — the 6.4 backend gap fix)
       const upd = await j(s.url, 'PUT', `/api/projects/${id}`, cookie, {
         title: 'Alpha Renamed',
         mode: 'design-plus-code',

@@ -202,7 +202,7 @@ function SupervisionTab({ supervisor, jobs }: { supervisor: ApiSupervisorSnapsho
         ) : (
           <div style={{ display: 'grid', gap: 8 }}>
             {supervisor.active.map((r) => (
-              <div key={r.jobId} className="row-between text-sm" style={{ padding: '8px 12px', borderRadius: 8, background: 'var(--surface-2)' }}>
+              <div key={r.jobId} className="row-between text-sm" style={{ padding: '8px 12px', borderRadius: 8, background: 'rgb(var(--surface-2))' }}>
                 <span><span className="mono" style={{ marginRight: 8 }}>{r.jobId}</span>{r.stageKey}</span>
                 <span className="row" style={{ gap: 8 }}>
                   <Status status={r.status} />
@@ -220,7 +220,7 @@ function SupervisionTab({ supervisor, jobs }: { supervisor: ApiSupervisorSnapsho
         ) : (
           <div style={{ display: 'grid', gap: 6 }}>
             {jobs.map((j) => (
-              <div key={j.id} className="row-between text-sm" style={{ padding: '8px 12px', borderRadius: 8, background: 'var(--surface-2)' }}>
+              <div key={j.id} className="row-between text-sm" style={{ padding: '8px 12px', borderRadius: 8, background: 'rgb(var(--surface-2))' }}>
                 <span><span className="mono" style={{ marginRight: 8 }}>{j.id}</span>{j.label}</span>
                 <span className="row" style={{ gap: 8 }}><Status status={j.status} /></span>
               </div>
@@ -371,7 +371,7 @@ function EnvironmentsTab({
           <h4 className="mb-12">Project execution environments</h4>
           <div style={{ display: 'grid', gap: 8 }}>
             {envs.map((e) => (
-              <div key={e.id} className="row-between text-sm" style={{ padding: '8px 12px', borderRadius: 8, background: 'var(--surface-2)' }}>
+              <div key={e.id} className="row-between text-sm" style={{ padding: '8px 12px', borderRadius: 8, background: 'rgb(var(--surface-2))' }}>
                 <button
                   className="btn btn-ghost btn-sm"
                   onClick={() => setSelected(e.id)}
@@ -507,7 +507,7 @@ function GraphTab({ graph, projectId }: { graph: ApiExecutionGraph | null; proje
           <h4 className="mb-12">Current blockages</h4>
           <div style={{ display: 'grid', gap: 6 }}>
             {graph.blockages.map((b) => (
-              <div key={b.id} className="text-sm" style={{ padding: '8px 12px', borderRadius: 8, background: 'var(--surface-2)' }}>
+              <div key={b.id} className="text-sm" style={{ padding: '8px 12px', borderRadius: 8, background: 'rgb(var(--surface-2))' }}>
                 <span className="mono text-xs" style={{ marginRight: 8 }}>{b.id}</span>{b.reason}
               </div>
             ))}
@@ -521,7 +521,7 @@ function GraphTab({ graph, projectId }: { graph: ApiExecutionGraph | null; proje
         ) : (
           <div style={{ display: 'grid', gap: 6 }}>
             {graph.nodes.map((n) => (
-              <div key={n.id} className="row-between text-sm" style={{ padding: '8px 12px', borderRadius: 8, background: 'var(--surface-2)' }}>
+              <div key={n.id} className="row-between text-sm" style={{ padding: '8px 12px', borderRadius: 8, background: 'rgb(var(--surface-2))' }}>
                 <span><span className="mono text-xs" style={{ marginRight: 8 }}>{n.id}</span>{n.label}</span>
                 <span className="row" style={{ gap: 8 }}>
                   {n.ai ? <span className="text-xs muted mono">{n.ai.providerId}/{n.ai.modelId}</span> : null}
@@ -569,7 +569,7 @@ function EventsTab({ events, live, projectId }: { events: ApiExecutionEvent[]; l
             .slice()
             .reverse()
             .map((e) => (
-              <div key={`${e.id}-${e.seq}`} className="text-xs" style={{ padding: '6px 10px', borderRadius: 6, background: 'var(--surface-2)' }}>
+              <div key={`${e.id}-${e.seq}`} className="text-xs" style={{ padding: '6px 10px', borderRadius: 6, background: 'rgb(var(--surface-2))' }}>
                 <span className="mono muted" style={{ marginRight: 8 }}>#{e.seq}</span>
                 <span className="mono">{e.type}</span>
                 {e.jobId ? <span className="muted"> · {e.jobId}</span> : null}

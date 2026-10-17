@@ -1,19 +1,52 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>NEXORA — The Blueprint AI Software Engineering Platform (Oluwasegunfunmi Project)</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#070A12" />
+    <title>Blueprint-First — AI Software Engineering Platform</title>
+    <meta
+      name="description"
+      content="Blueprint-First is an AI software engineering platform. It discovers, designs, builds, verifies, certifies and operates software through a governed, evidence-backed engineering organization."
+    />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap"
       rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=JetBrains+Mono:wght@400;500&display=swap"
     />
+    <script>
+      // Applied before first paint so a returning user never sees a flash of the
+      // wrong theme. Dark is the product's default identity; light is available
+      // and is used when the visitor has explicitly chosen it. An absent or
+      // unreadable preference must not depend on the operating system, because
+      // the approved visual identity is the dark one.
+      (function () {
+        var resolved = 'dark';
+        try {
+          var stored = window.localStorage.getItem('bf.theme');
+          if (stored === 'light') resolved = 'light';
+          else if (stored === 'dark') resolved = 'dark';
+          else if (stored === 'system') {
+            resolved = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
+          }
+        } catch (e) {
+          /* keep the default */
+        }
+        document.documentElement.setAttribute('data-theme', resolved);
+        document.documentElement.style.colorScheme = resolved;
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>
+    <noscript>
+      <div style="padding: 2rem; font-family: system-ui, sans-serif; color: #f3f6fc; background: #070a12">
+        Blueprint-First needs JavaScript enabled to run.
+      </div>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

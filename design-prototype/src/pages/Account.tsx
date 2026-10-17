@@ -109,7 +109,7 @@ export function Preferences() {
       <div style={{ display: 'grid', gap: 16 }}>
         <div>
           <h2 style={{ fontSize: 18, marginBottom: 4 }}>Preferences</h2>
-          <p className="muted" style={{ fontSize: 13 }}>Personalize your NEXORA workspace. Preferences are stored per account.</p>
+          <p className="muted" style={{ fontSize: 13 }}>Personalize your Blueprint-First workspace. Preferences are stored per account.</p>
         </div>
         <div className="card">
           <h4 className="mb-12">Notifications</h4>
@@ -125,7 +125,7 @@ export function Preferences() {
               </div>
               <div className="row-between">
                 <div><div>Theme</div><div className="muted text-sm">Choose light, dark, or system theme.</div></div>
-                <select value={(preferences.theme as string) || 'system'} onChange={e => toggle('theme', e.target.value)} disabled={saving} style={{ padding: '6px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'var(--surface)', color: 'var(--text-primary)' }}>
+                <select value={(preferences.theme as string) || 'system'} onChange={e => toggle('theme', e.target.value)} disabled={saving} style={{ padding: '6px 10px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)', background: 'rgb(var(--surface))', color: 'var(--text-primary)' }}>
                   <option value="system">System</option>
                   <option value="light">Light</option>
                   <option value="dark">Dark</option>

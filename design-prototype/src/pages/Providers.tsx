@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Shell } from '../shell'
 import { api, ApiModelRow, ApiProviderDescriptor, ApiSelectionState } from '../api'
 import { Status } from '../ui'
@@ -7,7 +7,7 @@ import { SecretField } from '../components/SecretField'
 
 const CAT_ICON: Record<string, string> = {
   free_no_api_key: 'ðŸŒ', free_api_key_required: 'ðŸ”‘', free_oauth: 'ðŸ‘¤',
-  platform_provided: 'âš™ï¸', paid: 'ðŸ’³', local: 'ðŸ–¥ï¸',
+  platform_provided: 'âš™️', paid: 'ðŸ’³', local: 'ðŸ–¥️',
 }
 
 const FREE_CATS = ['free_no_api_key', 'free_api_key_required', 'free_oauth', 'local']
@@ -36,7 +36,7 @@ function ModelRow({
           <div style={{ fontWeight: 600 }}>{m.name}<span className="text-xs muted" style={{ marginLeft: 8 }}>{m.providerName || m.providerId}</span></div>
           <div className="text-xs muted">{m.modelId}</div>
           <div className="text-xs muted">
-            ctx {Math.round((m.contextLength || 0) / 1000)}K Â· out {Math.round((m.maxOutputTokens || 0) / 1000)}K Â·{' '}
+            ctx {Math.round((m.contextLength || 0) / 1000)}K · out {Math.round((m.maxOutputTokens || 0) / 1000)}K ·{' '}
             {m.inputCostPer1M === null && m.outputCostPer1M === null
               ? 'Free'
               : `$${(m.inputCostPer1M ?? 0).toFixed(2)} in / $${(m.outputCostPer1M ?? 0).toFixed(2)} out /1M`}
@@ -84,10 +84,10 @@ function CredentialStep({ provider, onState }: { provider: ApiProviderDescriptor
           <SecretField value={key} onChange={setKey} placeholder="sk-..." data-testid="provider-api-key" />
         </div>
         <button className="btn btn-primary btn-sm" onClick={add} disabled={!key.trim() || busy}>
-          {busy ? <><span className="spin" /> Verifyingâ€¦</> : 'Add & verify'}
+          {busy ? <><span className="spin" /> Verifying…</> : 'Add & verify'}
         </button>
       </div>
-      {note && <div className="text-xs mt-8" style={{ color: note.startsWith('Key added') ? 'var(--green-700)' : 'var(--danger)' }}>{note}</div>}
+      {note && <div className="text-xs mt-8" style={{ color: note.startsWith('Key added') ? 'var(--green-700)' : 'rgb(var(--danger))' }}>{note}</div>}
     </div>
   )
 }
@@ -150,9 +150,9 @@ function ProviderCard({
     try {
       const res = await api.models.select(m.providerId, m.modelId)
       if (res.selection.connectionVerified) {
-        setVerifyNote(`Selected ${m.modelId} â€” connection verified.`)
+        setVerifyNote(`Selected ${m.modelId} — connection verified.`)
       } else {
-        setVerifyNote(`${m.modelId}: ${res.selection.status.replace(/_/g, ' ')} â€” listed but no verified access yet.`)
+        setVerifyNote(`${m.modelId}: ${res.selection.status.replace(/_/g, ' ')} — listed but no verified access yet.`)
       }
       onState()
     } catch (err) {
@@ -165,9 +165,9 @@ function ProviderCard({
   const stateText = provider.connectionVerified
     ? 'Connection verified'
     : provider.configured
-      ? 'Configured â€” verify to make models selectable'
+      ? 'Configured — verify to make models selectable'
       : provider.authMethod === 'none'
-        ? 'No credential needed â€” verify connection to continue'
+        ? 'No credential needed — verify connection to continue'
         : 'Not configured'
 
   return (
@@ -188,7 +188,7 @@ function ProviderCard({
         <div className="row" style={{ gap: 8 }}>
           {provider.configured && (
             <button className="btn btn-ghost btn-sm" onClick={verify} disabled={verifying} aria-label={`Verify connection to ${provider.providerId}`}>
-              {verifying ? <><span className="spin" /> Verifyingâ€¦</> : 'Verify connection'}
+              {verifying ? <><span className="spin" /> Verifying…</> : 'Verify connection'}
             </button>
           )}
           {expanded
@@ -209,17 +209,17 @@ function ProviderCard({
           <div className="row" style={{ gap: 8 }}>
             <input
               value={q}
-              placeholder={`Search ${provider.providerId} modelsâ€¦`}
+              placeholder={`Search ${provider.providerId} models…`}
               onChange={(e) => setQ(e.target.value)}
               onKeyDown={(e) => { if (e.key === 'Enter') loadModels() }}
               style={{ flex: 1, padding: '9px 12px', border: '1px solid var(--border)', borderRadius: 8, outline: 'none' }}
             />
             <button className="btn btn-ghost btn-sm" onClick={loadModels} disabled={loading}>Search</button>
           </div>
-          {error && <div className="text-sm mt-8" style={{ color: 'var(--danger)' }}>{error}</div>}
+          {error && <div className="text-sm mt-8" style={{ color: 'rgb(var(--danger))' }}>{error}</div>}
           {loading ? <div className="loading-screen" style={{ padding: 20 }}><div className="spinner" /></div> : (
             <div style={{ display: 'grid', gap: 8, marginTop: 10 }}>
-              {models.length === 0 && !error && <div className="empty-state" style={{ padding: '24px 0' }}><div className="empty-icon">ðŸ«™</div><h3>No models listed</h3><p>No models matched for this provider{provider.authMethod === 'none' ? ' â€” is a local runtime serving models?' : ''}.</p></div>}
+              {models.length === 0 && !error && <div className="empty-state" style={{ padding: '24px 0' }}><div className="empty-icon">ðŸ«™</div><h3>No models listed</h3><p>No models matched for this provider{provider.authMethod === 'none' ? ' — is a local runtime serving models?' : ''}.</p></div>}
               {models.map((m) => (
                 <ModelRow
                   key={`${m.providerId}:${m.modelId}`}
@@ -230,7 +230,7 @@ function ProviderCard({
               ))}
               {total > MODEL_PAGE && (
                 <div className="text-xs muted" style={{ textAlign: 'center', padding: 4 }}>
-                  Showing {models.length} of {total} â€” refine the search to narrow results.
+                  Showing {models.length} of {total} — refine the search to narrow results.
                 </div>
               )}
             </div>
@@ -243,7 +243,7 @@ function ProviderCard({
 }
 
 export function Providers() {
-  return <ProviderHub title="Providers & models" subtitle="Which provider is NEXORA using, and is it working? Configure, verify, then select a model to run stages for real." breadcrumb={[{ label: 'Providers' }]} />
+  return <ProviderHub title="Providers & models" subtitle="Which provider is Blueprint-First using, and is it working? Configure, verify, then select a model to run stages for real." breadcrumb={[{ label: 'Providers' }]} />
 }
 
 /** Fast Provider Hub: provider cards from /api/providers (small), models loaded
@@ -309,7 +309,7 @@ export function ProviderHub({
       const res = await api.models.select(m.providerId, m.modelId)
       setSelection(res.selection)
       if (res.selection.connectionVerified) setError('')
-      else setError(`${m.modelId}: ${res.selection.status.replace(/_/g, ' ')} â€” listed but not verified accessible.`)
+      else setError(`${m.modelId}: ${res.selection.status.replace(/_/g, ' ')} — listed but not verified accessible.`)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Selection failed')
     }
@@ -345,13 +345,13 @@ export function ProviderHub({
         : (
           <div className="warn-card card mb-16">
             <div className="text-sm" style={{ fontWeight: 600 }}>No verified model selected</div>
-            <div className="text-xs muted" style={{ marginTop: 2 }}>Until you verify a provider connection and select a model, project stages are recorded as checkpoints only â€” no provider request is made.</div>
+            <div className="text-xs muted" style={{ marginTop: 2 }}>Until you verify a provider connection and select a model, project stages are recorded as checkpoints only — no provider request is made.</div>
           </div>
         )}
 
       <div className="card mb-16" style={{ padding: '14px 16px' }}>
         <input
-          placeholder="Search provider or model against the real catalogueâ€¦"
+          placeholder="Search provider or model against the real catalogue…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           style={{ width: '100%', padding: '10px 14px', border: '1px solid var(--border)', borderRadius: 10, outline: 'none' }}
@@ -370,7 +370,7 @@ export function ProviderHub({
       {liveSearch.trim() ? (
         <div style={{ display: 'grid', gap: 8 }}>
           {searchResults === null ? null : searchResults.length === 0 && !searching ? (
-            <div className="empty-state"><div className="empty-icon">ðŸ”Ž</div><h3>No matches</h3><p>No {tier === 'free' ? 'free/local' : 'subscription'} models matched â€œ{liveSearch}â€ in the catalogue.</p></div>
+            <div className="empty-state"><div className="empty-icon">ðŸ”Ž</div><h3>No matches</h3><p>No {tier === 'free' ? 'free/local' : 'subscription'} models matched “{liveSearch}” in the catalogue.</p></div>
           ) : searchResults.map((m) => (
             <ModelRow
               key={`${m.providerId}:${m.modelId}`}
@@ -379,7 +379,7 @@ export function ProviderHub({
               onSelect={() => doSelect(m)}
             />
           ))}
-          {searchTotal > MODEL_PAGE && <div className="text-xs muted" style={{ textAlign: 'center', padding: 4 }}>Showing {searchResults?.length ?? 0} of {searchTotal} â€” refine your search.</div>}
+          {searchTotal > MODEL_PAGE && <div className="text-xs muted" style={{ textAlign: 'center', padding: 4 }}>Showing {searchResults?.length ?? 0} of {searchTotal} — refine your search.</div>}
         </div>
       ) : (
         <>

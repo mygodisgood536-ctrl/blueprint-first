@@ -116,17 +116,17 @@ export function Dashboard() {
 
       {/* First-time dashboard: no projects yet */}
       {projects.length === 0 && (
-        <div className="card mb-16" style={{ borderColor: 'var(--green-200)', background: 'linear-gradient(135deg, var(--green-50), var(--surface))', textAlign: 'center', padding: '40px 20px' }}>
+        <div className="card mb-16" style={{ borderColor: 'var(--green-200)', background: 'linear-gradient(135deg, var(--green-50), rgb(var(--surface)))', textAlign: 'center', padding: '40px 20px' }}>
           <div style={{ fontSize: 34, marginBottom: 10 }}>&#128736;</div>
           <h3>Create your first project</h3>
-          <p className="text-sm muted" style={{ maxWidth: 440, margin: '8px auto 16px' }}>A project is the unit of work. Describe what you want to build and NEXORA turns it into a blueprint you can review before engineering begins. Provider &amp; model are chosen inside each project's workspace composer.</p>
+          <p className="text-sm muted" style={{ maxWidth: 440, margin: '8px auto 16px' }}>A project is the unit of work. Describe what you want to build and Blueprint-First turns it into a blueprint you can review before engineering begins. Provider &amp; model are chosen inside each project's workspace composer.</p>
           <a href="#/projects/new" className="btn btn-primary">Create your first project</a>
         </div>
       )}
 
       {/* What needs your attention */}
       {attentionItems.length > 0 && (
-        <div className="card mb-16" style={{ borderColor: 'var(--green-200)', background: 'linear-gradient(135deg, var(--green-50), var(--surface))' }}>
+        <div className="card mb-16" style={{ borderColor: 'var(--green-200)', background: 'linear-gradient(135deg, var(--green-50), rgb(var(--surface)))' }}>
           <h3 className="mb-12"><I name="alert" size={16} /> What needs your attention</h3>
           <div style={{ display: 'grid', gap: 8 }}>
             {attentionItems.map((item) => (

@@ -106,7 +106,7 @@ export function DependencyMap() {
                   <g key={n.id} onMouseEnter={() => setHover(n.id)} onMouseLeave={() => setHover(null)}
                     onClick={() => { window.location.hash = `#/artifacts/${n.id}` }} style={{ cursor: 'pointer' }}>
                     <circle cx={p.x} cy={p.y} r={r} fill="var(--green-600)" opacity={hover && !active ? 0.35 : 1}
-                      stroke={active ? 'var(--green-700)' : 'var(--bg)'} strokeWidth={active ? 3 : 2} />
+                      stroke={active ? 'var(--green-700)' : 'rgb(var(--bg))'} strokeWidth={active ? 3 : 2} />
                     <text x={p.x} y={p.y - r - 8} textAnchor="middle" fontSize={11} fontWeight={600} fill="var(--ink-900)">{n.title.length > 18 ? n.title.slice(0, 17) + '…' : n.title}</text>
                     <text x={p.x} y={p.y + 4} textAnchor="middle" fontSize={9} fill="#fff" fontFamily="var(--mono)">{n.evidence} evidence</text>
                   </g>

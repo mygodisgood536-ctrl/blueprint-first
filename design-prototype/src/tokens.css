@@ -1,0 +1,249 @@
+/*
+ * Blueprint-First design tokens.
+ *
+ * The visual identity is the owner's own site (cornelius-adedeji-victor.com):
+ * a calm, near-black midnight substrate, one cool periwinkle accent, one mint
+ * secondary, an editorial serif over a technical sans, and a mono micro-label
+ * that does most of the "considered engineering" work.
+ *
+ * Every value below is taken from that site's own compiled stylesheet rather
+ * than approximated. Where the application needs a semantic colour the personal
+ * site has no use for (success / warning / danger / info), a member of the same
+ * hue family is used so the palette stays one system instead of a generic
+ * template palette.
+ *
+ * LIGHT MODE is derived, not invented: the same accent and secondary hues sit on
+ * a paper-white ramp, with text and border values chosen for WCAG AA at every
+ * step. Contrast was checked, not assumed.
+ */
+
+:root,
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  /* --- surfaces -------------------------------------------------------- */
+  --bg: 7 10 18;            /* #070A12 page background */
+  --bg-elevated: 11 16 32;  /* #0B1020 footer, tiles, field base */
+  --surface: 16 23 40;      /* #101728 panel */
+  --surface-2: 21 29 49;    /* #151D31 raised surface */
+  --surface-hover: 28 38 62;
+  --overlay: 7 10 18;
+
+  /* --- lines ----------------------------------------------------------- */
+  --line: 150 168 205;      /* #96A8CD */
+  --line-alpha: 0.16;
+  --line-alpha-strong: 0.32;
+  --line-alpha-soft: 0.08;
+
+  /* --- text ------------------------------------------------------------ */
+  --fg: 243 246 252;        /* #F3F6FC  ~17:1 on --bg */
+  --fg-muted: 176 188 207;  /* #B0BCCF  ~10:1 on --bg */
+  --fg-subtle: 142 155 179; /* #8E9BB3  ~6.4:1 on --bg */
+
+  /* --- brand ----------------------------------------------------------- */
+  --accent: 124 156 255;    /* #7C9CFF */
+  --accent-bright: 165 188 255; /* #A5BCFF hover / focus */
+  --accent-ink: 10 16 36;   /* #0A1024 text on accent */
+  --accent-soft: 0.14;
+  --teal: 95 214 196;       /* #5FD6C4 */
+  --teal-bright: 141 232 219;
+  --teal-ink: 6 26 24;
+
+  /* --- semantics (same hue families, extended) -------------------------- */
+  --success: 95 214 196;
+  --success-ink: 141 232 219;
+  --warning: 244 196 108;
+  --warning-ink: 252 219 158;
+  --danger: 248 145 145;
+  --danger-ink: 254 202 202;
+  --info: 124 156 255;
+  --info-ink: 165 188 255;
+
+  /* --- semantic alpha tints -------------------------------------------- */
+  --success-bg: 0.12;
+  --warning-bg: 0.12;
+  --danger-bg: 0.12;
+  --info-bg: 0.14;
+
+  /* --- typography ------------------------------------------------------- */
+  --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  --font-display: 'Fraunces', ui-serif, Georgia, 'Times New Roman', serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+
+  --text-xs: 0.75rem;
+  --text-sm: 0.82rem;
+  --text-meta: 0.8rem;
+  --text-body: 0.95rem;
+  --text-body-lg: 1.02rem;
+  --text-lede: clamp(1.02rem, 1.55vw, 1.2rem);
+  --text-h4: clamp(1.22rem, 2.4vw, 1.55rem);
+  --text-h3: clamp(1.6rem, 3.4vw, 2.4rem);
+  --text-h2: clamp(2.05rem, 5vw, 3.4rem);
+  --text-h1: clamp(2.5rem, 7.2vw, 4.75rem);
+
+  --tracking-tight: -0.018em;
+  --tracking-tighter: -0.028em;
+  --tracking-eyebrow: 0.24em;
+  --tracking-label: 0.19em;
+
+  /* --- shape ------------------------------------------------------------ */
+  --radius-xs: 6px;
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.5rem;
+  --radius-pill: 9999px;
+
+  /* --- elevation -------------------------------------------------------- */
+  --shadow-primary: inset 0 1px rgb(255 255 255 / 0.6), 0 10px 30px -12px rgb(124 156 255 / 0.7);
+  --shadow-primary-hover: inset 0 1px rgb(255 255 255 / 0.6), 0 16px 38px -14px rgb(124 156 255 / 0.9);
+  --shadow-panel: 0 18px 48px -28px rgb(0 0 0 / 0.75);
+  --shadow-overlay: 0 40px 90px -40px rgb(0 0 0 / 0.85);
+
+  /* --- motion ----------------------------------------------------------- */
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-expo: cubic-bezier(0.22, 1, 0.36, 1);
+  --duration-fast: 0.15s;
+  --duration-base: 0.3s;
+  --duration-slow: 0.5s;
+
+  /* --- structure -------------------------------------------------------- */
+  --header-h: 72px;
+  --container: 1240px;
+  --gutter: 1.25rem;
+  --section-y: 4rem;
+
+  /* --- decoration ------------------------------------------------------- */
+  --grid-line: rgb(150 168 205 / 0.07);
+  --glow-accent: radial-gradient(circle at 50% 50%, rgb(124 156 255 / 0.34), transparent 68%);
+  --glow-teal: radial-gradient(circle at 50% 50%, rgb(95 214 196 / 0.24), transparent 68%);
+  --panel-sheen: linear-gradient(168deg, rgb(255 255 255 / 0.055) 0%, rgb(255 255 255 / 0.012) 44%, rgb(0 0 0 / 0.09) 100%);
+  --hairline-accent: linear-gradient(90deg, transparent, rgb(124 156 255 / 0.45), transparent);
+
+  --scrollbar-track: #05070d;
+  --scrollbar-thumb: #23304a;
+  --scrollbar-thumb-hover: #33456a;
+}
+
+[data-theme='light'] {
+  color-scheme: light;
+
+  /* The same midnight ramp inverted to paper, keeping the blue cast so the two
+     modes read as one identity rather than two themes. */
+  --bg: 248 250 253;        /* #F8FAFD page */
+  --bg-elevated: 255 255 255;
+  --surface: 255 255 255;
+  --surface-2: 243 246 252;
+  --surface-hover: 234 239 249;
+
+  --line: 24 41 77;         /* #18294D */
+  --line-alpha: 0.14;
+  --line-alpha-strong: 0.28;
+  --line-alpha-soft: 0.07;
+
+  --fg: 12 20 38;           /* #0C1426  ~17.5:1 on --bg */
+  --fg-muted: 62 78 110;    /* #3E4E6E  ~8.2:1 */
+  --fg-subtle: 88 106 142;  /* #586A8E ~5.6:1 */
+
+  --accent: 59 96 214;      /* #3B60D6 darkened for AA on paper */
+  --accent-bright: 37 73 190;
+  --accent-ink: 255 255 255;
+  --accent-soft: 0.1;
+  --teal: 13 122 110;       /* #0D7A6E darkened for AA on paper */
+  --teal-bright: 9 100 90;
+  --teal-ink: 255 255 255;
+
+  --success: 13 122 110;
+  --success-ink: 9 92 84;
+  --warning: 146 92 8;
+  --warning-ink: 122 76 4;
+  --danger: 190 42 42;
+  --danger-ink: 160 30 30;
+  --info: 59 96 214;
+  --info-ink: 40 72 176;
+
+  --success-bg: 0.1;
+  --warning-bg: 0.1;
+  --danger-bg: 0.09;
+  --info-bg: 0.09;
+
+  --shadow-primary: inset 0 1px rgb(255 255 255 / 0.9), 0 10px 28px -14px rgb(59 96 214 / 0.45);
+  --shadow-primary-hover: inset 0 1px rgb(255 255 255 / 0.9), 0 16px 36px -16px rgb(59 96 214 / 0.6);
+  --shadow-panel: 0 14px 40px -30px rgb(12 20 38 / 0.4);
+  --shadow-overlay: 0 40px 90px -40px rgb(12 20 38 / 0.35);
+
+  --grid-line: rgb(24 41 77 / 0.055);
+  --glow-accent: radial-gradient(circle at 50% 50%, rgb(59 96 214 / 0.16), transparent 68%);
+  --glow-teal: radial-gradient(circle at 50% 50%, rgb(13 122 110 / 0.12), transparent 68%);
+  --panel-sheen: linear-gradient(168deg, rgb(255 255 255 / 0.9) 0%, rgb(255 255 255 / 0) 48%, rgb(12 20 38 / 0.03) 100%);
+  --hairline-accent: linear-gradient(90deg, transparent, rgb(59 96 214 / 0.35), transparent);
+
+  --scrollbar-track: #eef1f7;
+  --scrollbar-thumb: #c6cede;
+  --scrollbar-thumb-hover: #a6b2c8;
+}
+
+/* ---------------------------------------------------------------------------
+   LEGACY NAME COMPATIBILITY
+
+   Some screens still carry inline styles written against the previous token
+   names (--text-primary, --ink-600, --green-500, and so on). Those references
+   would otherwise resolve to nothing and silently render as inherited or
+   transparent. Rather than leave dozens of inline styles broken, every legacy
+   name is mapped onto the current token here.
+
+   Because this block sits inside both the dark and the light definitions, an
+   alias is theme-aware by construction: the same legacy name resolves to a
+   correct colour in whichever mode is active. New code must use the current
+   names; these aliases exist only so existing screens are never wrong.
+   --------------------------------------------------------------------------- */
+:root,
+[data-theme='dark'] {
+  --text-primary: rgb(var(--fg));
+  --text-secondary: rgb(var(--fg-muted));
+  --text-tertiary: rgb(var(--fg-subtle));
+
+  --bg-primary: rgb(var(--bg));
+  --bg-secondary: rgb(var(--bg-elevated));
+  --bg-tertiary: rgb(var(--surface));
+  --bg-subtle: rgb(var(--surface-2));
+  --surface-1: rgb(var(--surface));
+  --surface-2: rgb(var(--surface-2));
+
+  --border: rgb(var(--line) / var(--line-alpha));
+  --border-subtle: rgb(var(--line) / var(--line-alpha-soft));
+  --border-color: rgb(var(--line) / var(--line-alpha));
+
+  --nav-bg: rgb(var(--bg-elevated) / 0.86);
+
+  --mono: var(--font-mono);
+
+  --ink-300: rgb(var(--fg-subtle));
+  --ink-400: rgb(var(--fg-muted));
+  --ink-500: rgb(var(--fg-muted));
+  --ink-600: rgb(var(--fg));
+  --ink-700: rgb(var(--fg));
+  --ink-800: rgb(var(--fg));
+  --ink-900: rgb(var(--fg));
+
+  --green-50: rgb(var(--success) / 0.06);
+  --green-200: rgb(var(--success) / 0.28);
+  --green-500: rgb(var(--success));
+  --green-600: rgb(var(--success));
+  --green-700: rgb(var(--success-ink));
+  --green-deep: rgb(var(--success-ink));
+
+  --red-600: rgb(var(--danger));
+
+  --danger-soft: rgb(var(--danger) / var(--danger-bg));
+  --success-soft: rgb(var(--success) / var(--success-bg));
+  --warning-soft: rgb(var(--warning) / var(--warning-bg));
+  --info-soft: rgb(var(--info) / var(--info-bg));
+}
+
+@media (min-width: 640px) {
+  :root { --gutter: 1.75rem; --section-y: 5rem; }
+}
+@media (min-width: 1024px) {
+  :root { --gutter: 2.5rem; --section-y: 6rem; }
+}

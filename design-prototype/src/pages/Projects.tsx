@@ -60,18 +60,18 @@ export function ProjectsList() {
       <div className="card mb-16">
         <div className="row" style={{ gap: 12, flexWrap: 'wrap' }}>
           <div className="grow" style={{ minWidth: 200 }}><input placeholder="Search by name or ID…" value={search} onChange={e => setSearch(e.target.value)} style={{ width: '100%', padding: '10px 14px', border: '1px solid var(--border)', borderRadius: 10, outline: 'none' }} /></div>
-          <select value={modeFilter} onChange={e => setModeFilter(e.target.value)} style={{ padding: '10px 14px', border: '1px solid var(--border)', borderRadius: 10, background: 'var(--surface)' }}>
+          <select value={modeFilter} onChange={e => setModeFilter(e.target.value)} style={{ padding: '10px 14px', border: '1px solid var(--border)', borderRadius: 10, background: 'rgb(var(--surface))' }}>
             <option value="all">All modes</option>
             <option value="design-only">Design only</option>
             <option value="design-plus-code">Design + code</option>
             <option value="full-product">Full product</option>
           </select>
-          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ padding: '10px 14px', border: '1px solid var(--border)', borderRadius: 10, background: 'var(--surface)' }}>
+          <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ padding: '10px 14px', border: '1px solid var(--border)', borderRadius: 10, background: 'rgb(var(--surface))' }}>
             <option value="all">All statuses</option>
             <option value="active">Active</option>
             <option value="paused">Paused</option>
           </select>
-          <select value={sortKey} onChange={e => setSortKey(e.target.value as any)} style={{ padding: '10px 14px', border: '1px solid var(--border)', borderRadius: 10, background: 'var(--surface)' }} aria-label="Sort projects">
+          <select value={sortKey} onChange={e => setSortKey(e.target.value as any)} style={{ padding: '10px 14px', border: '1px solid var(--border)', borderRadius: 10, background: 'rgb(var(--surface))' }} aria-label="Sort projects">
             <option value="activity">Sort: last activity</option>
             <option value="created">Sort: created</option>
             <option value="name">Sort: name</option>

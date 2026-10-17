@@ -23,16 +23,32 @@ import { useStore } from '../store'
 function AuthShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="auth-bg">
-      <div style={{ width: '100%', maxWidth: 440 }}>
-        <div style={{ textAlign: 'center', marginBottom: 22 }}>
-          <a href="#/welcome" style={{ display: 'inline-flex', alignItems: 'center', gap: 10 }}>
-            <img src="/favicon.svg" alt="" width={32} height={32} />
-            <span style={{ fontSize: 20, fontWeight: 800, color: 'var(--text-primary)' }}>NEXORA</span>
+      <div className="grid-backdrop" aria-hidden="true" />
+      <div
+        className="glow-orb"
+        aria-hidden="true"
+        style={{ width: 416, height: 416, left: -144, top: -96, background: 'var(--glow-accent)', opacity: 0.5 }}
+      />
+      <div
+        className="glow-orb"
+        aria-hidden="true"
+        style={{ width: 320, height: 320, right: -112, bottom: -88, background: 'var(--glow-teal)', opacity: 0.4 }}
+      />
+      <div className="auth-card-wrap">
+        <div className="auth-brand">
+          <a href="#/welcome" className="entry-mark" aria-label="Blueprint-First home">
+            <span className="splash-monogram" style={{ width: 40, height: 40, fontSize: 13 }} aria-hidden="true">
+              BF
+            </span>
+            <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
+              <span className="brand-name">Blueprint-First</span>
+              <span className="brand-sub">AI software engineering</span>
+            </span>
           </a>
         </div>
-        <div className="auth-card card">{children}</div>
-        <p className="center text-sm mt-16" style={{ color: 'var(--text-tertiary)' }}>
-          © 2026 NEXORA
+        <div className="auth-card">{children}</div>
+        <p className="center text-sm dim" style={{ marginTop: '1.5rem' }}>
+          &copy; 2026 Blueprint-First
         </p>
       </div>
     </div>
@@ -40,13 +56,9 @@ function AuthShell({ children }: { children: React.ReactNode }) {
 }
 
 function Notice({ tone, children }: { tone: 'error' | 'info' | 'success'; children: React.ReactNode }) {
-  const bg = tone === 'error' ? 'var(--danger-soft)' : tone === 'success' ? 'var(--success-soft)' : 'var(--info-soft)'
-  const fg = tone === 'error' ? 'var(--danger)' : tone === 'success' ? 'var(--success)' : 'var(--info)'
+  const cls = tone === 'error' ? 'notice-error' : tone === 'success' ? 'notice-success' : 'notice-info'
   return (
-    <div
-      role={tone === 'error' ? 'alert' : 'status'}
-      style={{ padding: '10px 14px', borderRadius: 8, background: bg, color: fg, fontSize: 13, marginBottom: 16 }}
-    >
+    <div role={tone === 'error' ? 'alert' : 'status'} className={`notice ${cls}`}>
       {children}
     </div>
   )
@@ -149,8 +161,8 @@ export function SignIn() {
   }
 return (
     <AuthShell>
-      <h1 style={{ fontSize: 21, marginBottom: 4 }}>{creating ? 'Create your account' : 'Sign in'}</h1>
-      <p className="muted text-sm mb-20">
+      <h1 className="auth-title">{creating ? 'Create your account' : 'Sign in'}</h1>
+      <p className="muted text-sm auth-sub">
         {creating
           ? 'Five details create your account. You will sign in with your Gmail and security question.'
           : 'Sign in with your Gmail address and the security question you chose.'}
@@ -225,8 +237,8 @@ return (
         </button>
       </form>
       <div className="divider" />
-      <p className="center text-sm muted" style={{ marginBottom: 0 }}>
-        {creating ? 'Already have an account? ' : 'New to NEXORA? '}
+      <p className="auth-switch text-sm muted">
+        {creating ? 'Already have an account? ' : 'New to Blueprint-First? '}
         <a
           href="#/signin"
           onClick={(e) => {

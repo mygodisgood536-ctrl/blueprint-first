@@ -83,7 +83,7 @@ export function DocumentsList() {
           className="drop-zone"
           style={{
             padding: '28px 16px', borderRadius: 12, border: `2px dashed ${dragOver ? 'var(--green-500)' : 'var(--border)'}`,
-            background: dragOver ? 'var(--green-50)' : 'var(--surface-2)', color: dragOver ? 'var(--green-700)' : 'var(--ink-700)',
+            background: dragOver ? 'var(--green-50)' : 'rgb(var(--surface-2))', color: dragOver ? 'var(--green-700)' : 'var(--ink-700)',
             textAlign: 'center', cursor: 'pointer', fontWeight: 600, fontSize: 14,
           }}
           onClick={() => document.getElementById('doc-file-input')?.click()}
@@ -206,12 +206,12 @@ export function DocumentDetail({ id }: { id: string }) {
             <div className="row-between text-sm"><span className="muted">Created</span>{doc.createdAt ? fmtDate(doc.createdAt) : '—'}</div>
             <div className="text-sm"><span className="muted">Content hash</span>
               <div className="row" style={{ gap: 8, marginTop: 4 }}>
-                <code className="id-mono text-xs" style={{ background: 'var(--surface-2)', padding: '6px 10px', borderRadius: 6, wordBreak: 'break-all', flex: 1 }}>{doc.contentHash || 'not recorded'}</code>
+                <code className="id-mono text-xs" style={{ background: 'rgb(var(--surface-2))', padding: '6px 10px', borderRadius: 6, wordBreak: 'break-all', flex: 1 }}>{doc.contentHash || 'not recorded'}</code>
                 {doc.contentHash && <button className="btn btn-ghost btn-sm" onClick={copyHash}>Copy</button>}
               </div></div>
           </div></div>
         <div className="card"><h4 className="mb-12">Preview</h4>
-          <div style={{ padding: 16, background: 'var(--bg)', borderRadius: 10, fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--ink-600)', minHeight: 120, maxHeight: 220, overflow: 'auto', whiteSpace: 'pre-wrap' }}>
+          <div style={{ padding: 16, background: 'rgb(var(--bg))', borderRadius: 10, fontFamily: 'var(--mono)', fontSize: 12, color: 'var(--ink-600)', minHeight: 120, maxHeight: 220, overflow: 'auto', whiteSpace: 'pre-wrap' }}>
             {preview}{charCount > 600 ? '\n…' : ''}
           </div>
           {charCount > 600 && <p className="text-xs muted mt-8">Bounded preview — the first 600 characters. The full content is below.</p>}
@@ -227,8 +227,8 @@ export function DocumentDetail({ id }: { id: string }) {
           </div>
         </div>
         {doc.content ? (
-          <div style={{ display: 'flex', background: 'var(--bg)', borderRadius: 10, maxHeight: 420, overflow: 'auto', fontFamily: 'var(--mono)', fontSize: 12 }}>
-            <div aria-hidden="true" style={{ padding: '12px 8px', textAlign: 'right', color: 'var(--ink-400)', userSelect: 'none', borderRight: '1px solid var(--border)', position: 'sticky', left: 0, background: 'var(--bg)' }}>
+          <div style={{ display: 'flex', background: 'rgb(var(--bg))', borderRadius: 10, maxHeight: 420, overflow: 'auto', fontFamily: 'var(--mono)', fontSize: 12 }}>
+            <div aria-hidden="true" style={{ padding: '12px 8px', textAlign: 'right', color: 'var(--ink-400)', userSelect: 'none', borderRight: '1px solid var(--border)', position: 'sticky', left: 0, background: 'rgb(var(--bg))' }}>
               {lines.map((_: string, i: number) => <div key={i} style={{ lineHeight: '20px' }}>{i + 1}</div>)}
             </div>
             <pre style={{ margin: 0, padding: 12, color: 'var(--ink-700)', whiteSpace: 'pre-wrap', wordBreak: 'break-word', flex: 1 }}>

@@ -41,7 +41,7 @@ export function EvidenceList() {
       <div className="page-head"><div><h1>Evidence</h1><p className="subtitle">The reasoning, decisions, and verifications behind every artifact.</p></div></div>
       <div className="card mb-16">
         <div className="row" style={{ gap: 12 }}>
-          <select value={kindFilter} onChange={e => setKindFilter(e.target.value)} style={{ padding: '10px 14px', border: '1px solid var(--border)', borderRadius: 10, background: 'var(--surface)' }}>
+          <select value={kindFilter} onChange={e => setKindFilter(e.target.value)} style={{ padding: '10px 14px', border: '1px solid var(--border)', borderRadius: 10, background: 'rgb(var(--surface))' }}>
             {KINDS.map(k => <option key={k} value={k}>{k === 'all' ? 'All kinds' : k}</option>)}
           </select>
         </div>
@@ -113,7 +113,7 @@ export function EvidenceDetail({ id }: { id: string }) {
           ) : (
             <div style={{ display: 'grid', gap: 8 }}>
               {linkedArtifacts.map((a: any) => (
-                <div key={a.id} className="row-between text-sm" style={{ padding: '8px 10px', borderRadius: 8, background: 'var(--surface-2)' }}>
+                <div key={a.id} className="row-between text-sm" style={{ padding: '8px 10px', borderRadius: 8, background: 'rgb(var(--surface-2))' }}>
                   <div><a href={`#/artifacts/${a.id}`} className="id-mono">{a.id}</a> <a href={`#/artifacts/${a.id}`}>{a.title}</a></div>
                   <span className="badge badge-gray">{a.type}</span>
                 </div>

@@ -69,7 +69,7 @@ export function CreateProject() {
         <p className="muted mb-24">Define your project identity, choose a mode, describe your vision, and optionally attach reference documents.</p>
 
         <form onSubmit={submit}>
-          {error && <div style={{ padding: '10px 14px', borderRadius: 8, background: 'var(--danger-soft)', color: 'var(--danger)', fontSize: 13, marginBottom: 16 }}>{error}</div>}
+          {error && <div style={{ padding: '10px 14px', borderRadius: 8, background: 'var(--danger-soft)', color: 'rgb(var(--danger))', fontSize: 13, marginBottom: 16 }}>{error}</div>}
 
           <div className="card mb-16">
             <h3 className="mb-12">Project name</h3>
@@ -104,7 +104,7 @@ export function CreateProject() {
             <div className={`text-sm ${classification === 'document' ? 'green' : 'muted'}`}>
               {charCount === 0 ? 'Start typing to see classification.' : classification === 'document' ? '✓ This vision will be stored as a document reference (8,000+ characters).' : 'This will stay inline as a message (under 8,000 characters).'}
             </div>
-            {charCount >= 7500 && charCount <= 8000 && <div className="text-xs" style={{ color: 'var(--warning)', marginTop: 4 }}>You are near the 8,000-character limit. Above it the vision is stored as a document reference.</div>}
+            {charCount >= 7500 && charCount <= 8000 && <div className="text-xs" style={{ color: 'rgb(var(--warning))', marginTop: 4 }}>You are near the 8,000-character limit. Above it the vision is stored as a document reference.</div>}
           </div>
 
           {/* Reference attachments */}
@@ -115,7 +115,7 @@ export function CreateProject() {
             {attached.length > 0 && (
               <div style={{ display: 'grid', gap: 8, marginBottom: 12 }}>
                 {attached.map(a => (
-                  <div key={a.id} className="row-between text-sm" style={{ padding: '8px 12px', borderRadius: 8, background: 'var(--surface-2)' }}>
+                  <div key={a.id} className="row-between text-sm" style={{ padding: '8px 12px', borderRadius: 8, background: 'rgb(var(--surface-2))' }}>
                     <span><a href={`#/documents/${a.id}`} style={{ fontWeight: 600 }}>{a.title}</a> <span className="id-mono text-xs muted">{a.id}</span></span>
                     <button type="button" className="btn btn-ghost btn-sm" onClick={() => setAttached(prev => prev.filter(x => x.id !== a.id))}><I name="close" size={14} /> Remove</button>
                   </div>
@@ -126,7 +126,7 @@ export function CreateProject() {
             <div className="row" style={{ gap: 12, flexWrap: 'wrap' }}>
               <div
                 className="drop-zone"
-                style={{ flex: 1, minWidth: 240, padding: '18px 14px', borderRadius: 12, border: '2px dashed var(--border)', background: 'var(--surface-2)', textAlign: 'center', cursor: 'pointer', fontWeight: 600, fontSize: 13, color: 'var(--ink-700)' }}
+                style={{ flex: 1, minWidth: 240, padding: '18px 14px', borderRadius: 12, border: '2px dashed var(--border)', background: 'rgb(var(--surface-2))', textAlign: 'center', cursor: 'pointer', fontWeight: 600, fontSize: 13, color: 'var(--ink-700)' }}
                 onClick={() => document.getElementById('create-doc-file')?.click()}
                 onDragOver={e => e.preventDefault()}
                 onDrop={e => { e.preventDefault(); handleFiles(e.dataTransfer?.files) }}
