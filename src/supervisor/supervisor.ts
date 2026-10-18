@@ -201,6 +201,18 @@ export class ExecutionSupervisor implements RunSupervisor {
     });
   }
 
+  /**
+   * Where this supervisor's durable trace is actually written, or null when the
+   * live backend is PostgreSQL and therefore has no file.
+   *
+   * The configured traceFilePath names a durable *slot*; the backend owns the
+   * on-disk name. Reporting the real location keeps an operator (and a
+   * diagnostic) from looking for a file that was never created.
+   */
+  traceLocation(): string | null {
+    return this.trace.location();
+  }
+
   /** Loads any prior control-plane trace and records the boot honestly. */
   async init(): Promise<void> {
     await ensureDir(dirname(this.traceFilePath));

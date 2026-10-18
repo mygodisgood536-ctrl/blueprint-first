@@ -379,11 +379,21 @@ describe('ExecutionSupervisor', () => {
       fakeNow += 10_000;
       await supervisorA.tick();
     }
-    // checkpoint trail became durable (stride 5 reached)
-    const parsed = JSON.parse(await readFile(traceFilePath, 'utf8')) as {
-      value: { bootId: string; nextCheckpointSeq: number; checkpoints: { jobId: string; status: string }[] };
+    // checkpoint trail became durable (stride 5 reached). The trace is written by
+    // the storage backend, which owns the on-disk name, so ask the supervisor
+    // where it actually landed rather than assuming the configured path is a
+    // file path. It used to be `supervision.json`; it is now whatever the live
+    // backend names, and the earlier assumption made this test fail.
+    const traceFile = supervisorA.traceLocation();
+    assert.ok(traceFile !== null, 'the filesystem backend must report a trace location');
+    // Two envelopes are layered on disk and they are not redundant: the backend
+    // owns file freshness (`savedAt`) and the store owns schema versioning. The
+    // store's `load()` unwraps the backend layer, so a raw read has to unwrap
+    // both to reach the supervision trace itself.
+    const parsed = JSON.parse(await readFile(traceFile, 'utf8')) as {
+      value: { value: { bootId: string; nextCheckpointSeq: number; checkpoints: { jobId: string; status: string }[] } };
     };
-    const raw = parsed.value;
+    const raw = parsed.value.value;
     assert.equal(raw.bootId, bootIdA);
     assert.ok(raw.nextCheckpointSeq >= 1, 'a stride checkpoint advanced the sequence');
     assert.ok(raw.checkpoints.length === 1, 'one durable per-run checkpoint set');

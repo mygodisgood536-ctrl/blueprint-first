@@ -59,6 +59,16 @@ export class JsonFileStore<T> {
   }
 
   /**
+   * Where this slot is actually persisted right now, or null when the live
+   * backend has no file. The path handed to the constructor names a slot, not a
+   * file: the backend owns the on-disk naming, so this is the only reliable way
+   * to learn it.
+   */
+  location(): string | null {
+    return this.backend().location?.(this.slot) ?? null;
+  }
+
+  /**
    * Loads the persisted value, or null when the slot has never been written
    * (first run). Throws STORE_CORRUPT on a schema-version mismatch so an
    * incompatible store is never silently ignored.

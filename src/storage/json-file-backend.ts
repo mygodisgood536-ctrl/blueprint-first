@@ -33,6 +33,8 @@ export function jsonFileBackend(rootDir: string): DurableSnapshotBackend {
 
   return {
     kind: 'json-file' satisfies StorageKind,
+    /** The filesystem backend is the one backend with a real location. */
+    location: (key: string): string | null => pathFor(key),
 
     async read(key: string): Promise<unknown | null> {
       const file = pathFor(key);

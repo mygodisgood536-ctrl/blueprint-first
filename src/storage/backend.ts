@@ -29,6 +29,16 @@ export type StorageKind = 'json-file' | 'postgresql';
  */
 export interface DurableSnapshotBackend {
   readonly kind: StorageKind;
+  /**
+   * Where this slot is actually persisted, for backends that have a location on
+   * disk, or null for a backend that has no file (PostgreSQL).
+   *
+   * The filesystem backend owns the file naming, so a caller cannot derive the
+   * path it passed in: it names a *slot*, not a file. Anything that needs to
+   * inspect the durable artefact directly - an operator, a diagnostic, a test -
+   * asks the backend rather than assuming.
+   */
+  location?(key: string): string | null;
   /** Reads the current value, or null when the slot has never been written. */
   read(key: string): Promise<unknown | null>;
   /** Atomically replaces the slot's value. */

@@ -143,7 +143,10 @@ describe('model selector API (honest surface, per-user isolation)', () => {
     const { url, close } = await buildTestServer();
     try {
       const alice = await signupEnrolledCookie(url, 'alice');
-      const missing = await fetch(`${url}/api/models/anthropic/nope`);
+      // Authenticated, but the model does not exist: 404.
+      const missing = await fetch(`${url}/api/models/anthropic/nope`, {
+        headers: { cookie: alice },
+      });
       assert.equal(missing.status, 404);
       const noUser = await fetch(`${url}/api/models/selection`);
       assert.equal(noUser.status, 401);
@@ -152,6 +155,24 @@ describe('model selector API (honest surface, per-user isolation)', () => {
       });
       assert.equal(withUser.status, 200);
       assert.equal(((await withUser.json()) as { selection: unknown }).selection, null);
+    } finally {
+      await close();
+    }
+  });
+
+  it('does not let an anonymous caller probe which models exist', async () => {
+    // A 404 versus a 200 is an existence oracle, so authentication is enforced
+    // before the catalogue is consulted. Both a real and a fake model must look
+    // identical to a caller with no session.
+    const { url, close } = await buildTestServer();
+    try {
+      const anonymous = await fetch(`${url}/api/models/anthropic/nope`);
+      const real = await fetch(`${url}/api/models/anthropic/claude-sonnet-4-5`);
+      assert.equal(anonymous.status, 401, 'an anonymous request must not reach the catalogue');
+      assert.equal(real.status, 401, 'an anonymous request must not reach the catalogue');
+      const anonymousBody = (await anonymous.json()) as { error: string };
+      const realBody = (await real.json()) as { error: string };
+      assert.equal(anonymousBody.error, realBody.error, 'the two must be indistinguishable');
     } finally {
       await close();
     }
