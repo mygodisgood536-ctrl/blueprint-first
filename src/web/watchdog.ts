@@ -58,15 +58,20 @@ function collect(events: readonly { type: string; payload?: Record<string, unkno
  * Runs one complete supervision pass and reports what it actually did.
  * Safe to call concurrently with request traffic: the supervisor serializes its
  * own scans and the durable trace is the single source of truth.
+ *
+ * `history` is a *function*, not a snapshot. The events a pass emits are
+ * appended to the log during the pass itself, so a caller that passed a copy
+ * taken beforehand would make every report say "no job required intervention"
+ * even when the watchdog had just recovered one. Baseline before, read after.
  */
 export async function runWatchdogTick(
   supervisor: WatchdogTarget,
-  events: readonly { type: string; payload?: Record<string, unknown> }[],
+  history: () => Promise<readonly { type: string; payload?: Record<string, unknown> }[]>,
 ): Promise<WatchdogResult> {
-  const before = events.length;
+  const baseline = (await history()).length;
   await supervisor.tick();
   const beat = await supervisor.watchdogCheck();
-  const emitted = events.slice(before);
+  const emitted = (await history()).slice(baseline);
   return {
     ok: true,
     ranAt: new Date().toISOString(),

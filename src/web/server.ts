@@ -386,6 +386,9 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
       architecture: '3.3',
       environment: process.env['BF_ENV'] ?? 'development',
       persistence: boot?.persistenceKind ?? 'json-file',
+      // Honest readiness, not just a name: a build that is not backed by the
+      // managed database must never present itself as fully durable.
+      persistenceReady: boot?.persistence.ok ?? false,
       time: new Date().toISOString(),
     });
   });
@@ -1159,6 +1162,13 @@ res.json({ project: projectSummary(updated) });
     boundRouter.complete = (request) =>
       verifiedRouter.router.complete({ ...request, model: request.model ?? verifiedRouter.modelId });
     const runServices: CoreServices = { ...services, router: boundRouter };
+    // The Build stage reads the REAL execution environment back so its -IMPL
+    // artifacts correspond to code that actually exists. A READY environment is
+    // attached when the project has one; otherwise the stage fails closed rather
+    // than describing an implementation that was never written.
+    const buildEnvRecord = await environments.findReady(user, project.id);
+    const buildEnvironment =
+      buildEnvRecord === null ? undefined : await environments.workspace(buildEnvRecord.id, user);
     let outcome;
     try {
       outcome = await execution.runStage({
@@ -1167,6 +1177,9 @@ res.json({ project: projectSummary(updated) });
         services: runServices,
         actor: { kind: 'human', id: user },
         ...(instruction ? { instruction } : {}),
+        ...(buildEnvironment !== null && buildEnvironment !== undefined
+          ? { executionEnvironment: { ...buildEnvironment, environmentId: buildEnvRecord!.id } }
+          : {}),
       });
     } catch (error) {
       jsonError(res, 400, error);
@@ -4311,11 +4324,15 @@ execution.router.complete({
   // process runs on a timer, so the three-minute no-progress timeout, crash
   // recovery and network-restore resume keep working with nobody browsing. The
   // durable supervision trace, not this process, is the source of truth.
-  app.post('/api/internal/watchdog', async (req, res) => {
+  const scheduledWatchdog = async (req: express.Request, res: express.Response): Promise<void> => {
     // Authorization: Vercel's scheduler sends `Authorization: Bearer $CRON_SECRET`
     // automatically when CRON_SECRET is set, which keeps the secret out of the
     // repository entirely. A dedicated BF_WATCHDOG_SECRET and an explicit
     // `x-watchdog-secret` header are also honoured for other schedulers.
+    //
+    // The platform's cron issues GET, never POST, so both methods are served by
+    // this one handler; a watchdog reachable only by the verb a scheduler does
+    // not use is a watchdog that never runs.
     const configured = [
       process.env['CRON_SECRET']?.trim(),
       process.env['BF_WATCHDOG_SECRET']?.trim(),
@@ -4337,10 +4354,9 @@ execution.router.complete({
       return;
     }
     try {
-      const history = await bus.history();
       const report = await runWatchdogTick(
         { tick: () => supervisor.tick(), watchdogCheck: () => supervisor.watchdogCheck() },
-        history.slice(0),
+        () => bus.history(),
       );
       await result.evidence.append({
         kind: 'inspection',
@@ -4348,11 +4364,13 @@ execution.router.complete({
         artifactIds: [],
         producer: { kind: 'system', id: 'scheduled-watchdog' },
       });
-      res.json({ ...report, eventsConsidered: history.length });
+      res.json(report);
     } catch (error) {
       res.status(500).json({ error: 'watchdog-failed', detail: (error as Error).message });
     }
-  });
+  };
+  app.get('/api/internal/watchdog', scheduledWatchdog);
+  app.post('/api/internal/watchdog', scheduledWatchdog);
 
   /* An unknown API path is a client error, and must be answered as JSON like every
    other API response rather than as Express's default HTML page. */

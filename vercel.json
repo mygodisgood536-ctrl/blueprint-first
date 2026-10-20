@@ -1,7 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
-  "installCommand": "npm ci",
+  "installCommand": "npm ci && npm --prefix design-prototype ci",
   "buildCommand": "npm run build:frontend",
   "functions": {
     "api/index.ts": {

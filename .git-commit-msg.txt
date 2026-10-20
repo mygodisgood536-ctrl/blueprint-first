@@ -1,0 +1,40 @@
+Complete Architecture 3.3 backend reconciliation (checkpoint — not final completion)
+
+Backend/core architecture (Phase 3):
+- Removed the legacy password + TOTP authentication stack
+  (src/account/accounts.ts, totp.ts, isolation.ts and test/account.test.ts).
+  Authentication is now exclusively the V.2 contract: Full Name, Username, Gmail,
+  Security Question, Security Answer, via src/account/identity.ts. The demo was
+  migrated onto the real IdentityRegistry with ownership-based tenant isolation
+  (server-side `projectOwnerId === caller`), matching the web API.
+- Real build code generation (reality over declaration, V.9). The Architecture
+  stage no longer writes -IMPL artifacts from design documents. It reads the
+  real execution environment back through the EnvAdapter port
+  (src/build/implementation-capture.ts), materializes -IMPL artifacts that name
+  the real files, byte counts and content hashes (src/build/materialize-real.ts),
+  advances them to VERIFIED through the Build Boss, and verifies count/coverage
+  /identity. It fails closed when no READY environment exists or the workspace
+  holds no source.
+- BF_REQUIRE_DATABASE=1 now fails closed at boot: assertStorageIsReal throws
+  from both initStorage and resolveStorage when no managed database URL is
+  configured, and /api/health reports persistenceReady honestly.
+- Watchdog: runWatchdogTick reads event history before and after the scan so the
+  report reflects what the pass actually emitted; /api/internal/watchdog now
+  serves both GET (Vercel cron) and POST.
+
+Infrastructure (Phase 4):
+- vercel.json installCommand installs nested design-prototype deps so the
+  frontend build can run on the managed control plane.
+- .env.example rewritten to document every variable the server reads
+  (Neon/DATABASE_URL, Daytona BF_DAYTONA_API_KEY, Cline, OpenCode, cron
+  secrets, Platform Owner bootstrap vars), with no secret carrying a real value;
+  test/environment-contract.test.ts pins this contract.
+
+Tests: new regression coverage for the watchdog, fail-closed storage, real
+implementation capture, environment contract, and the real build stage.
+Backend suite: 658 pass / 0 fail. Frontend typecheck and build green. Both
+browser audits (bf-redesign-audit, bf-product-audit) pass on fresh data dirs.
+
+Phase 10 real end-to-end execution and Phase 13 push/deploy/verify remain
+blocked pending Vercel, Neon and Daytona credentials (genuine external blocker,
+not avoided work).

@@ -44,13 +44,20 @@ import {
 } from '../visual/design-quality.ts';
 import { materializeDigitalTwin } from '../twin/materialize.ts';
 import { approveBlueprint } from '../design/approval.ts';
-import { AiBuildStudio } from '../build/studio.ts';
+import { checkBuildCount, checkBuildCoverage, checkBuildIdentity } from '../build/verify.ts';
 import { verifyUXAgainstImplementation } from '../visual/ux-verification.ts';
 import { ReasoningCouncil } from '../council/council.ts';
 import { MasterVerificationEngine } from '../verification/master-engine.ts';
 import { createClosureVerifier } from '../verification/closure-verifier.ts';
 import { requirementsTraceability, lineageStatus, coverageSummary } from '../traceability/trace.ts';
 import { buildDesignCodeTrace } from '../traceability/design-code-trace.ts';
+import type { EnvAdapter } from '../env/types.ts';
+import {
+  captureRealImplementation,
+  hasRealSource,
+  type RealImplementation,
+} from '../build/implementation-capture.ts';
+import { materializeRealImplementation } from '../build/materialize-real.ts';
 import { certifyBlueprintCompleteness } from '../design/certification.ts';
 import { ProjectRegistry, type ProjectOwner } from './registry.ts';
 import { PROJECT_MODE_STAGES } from './types.ts';
@@ -102,6 +109,15 @@ export interface RunStageInput {
   readonly actor: RunActor;
   readonly instruction?: string;
   readonly sampleSize?: number;
+  /**
+   * The project's REAL execution environment, when one exists.
+   *
+   * The Build stage must not assert an implementation it has not observed, so
+   * the architecture stage materializes `-IMPL` artifacts only by reading this
+   * environment back through the `EnvAdapter` port. Without it the stage fails
+   * closed rather than describing code that was never written.
+   */
+  readonly executionEnvironment?: EnvAdapter & { readonly environmentId?: string };
 }
 
 export interface RunStageResult {
@@ -452,22 +468,125 @@ export class ProjectExecution {
   // ── Stage 5: Architecture (build studio decomposition) ─────────────────────
 
   private async runArchitecture(input: RunStageInput): Promise<StageOutcome> {
-    const { project, services } = input;
+    const { project, services, actor } = input;
     const design = this.stages.getStage(project.id, 'design');
     const blueprintId = design.summary['blueprintId'];
     if (typeof blueprintId !== 'string') {
       throw new StageGateFailure('DESIGN_MISSING', 'Architecture requires a completed Design stage.');
     }
-    const build = await new AiBuildStudio(services).buildFromBlueprint(blueprintId);
-    if (build.status !== 'accepted') {
-      throw new StageGateFailure(build.error?.code ?? 'BUILD_NOT_ACCEPTED', build.error?.message ?? 'Build was not accepted.');
+    // The APPROVED blueprint is the authoritative record of what was certified
+    // for Build to implement. Reading the certified design list from the stage
+    // summary instead would silently compare the build against a partial view.
+    const blueprint = await services.store.require(blueprintId);
+
+    // REAL BUILD, NOT A BUILD MANIFEST.
+    //
+    // An `-IMPL` artifact must correspond to code that exists. The only
+    // acceptable source of truth is the real execution environment, read back
+    // through the EnvAdapter port; a design document is a plan, not an
+    // implementation. Without a READY environment there is nothing to observe,
+    // so the stage fails closed instead of describing code that was never
+    // written.
+    const environment = input.executionEnvironment;
+    if (environment === undefined) {
+      throw new StageGateFailure(
+        'EXECUTION_ENVIRONMENT_REQUIRED',
+        'Build requires a READY execution environment so the platform can read back the code it actually produced. ' +
+          'No environment is attached to this project, so no -IMPL artifact was created and nothing was fabricated.',
+      );
     }
+    const implementation: RealImplementation = await captureRealImplementation(environment, {
+      environmentId: environment.environmentId ?? 'unknown-environment',
+      workspaceRoot: null,
+    });
+    if (!hasRealSource(implementation)) {
+      throw new StageGateFailure(
+        'NO_REAL_IMPLEMENTATION',
+        `The execution environment (${implementation.adapterKind} ${implementation.environmentId}) contains no readable ` +
+          'source files, so the Build stage produced no -IMPL artifacts. A build is recorded only from code that ' +
+          'actually exists on disk.',
+      );
+    }
+
+    // The certified Design baseline this build implements.
+    const pageDesignIds = (blueprint.attributes['pageDesignIds'] as readonly string[] | undefined) ?? [];
+    const pageDesigns: PageDesignDoc[] = [];
+    for (const designId of pageDesignIds) {
+      const artifact = await services.store.require(designId);
+      const doc = artifact.attributes['designDoc'] as PageDesignDoc | undefined;
+      if (doc !== undefined && doc.layout !== undefined) pageDesigns.push(doc);
+    }
+    const featureDesignIds = (blueprint.attributes['featureDesignIds'] as readonly string[] | undefined) ?? [];
+    // The blueprint lists each entry already carrying its `-DESIGN` suffix
+    // (FEATURE-0001-DESIGN). Appending the suffix again would produce
+    // FEATURE-0001-DESIGN-DESIGN and quietly certify nothing.
+    const featureBaseIds = featureDesignIds.map((id) => id.replace(/-DESIGN$/, ''));
+    const featureTitles: Record<string, string> = {};
+    for (const featureId of featureBaseIds) {
+      const artifact = await services.store.get(`${featureId}-DESIGN`);
+      if (artifact !== null) featureTitles[featureId] = artifact.title;
+    }
+
+    const real = await materializeRealImplementation(services, {
+      projectId: project.id,
+      implementation,
+      pageDesigns,
+      featureDesignIds: featureBaseIds,
+      featureTitles,
+      producer: { kind: 'system', id: actor.id },
+      verifier: { kind: 'verifier', id: 'build-boss-01' },
+    });
+
+    // The build is verified against the REAL artifacts above, using the same
+    // dimension checks the Build department has always used. A certified design
+    // with no real file behind it is a COVERAGE failure that verification can
+    // see and reject, rather than a description that quietly claims coverage.
+    const draft = {
+      projectId: project.id,
+      approvedDesignIds: [...pageDesigns.map((d) => `${d.pageArtifactId}-DESIGN`), ...featureBaseIds.map((f) => `${f}-DESIGN`)],
+      materialization: {
+        manifestId: '',
+        pageImplIds: real.pageImplIds,
+        featureImplIds: real.featureImplIds,
+        allArtifactIds: [...real.pageImplIds, ...real.featureImplIds, ...real.fileImplIds],
+      },
+      noteHashes: {},
+      expectedPageCount: pageDesigns.length,
+      expectedFeatureCount: featureBaseIds.length,
+    };
+    const [count, coverage, identity] = [
+      checkBuildCount(draft),
+      checkBuildCoverage(draft),
+      await checkBuildIdentity(services, draft),
+    ];
+    const blocking = [count, coverage, identity].filter((f) => f.verdict === 'fail');
+    if (blocking.length > 0) {
+      throw new StageGateFailure(
+        'BUILD_VERIFICATION_FAILED',
+        `Real implementation does not satisfy the certified design: ${blocking
+          .map((f) => `${f.dimension} - ${f.detail}`)
+          .join('; ')}`,
+      );
+    }
+
     return {
-      artifactIds: [...new Set<string>([...this.optionalId(build.manifestId), ...build.artifactIds])],
+      artifactIds: [
+        ...new Set<string>([
+          ...real.fileImplIds,
+          ...real.pageImplIds,
+          ...real.featureImplIds,
+        ]),
+      ],
       evidenceIds: [],
       summary: {
-        manifestId: build.manifestId ?? null,
-        buildArtifactIds: build.artifactIds,
+        manifestId: null,
+        buildArtifactIds: [...real.pageImplIds, ...real.featureImplIds],
+        realFileCount: real.totalRealFiles,
+        realInventoryHash: implementation.inventoryHash,
+        realEnvironmentId: implementation.environmentId,
+        realPageImplIds: real.pageImplIds,
+        realFeatureImplIds: real.featureImplIds,
+        unimplementedDesignIds: real.unimplementedDesignIds,
       },
     };
   }

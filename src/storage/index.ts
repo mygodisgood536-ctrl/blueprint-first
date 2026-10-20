@@ -48,6 +48,30 @@ export function usingPostgres(): boolean {
   return resolveBackend().kind === 'postgresql';
 }
 
+/** True when the operator has refused the filesystem fallback. */
+export function databaseRequired(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env['BF_REQUIRE_DATABASE'] === '1';
+}
+
+/**
+ * Enforces `BF_REQUIRE_DATABASE=1`: production must persist to Neon, and a
+ * missing connection string has to stop the boot rather than quietly downgrade
+ * to an ephemeral disk that loses every project on the next cold start.
+ *
+ * Checked by both `initStorage` and `resolveBackend`, because refusing it only
+ * at boot is not enough — any later resolution of the backend would otherwise
+ * fall back silently and the refusal would be decorative.
+ */
+function assertStorageIsReal(kind: StorageKind): void {
+  if (kind === 'postgresql' || !databaseRequired()) return;
+  throw new Error(
+    'BF_REQUIRE_DATABASE=1 but no database connection string is configured, so the ' +
+      'filesystem fallback is refused. Set DATABASE_URL to the Neon database ' +
+      '(POSTGRES_URL and NEON_DATABASE_URL are honoured), or unset BF_REQUIRE_DATABASE ' +
+      'to run on local filesystem snapshots.',
+  );
+}
+
 export function getPool(): Pool | null {
   return pool;
 }
@@ -55,7 +79,9 @@ export function getPool(): Pool | null {
 /** The active backend, created on first use. */
 export function resolveBackend(): DurableSnapshotBackend {
   if (backend !== null) return backend;
-  if (selectStorageKind() === 'postgresql') {
+  const kind = selectStorageKind();
+  assertStorageIsReal(kind);
+  if (kind === 'postgresql') {
     const connectionString = databaseUrlFrom();
     if (connectionString === null) {
       throw new Error('Storage kind is postgresql but no database connection string is configured.');
@@ -81,17 +107,17 @@ export async function initStorage(): Promise<{
   migrations: string[];
 }> {
   const kind = selectStorageKind();
+  // Throws when BF_REQUIRE_DATABASE=1 and no connection string is configured,
+  // so a misconfigured production deploy never boots on the filesystem.
+  assertStorageIsReal(kind);
   if (kind === 'json-file') {
-    const required = process.env['BF_REQUIRE_DATABASE'] === '1';
     const root = resolve(dataRoot);
     await mkdir(root, { recursive: true });
     backend = jsonFileBackend(root);
     return {
       kind,
-      ok: !required,
-      detail: required
-        ? 'BF_REQUIRE_DATABASE=1 but no database connection string is configured.'
-        : `filesystem durable snapshots at ${root}`,
+      ok: true,
+      detail: `filesystem durable snapshots at ${root}`,
       migrations: [],
     };
   }

@@ -7,18 +7,15 @@
  * retired.
  *
  * Those behaviours have intentionally ceased to exist, so tests asserting them
- * would assert a fiction. They are replaced by the guarantee that actually
- * matters now: the authenticator is UNREACHABLE - not merely unused, but not
- * registered, so a caller cannot enroll, enable, disable or bypass one.
- *
- * The TOTP primitives still exist in `src/account/totp.ts` because
- * `src/account/accounts.ts` (retained for execution-foundation project
- * isolation) imports them. What must be proven is that nothing in the active
- * HTTP, session or frontend graph can reach them.
+ * would assert a fiction. They are replaced by two guarantees that actually
+ * matter now: the authenticator is UNREACHABLE - not merely unused, but not
+ * registered, so a caller cannot enroll, enable, disable or bypass one - and the
+ * password/TOTP primitives it depended on have been DELETED rather than left in
+ * the tree as unreferenced dead code.
  */
 import assert from 'node:assert/strict';
 import test, { describe } from 'node:test';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -46,6 +43,40 @@ async function activeApp(): Promise<{ url: string; close: () => Promise<void> }>
 const Q = 'What city did my parents meet?';
 
 describe('the authenticator is not part of the active authentication system', () => {
+  test('the password and TOTP primitives are deleted, not merely unreferenced', () => {
+    for (const rel of ['src/account/totp.ts', 'src/account/accounts.ts', 'src/account/isolation.ts']) {
+      assert.equal(existsSync(join(REPO, rel)), false, `${rel} must not exist (Architecture V.2)`);
+    }
+  });
+
+  test('no module in the repository imports the retired primitives', () => {
+    const offenders: string[] = [];
+    // Match only real module specifiers. A bare substring scan would flag prose
+    // (a log line or comment naming the module), which is not an import.
+    const specifier = /(?:from\s*|import\s*\(\s*|require\s*\(\s*)['"]([^'"]+)['"]/g;
+    const walk = (dir: string): void => {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (entry.name === 'node_modules' || entry.name === '.git') continue;
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          walk(full);
+          continue;
+        }
+        if (!entry.name.endsWith('.ts') && !entry.name.endsWith('.tsx')) continue;
+        const source = readFileSync(full, 'utf8');
+        for (const match of source.matchAll(specifier)) {
+          const target = match[1] ?? '';
+          if (/\baccount\/(totp|accounts|isolation)\b/.test(target)) {
+            offenders.push(`${full} -> ${target}`);
+          }
+        }
+      }
+    };
+    walk(join(REPO, 'src'));
+    walk(join(REPO, 'api'));
+    assert.deepEqual(offenders, [], 'the retired auth stack must have no remaining importer');
+  });
+
   test('no authenticator route is registered on the active HTTP surface', async () => {
     const { url, close } = await activeApp();
     try {

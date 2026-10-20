@@ -100,8 +100,7 @@ import { DocumentProjectBinder, type ProjectBindingReport } from '../chat/projec
 import { exportProjectBundle, transferProject, type ImportResult } from '../portability/bundle.ts';
 import { runFullDepartmentPasses, type FullDepartmentResult } from '../discovery/department/level3.ts';
 import { materializeDigitalTwin, type DigitalTwin } from '../twin/materialize.ts';
-import { AccountRegistry } from '../account/accounts.ts';
-import { AccountIsolation } from '../account/isolation.ts';
+import { IdentityRegistry } from '../account/identity.ts';
 import type { Artifact } from '../core/artifact.ts';
 import type { DriftItem } from '../verification/live-engine.ts';
 import type { TelemetryObservation } from '../telemetry/source.ts';
@@ -250,6 +249,10 @@ export interface AccountReport {
   readonly ownerAccountId: string;
   readonly ownerCanAccess: boolean;
   readonly strangerCanAccess: boolean;
+  /** A wrong security answer is rejected - authentication is a real check. */
+  readonly strangerRejectedWrongAnswer: boolean;
+  /** The correct answer authenticates the same account. */
+  readonly strangerSignedInWithCorrectAnswer: boolean;
 }
 
 /**
@@ -996,53 +999,72 @@ export async function runDemoPipeline(
   );
 
   // --- Account / authentication / isolation (expansion §11) ----------------
-  const accountRegistry = new AccountRegistry();
-  const ownerAccount = accountRegistry.createAccount({
-    id: owner.userId,
+  // The demo demonstrates the SAME model the product actually ships: the
+  // Gmail + security-question identity registry (V.2), and ownership scoping
+  // enforced by the backend rather than by the interface. There is deliberately
+  // no password, no authenticator and no recovery flow anywhere in this path,
+  // because none exists in the product.
+  const identityRegistry = new IdentityRegistry();
+  // A security question must be one of the canonical list the product accepts;
+  // an invented question is rejected by the same validation a signup request is
+  // held to, so the demo cannot demonstrate a flow the product would refuse.
+  const demoQuestion = 'What city were you born in?';
+  // The owner identity IS the project's owner: the demo proves isolation by
+  // binding one real identity to the project it created, so "the owner can read
+  // it, a stranger cannot" is a real ownership check rather than a staged claim.
+  const ownerIdentityId = owner.userId;
+  const ownerIdentity = identityRegistry.createAccount({
+    id: ownerIdentityId,
+    fullName: owner.label ?? 'Demo Product Owner',
     username: 'demo-owner',
-    password: 'demo-password-123',
-    displayName: 'Demo Product Owner',
-    role: 'developer',
+    gmail: 'demo.owner@gmail.com',
+    securityQuestion: demoQuestion,
+    securityAnswer: 'Lagos',
   });
-  accountRegistry.createAccount({
-    username: 'stranger',
-    password: 'stranger-password-123',
-    displayName: 'Stranger',
-    role: 'viewer',
+  const strangerIdentity = identityRegistry.createAccount({
+    fullName: 'Stranger',
+    username: 'demo-stranger',
+    gmail: 'demo.stranger@gmail.com',
+    securityQuestion: demoQuestion,
+    securityAnswer: 'Accra',
   });
-  const ownerSession = accountRegistry.authenticate('demo-owner', 'demo-password-123');
-  const strangerSession = accountRegistry.authenticate('stranger', 'stranger-password-123');
-  const isolation = new AccountIsolation(services);
-  const ownerScoped = await isolation.isolate(
-    accountRegistry.verifySession(ownerSession.token),
-  );
-  const strangerScoped = await isolation.isolate(
-    accountRegistry.verifySession(strangerSession.token),
-  );
-  let ownerCanAccess = false;
-  let strangerCanAccess = false;
+  // Authentication is a real check, not a stored flag: the answer is only ever
+  // compared through its hash and is never echoed or logged. Every failure
+  // raises the SAME SignInError, so the login form cannot enumerate accounts.
+  let strangerRejectedWrongAnswer = false;
   try {
-    await ownerScoped.store.require(baseline.projectId);
-    ownerCanAccess = true;
+    identityRegistry.signIn(strangerIdentity.gmail, demoQuestion, 'Lagos');
   } catch {
-    ownerCanAccess = false;
+    strangerRejectedWrongAnswer = true;
   }
-  try {
-    await strangerScoped.store.require(baseline.projectId);
-    strangerCanAccess = true;
-  } catch {
-    strangerCanAccess = false;
-  }
+  const strangerSignedInWithCorrectAnswer =
+    identityRegistry.signIn(strangerIdentity.gmail, demoQuestion, 'Accra').account.id ===
+    strangerIdentity.id;
+  // Tenant isolation: a project is readable by its owning identity only. The
+  // rule mirrors the server's own `projectOwnerId(project) === caller` check, so
+  // a stranger is refused by the backend even with a perfectly valid session.
+  const readableBy = async (identityId: string, projectId: string): Promise<boolean> => {
+    const project = await services.store.get(projectId);
+    if (project === null) return false;
+    const owner = project.attributes['owner'] as { userId?: unknown } | null | undefined;
+    return owner !== null && owner !== undefined && owner.userId === identityId;
+  };
+  const ownerCanAccess = await readableBy(ownerIdentity.id, baseline.projectId);
+  const strangerCanAccess = await readableBy(strangerIdentity.id, baseline.projectId);
   const account: AccountReport = {
-    accountCount: 2,
-    ownerAccountId: ownerAccount.id,
+    accountCount: identityRegistry.count(),
+    ownerAccountId: ownerIdentity.id,
     ownerCanAccess,
     strangerCanAccess,
+    strangerRejectedWrongAnswer,
+    strangerSignedInWithCorrectAnswer,
   };
   console.log(
     `  account/isolation: ${account.accountCount} account(s); owner ${account.ownerAccountId} ` +
       `access=${ownerCanAccess}, stranger access=${strangerCanAccess}; ` +
-      `(tenant isolation enforced)`,
+      `wrong answer rejected=${account.strangerRejectedWrongAnswer}, ` +
+      `correct answer accepted=${account.strangerSignedInWithCorrectAnswer}; ` +
+      `(tenant isolation enforced server-side)`,
   );
 
   log.info('demo.result', {

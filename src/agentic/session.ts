@@ -69,12 +69,26 @@ export interface AgentSessionOptions {
   readonly onProgress?: (evidence: { kind: string; detail?: string }) => void;
 }
 
+export interface AgentToolLogEntry {
+  readonly tool: string;
+  readonly ok: boolean;
+  /**
+   * The REAL workspace path this call touched, for file operations.
+   *
+   * A tool name alone (`file.write`) does not say what changed; recording the
+   * path and byte count is what lets the platform read back what a build
+   * actually produced instead of trusting the model's account of itself.
+   */
+  readonly path?: string;
+  readonly bytes?: number;
+}
+
 export interface AgentSessionResult {
   readonly ok: boolean;
   readonly steps: number;
   readonly toolCalls: number;
   readonly finalText: string;
-  readonly toolLog: readonly { readonly tool: string; readonly ok: boolean }[];
+  readonly toolLog: readonly AgentToolLogEntry[];
   /** Human-readable evidence lines for durable certification. */
   readonly evidence: readonly string[];
   readonly providerId: string;
@@ -91,6 +105,24 @@ interface SessionTranscriptTurn {
 const DEFAULT_MAX_TOOL_CALLS = 24;
 const TOOL_MARKER = 'TOOL_CALL';
 const MAX_TOOL_OUTPUT = 4000;
+
+/**
+ * Extracts the real filesystem mutation a tool call performed.
+ *
+ * Only successful mutations are reported: a `file.write` that threw changed
+ * nothing, and recording it as a change would make the tool log a list of
+ * intentions rather than of effects.
+ */
+function mutationOf(call: AgentToolCall, outcome: AgentToolOutcome): { path?: string; bytes?: number } {
+  if (!outcome.ok) return {};
+  const rawPath = call.input['path'];
+  const path = typeof rawPath === 'string' ? rawPath : undefined;
+  // `file.write` is the only mutating file tool; reads and listings are not
+  // changes, and recording them would make the log a list of intentions.
+  if (path === undefined || call.name !== 'file.write') return {};
+  const rawBytes = call.input['bytes'];
+  return typeof rawBytes === 'number' ? { path, bytes: rawBytes } : { path };
+}
 
 const TOOL_SPECS: Record<AgentToolName, string> = {
   'file.read': 'read a file at `path` (relative to the workspace root); returns its content',
@@ -201,7 +233,7 @@ export class AgenticSession {
   async run(): Promise<AgentSessionResult> {
     let steps = 0;
     let toolCalls = 0;
-    const toolLog: { tool: string; ok: boolean }[] = [];
+    const toolLog: AgentToolLogEntry[] = [];
     const evidence: string[] = [];
     const sessionIds: string[] = [];
     let lastProviderId = this.options.providerId ?? 'unknown';
@@ -275,7 +307,7 @@ export class AgenticSession {
         if (toolCalls >= this.maxToolCalls) break;
         const outcome = await this.executeTool(call);
         this.turns.push({ assistant: response.content, tool: outcome });
-        toolLog.push({ tool: call.name, ok: outcome.ok });
+        toolLog.push({ tool: call.name, ok: outcome.ok, ...mutationOf(call, outcome) });
         executed += 1;
         toolCalls += 1;
         const line =
