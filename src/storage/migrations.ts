@@ -83,6 +83,16 @@ const MIGRATIONS_TABLE = 'bf_schema_migrations';
 
 /** Applies every pending migration. Returns the ids that were applied. */
 export async function runMigrations(pool: Pool): Promise<string[]> {
+  // The ledger of applied migrations is itself created by the first migration,
+  // so it must exist before the "which migrations have run" question can even
+  // be asked. On a brand-new database the table is absent, and asking anyway
+  // fails with "relation does not exist" before a single migration runs.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS ${MIGRATIONS_TABLE} (
+      id          text PRIMARY KEY,
+      applied_at  timestamptz NOT NULL DEFAULT now()
+    );
+  `);
   const bootstrap = await pool.query<{ id: string }>(
     `SELECT id FROM ${MIGRATIONS_TABLE} WHERE id = ANY($1::text[])`,
     [MIGRATIONS.map((m) => m.id)],
