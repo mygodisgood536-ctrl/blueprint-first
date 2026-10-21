@@ -21,3 +21,6 @@ Thumbs.db
 # Vercel CLI project link (local project metadata, not part of the product)
 .vercel/
 
+# Local commit-message scratch file
+.git-commit-msg.txt
+
