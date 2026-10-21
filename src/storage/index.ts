@@ -13,6 +13,7 @@ import { mkdir } from 'node:fs/promises';
 import type { Pool } from 'pg';
 import {
   databaseUrlFrom,
+  unpooledDatabaseUrlFrom,
   selectStorageKind,
   type DurableSnapshotBackend,
   type StorageKind,
@@ -30,6 +31,16 @@ export { createPostgresPool, probeDatabase } from './pool.ts';
 
 let backend: DurableSnapshotBackend | null = null;
 let pool: Pool | null = null;
+/**
+ * The single boot of durable storage. Every caller receives the same result, so
+ * the schema is applied exactly once and before any store reads a slot.
+ */
+let initPromise: Promise<{
+  kind: StorageKind;
+  ok: boolean;
+  detail: string;
+  migrations: string[];
+}> | null = null;
 
 /** Overrides the data root for the filesystem backend (tests). */
 let dataRoot = process.env['BF_DATA_DIR'] ?? join(process.cwd(), 'data');
@@ -99,8 +110,29 @@ export function resolveBackend(): DurableSnapshotBackend {
 /**
  * Boots durable storage: creates the pool, applies migrations, and reports the
  * live backend honestly. Never returns "ready" for a backend that is not real.
+ *
+ * Idempotent by design: the boot calls this once, and every later caller
+ * receives the SAME result. That matters because the schema must exist before
+ * ANY durable store reads a slot, so the migration step cannot be left to a
+ * later phase of the boot.
  */
 export async function initStorage(): Promise<{
+  kind: StorageKind;
+  ok: boolean;
+  detail: string;
+  migrations: string[];
+}> {
+  initPromise ??= initStorageOnce().catch((error: unknown) => {
+    // A failed boot is not memoized: the next attempt must be able to try
+    // again (for example once the environment is corrected), and a sticky
+    // rejection would make a later, valid boot look permanently broken.
+    initPromise = null;
+    throw error;
+  });
+  return await initPromise;
+}
+
+async function initStorageOnce(): Promise<{
   kind: StorageKind;
   ok: boolean;
   detail: string;
@@ -126,7 +158,23 @@ export async function initStorage(): Promise<{
     throw new Error('Storage kind is postgresql but no database connection string is configured.');
   }
   pool = createPostgresPool({ connectionString });
-  const applied = await runMigrations(pool);
+  // Migrations run against the DIRECT connection when one is available. A
+  // pooled Neon URL is served by a connection pooler that is not a single
+  // PostgreSQL session, and DDL plus session-scoped locking behaves
+  // differently there. The unpooled URL is the same database, reached
+  // directly, so the schema is created exactly once and identically.
+  const unpooled = unpooledDatabaseUrlFrom();
+  const applied = await (async () => {
+    if (unpooled === null || unpooled === connectionString) {
+      return await runMigrations(pool);
+    }
+    const migrationPool = createPostgresPool({ connectionString: unpooled, max: 1 });
+    try {
+      return await runMigrations(migrationPool);
+    } finally {
+      await migrationPool.end().catch(() => undefined);
+    }
+  })();
   backend = postgresBackend(pool);
   const schema = await checkSchema(pool);
   return {

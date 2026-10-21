@@ -30,6 +30,7 @@ import { DurableProjectStore, webProjectsFilePath } from './durable-projects.ts'
 import { DurableJudgmentLedger, judgmentFilePath } from '../judgment/store.ts';
 import { resolveAmbiguity, type IntentTrace } from '../judgment/product-judgment.ts';
 import { ensureWritableDir, resolveDataDir } from '../runtime/paths.ts';
+import { initStorage } from '../storage/index.ts';
 import { DuplicateCredentialError, CredentialStore } from '../ai/credential-store.ts';
 import { DocumentStore, DocumentNotFoundError, sha256, type DocumentRef } from '../chat/document.ts';
 import { ModelCatalogue } from '../ai/model-catalogue.ts';
@@ -298,6 +299,14 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
         'The requested data directory is on a read-only filesystem; derived state is using a writable temporary root. ' +
         'Durable state is unaffected because it is stored in the database.',
     });
+  }
+  // Durable storage is booted FIRST: the schema must exist before any durable
+  // store reads a slot. Reading a slot against a database whose migrations have
+  // not run yet fails with "relation does not exist", which is exactly what a
+  // cold production boot must not do.
+  const persistence = await initStorage();
+  if (!persistence.ok) {
+    throw new Error(`Durable storage is not ready: ${persistence.detail}`);
   }
   // The certification/evidence trail is DURABLE across restarts: every append
   // this boot (demo scenario plus all web-stage, verification and supervised

@@ -65,6 +65,23 @@ export function databaseUrlFrom(env: NodeJS.ProcessEnv = process.env): string | 
   return null;
 }
 
+/**
+ * The DIRECT (unpooled) connection string to the same database, when the
+ * deployment provides one.
+ *
+ * Neon supplies both: a pooled URL for application traffic and an unpooled URL
+ * for schema changes and session-scoped work. Migrations must use the direct
+ * connection, because a pooled URL is served by a connection pooler rather
+ * than a single PostgreSQL session.
+ */
+export function unpooledDatabaseUrlFrom(env: NodeJS.ProcessEnv = process.env): string | null {
+  for (const key of ['DATABASE_URL_UNPOOLED', 'POSTGRES_URL_UNPOOLED', 'POSTGRES_URL_NON_POOLING', 'PGHOST_UNPOOLED']) {
+    const value = env[key];
+    if (typeof value === 'string' && value.trim().length > 0) return value.trim();
+  }
+  return null;
+}
+
 /** Chooses the backend the process must use. Never silently degrades. */
 export function selectStorageKind(env: NodeJS.ProcessEnv = process.env): StorageKind {
   return databaseUrlFrom(env) === null ? 'json-file' : 'postgresql';
