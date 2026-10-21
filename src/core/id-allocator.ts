@@ -65,6 +65,16 @@ export class ArtifactIdAllocator {
   /**
    * Ensures a reserved block covers the counter for `type`.
    * Awaited during boot (and by any caller that wants to guarantee headroom).
+   *
+   * A reserved block is EXCLUSIVE to the instance that reserved it: that
+   * instance hands out the IDs inside it, and no other instance ever does.
+   * The allocator therefore continues from the block's start, not from the
+   * highest ID it happens to have observed - an observed ID belongs to some
+   * other instance's block, and continuing from it would mint an ID twice.
+   *
+   * When the observed high-water mark is already at or beyond the block, the
+   * block cannot be used at all and another one is reserved, because the
+   * reserved ranges are handed out from a single global counter.
    */
   async reserve(
     type: ArtifactType,
@@ -73,10 +83,18 @@ export class ArtifactIdAllocator {
   ): Promise<void> {
     const source = reservation ?? this.reservation;
     if (source === undefined) return;
-    const block = await source.reserve(type, size);
+    let block = await source.reserve(type, size);
     const highWater = this.counters.get(type) ?? 0;
-    const from = Math.max(block.from - 1, highWater);
-    if (block.to >= from) this.blockEnd.set(type, block.to);
+    if (highWater > block.from - 1) {
+      // Everything this block could hand out already exists (or is owned by
+      // another instance's block). Take the next range instead.
+      block = await source.reserve(type, size);
+    }
+    const start = Math.max(block.from - 1, highWater);
+    if (block.to >= start) {
+      this.counters.set(type, start);
+      this.blockEnd.set(type, block.to);
+    }
   }
 
   /** Allocates the next canonical ID for the given type (monotonic). */

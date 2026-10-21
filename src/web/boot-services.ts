@@ -71,14 +71,20 @@ export async function createBootServices(input: {
   const config = loadConfig(process.env);
   const persistence = await initStorage();
   const allocator = new ArtifactIdAllocator();
-  // Reserve canonical-ID headroom before the first request can mint one.
-  await reserveIdBlocks(allocator);
   const composed = composeArtifactStore({
     filePath: blueprintStoreFilePath(input.dataDir),
     allocator,
   });
   const store = composed.store;
+  // The IDs that already exist are observed BEFORE the canonical-ID blocks are
+  // reserved. A reserved block is exclusive to the instance that reserved it
+  // and must start above everything that has been minted, so the observation
+  // has to happen first. Reserving first would place this instance's counter
+  // at the end of its own fresh block, and the first ID it handed out would
+  // look exhausted.
   await initArtifactStore(store);
+  // Reserve canonical-ID headroom before the first request can mint one.
+  await reserveIdBlocks(allocator);
   const graph = new KnowledgeGraph();
   const router = new AiRouter({ ...(input.logger !== undefined ? { logger: input.logger } : {}) });
   const registry = new ProjectRegistry({ store, allocator, graph, evidence: input.evidence, router, ...(input.logger !== undefined ? { logger: input.logger } : {}) });

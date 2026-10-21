@@ -48,19 +48,20 @@ export class PostgresArtifactStore implements ArtifactStore {
     this.allocator = options.allocator;
   }
 
-  /** Seeds the in-process allocator from persisted counters and IDs. */
+  /**
+   * Seeds the in-process allocator from the IDs that were actually minted.
+   *
+   * The counter table is NOT a source for the allocator's high-water mark: it
+   * records RESERVED ranges, because reserving a block advances it before a
+   * single ID from that block is minted. Seeding from it would place the
+   * allocator at the end of the block this very instance had just reserved,
+   * and the first ID it tried to hand out would look exhausted.
+   *
+   * The minted high-water mark is the highest artifact ID that actually
+   * exists, which is what the allocator must continue above.
+   */
   async init(): Promise<void> {
     if (this.allocator === undefined) return;
-    const counters = await this.pool.query<{ artifact_type: string; next_value: number }>(
-      `SELECT artifact_type, next_value FROM ${COUNTERS}`,
-    );
-    for (const row of counters.rows) {
-      for (let n = row.next_value - 1; n >= 1; n -= 1) {
-        // observe() is monotonic; seeding from the stored high-water mark is
-        // enough and avoids guessing at ID formatting here.
-      }
-      this.allocator.observe(`${row.artifact_type}-${row.next_value - 1}`);
-    }
     const max = await this.pool.query<{ id: string }>(`SELECT id FROM ${ARTIFACTS}`);
     for (const row of max.rows) {
       try {

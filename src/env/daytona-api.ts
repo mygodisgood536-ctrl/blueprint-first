@@ -194,12 +194,27 @@ export class DaytonaApiClient {
   }
 
   /** Verifies the credential itself (V.10 — real connection, not a config record). */
+  /**
+   * Verifies the credential against the endpoints the platform ACTUALLY uses.
+   *
+   * The probe deliberately does not depend on `/users/me`: against Daytona's
+   * live API that endpoint authenticates an interactive session and answers
+   * "Invalid credentials" for a perfectly valid API key, while the sandbox
+   * endpoints - the ones every real operation goes through - accept it. Gating
+   * on it reported a working credential as broken and left the platform unable
+   * to execute anything.
+   *
+   * The sandbox listing is the authoritative check, because a credential that
+   * can list the account's sandboxes can also create them. The account label
+   * is derived from what Daytona actually answered.
+   */
   async verifyCredential(): Promise<{ ok: boolean; detail: string; user?: string }> {
     try {
-      const me = await this.request<{ id?: string; username?: string; name?: string }>(
-        `${this.baseUrl}/users/me`,
+      const body = await this.request<DaytonaSandboxRecord[] | { items?: DaytonaSandboxRecord[] }>(
+        `${this.baseUrl}/sandbox`,
       );
-      const label = me.username ?? me.name ?? me.id ?? 'the authenticated Daytona account';
+      const items = Array.isArray(body) ? body : (body.items ?? []);
+      const label = `the authenticated Daytona account (${items.length} sandbox${items.length === 1 ? '' : 'es'} visible)`;
       return { ok: true, detail: `Daytona credential accepted for ${label}.`, user: label };
     } catch (error) {
       return { ok: false, detail: (error as Error).message };
