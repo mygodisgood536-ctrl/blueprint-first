@@ -1,9 +1,15 @@
 /**
  * DURABLE identity registry for the replacement authentication model.
  *
- * Wraps `IdentityRegistry` with the same atomic JSON-file persistence the
- * previous account registry used (temp + rename, Windows-safe), so accounts and
- * sessions survive restarts.
+ * Wraps `IdentityRegistry` with durable persistence through the platform's
+ * storage port, so accounts and sessions survive restarts AND are stored in
+ * Neon in production, where the function filesystem is read-only. The file path
+ * passed to `load()` names a durable SLOT, not a write location: the backend
+ * owns the real persistence (Decision D2).
+ *
+ * Every mutation is a serialized read-modify-write, so two concurrent
+ * serverless instances cannot both accept the same Gmail: the uniqueness
+ * decision and the write happen inside one transaction.
  *
  * On load the Gmail/username uniqueness indexes are REBUILT from the persisted
  * records and any duplicate is resolved deterministically (earliest record
@@ -11,12 +17,10 @@
  * by the in-memory writer — a hand-edited or corrupted store can never resurrect
  * two accounts sharing one Gmail.
  *
- * The stored file contains the scrypt hash of a security answer, never the
+ * The stored record contains the scrypt hash of a security answer, never the
  * plaintext. The privileged bootstrap answer is read from the environment and
  * is never written here.
  */
-import { promises as fs } from 'node:fs';
-import { atomicWriteText } from '../core/json-file-store.ts';
 import {
   IdentityRegistry,
   ensurePrivilegedAccount,
@@ -29,13 +33,9 @@ import {
   type IdentitySession,
   type IdentityView,
 } from './identity.ts';
+import { JsonFileStore } from '../storage/snapshot-store.ts';
 
 const FILE_SCHEMA_VERSION = 1;
-
-interface PersistedEnvelope {
-  readonly schemaVersion: number;
-  readonly value: IdentityRegistryState;
-}
 
 /** Rebuilds uniqueness indexes from persisted records, earliest record wins. */
 export function reassertUniqueness(registry: IdentityRegistry): void {
@@ -55,47 +55,62 @@ export function reassertUniqueness(registry: IdentityRegistry): void {
 
 export class DurableIdentityRegistry {
   private readonly inner: IdentityRegistry;
+  private readonly store: JsonFileStore<IdentityRegistryState>;
   readonly filePath: string;
 
-  private constructor(inner: IdentityRegistry, filePath: string) {
+  private constructor(inner: IdentityRegistry, store: JsonFileStore<IdentityRegistryState>, filePath: string) {
     this.inner = inner;
+    this.store = store;
     this.filePath = filePath;
   }
 
   static async load(filePath: string, sessionTtlMs: number): Promise<DurableIdentityRegistry> {
     const inner = new IdentityRegistry(sessionTtlMs);
-    let raw: string | null = null;
-    try {
-      raw = await fs.readFile(filePath, 'utf8');
-    } catch {
-      raw = null; // first run
-    }
-    if (raw !== null) {
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(raw);
-      } catch {
-        throw new Error(`Identity store ${filePath} is not valid JSON.`);
-      }
-      const envelope = parsed as PersistedEnvelope;
-      const state =
-        typeof envelope === 'object' && envelope !== null && 'value' in envelope
-          ? envelope.value
-          : (parsed as IdentityRegistryState);
+    const store = new JsonFileStore<IdentityRegistryState>({
+      filePath,
+      schemaVersion: FILE_SCHEMA_VERSION,
+    });
+    const state = await store.load();
+    if (state !== null) {
       inner.restoreState(state);
       reassertUniqueness(inner);
     }
-    const registry = new DurableIdentityRegistry(inner, filePath);
+    const registry = new DurableIdentityRegistry(inner, store, filePath);
     await registry.persist();
     return registry;
   }
 
+  /**
+   * Where this registry's durable state actually lives right now, or null when
+   * the live backend has no file (PostgreSQL in production). The path passed to
+   * `load()` names a SLOT, not a file: the backend owns the on-disk naming, so
+   * this is the only reliable way to learn it.
+   */
+  location(): string | null {
+    return this.store.location();
+  }
+
   private async persist(): Promise<void> {
-    const envelope: PersistedEnvelope = {
-      schemaVersion: FILE_SCHEMA_VERSION,
-      value: this.inner.exportState(),
-    };
-    await atomicWriteText(this.filePath, JSON.stringify(envelope, null, 2));
+    await this.store.save(this.inner.exportState());
+  }
+
+  /**
+   * Applies a mutation to the durable state atomically.
+   *
+   * The in-memory registry is refreshed from the durable state first, so the
+   * decision is always made against the CURRENT durable state (including a
+   * write made by another instance), and the result is written back in the same
+   * transaction. Uniqueness therefore holds across concurrent instances.
+   */
+  private async mutate<R>(apply: () => R): Promise<R> {
+    return await this.store.update((current) => {
+      if (current !== null) {
+        this.inner.restoreState(current);
+        reassertUniqueness(this.inner);
+      }
+      const result = apply();
+      return { value: this.inner.exportState(), result };
+    });
   }
 
   // ── reads ──────────────────────────────────────────────────────────────────
@@ -128,9 +143,7 @@ export class DurableIdentityRegistry {
   // ── mutations ──────────────────────────────────────────────────────────────
 
   async createAccount(input: CreateIdentityInput): Promise<IdentityView> {
-    const view = this.inner.createAccount(input);
-    await this.persist();
-    return view;
+    return await this.mutate(() => this.inner.createAccount(input));
   }
 
   async signIn(
@@ -138,27 +151,22 @@ export class DurableIdentityRegistry {
     securityQuestion: string,
     securityAnswer: string,
   ): Promise<{ account: IdentityView; session: IdentitySession }> {
-    const out = this.inner.signIn(gmail, securityQuestion, securityAnswer);
-    await this.persist();
-    return out;
+    return await this.mutate(() => this.inner.signIn(gmail, securityQuestion, securityAnswer));
   }
 
   async logout(token: string): Promise<boolean> {
-    const ok = this.inner.logout(token);
-    if (ok) await this.persist();
-    return ok;
+    return await this.mutate(() => {
+      const ok = this.inner.logout(token);
+      return ok;
+    });
   }
 
   async setFullName(id: string, fullName: string): Promise<boolean> {
-    const ok = this.inner.setFullName(id, fullName);
-    if (ok) await this.persist();
-    return ok;
+    return await this.mutate(() => this.inner.setFullName(id, fullName));
   }
 
   async setPreferences(id: string, prefs: Record<string, string | number | boolean>): Promise<boolean> {
-    const ok = this.inner.setPreferences(id, prefs);
-    if (ok) await this.persist();
-    return ok;
+    return await this.mutate(() => this.inner.setPreferences(id, prefs));
   }
 
   /**
@@ -170,8 +178,9 @@ export class DurableIdentityRegistry {
   async ensurePrivilegedAccount(env: NodeJS.ProcessEnv = process.env): Promise<IdentityView | null> {
     const config: BootstrapConfig | null = readBootstrapConfig(env);
     if (config === null) return null;
-    const { accountId } = ensurePrivilegedAccount(this.inner, config);
-    await this.persist();
-    return this.inner.get(accountId);
+    return await this.mutate(() => {
+      const { accountId } = ensurePrivilegedAccount(this.inner, config);
+      return this.inner.get(accountId);
+    });
   }
 }

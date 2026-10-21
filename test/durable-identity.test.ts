@@ -56,7 +56,11 @@ describe('durable identity — restart survival', () => {
       fullName: 'Ada Lovelace', username: 'ada', gmail: 'ada@gmail.com',
       securityQuestion: Q, securityAnswer: 'analytical',
     });
-    const raw = await fs.readFile(file, 'utf8');
+    // The path handed to load() names a durable SLOT; the backend owns the
+    // on-disk name, so the registry reports where the bytes really landed.
+    const location = r.location();
+    assert.ok(location !== null, 'the filesystem backend must report a location');
+    const raw = await fs.readFile(location, 'utf8');
     assert.ok(raw.includes('scrypt$'), 'the hash is what is persisted');
     assert.equal(raw.includes('analytical'), false, 'the plaintext answer must never be written');
   });
@@ -71,9 +75,19 @@ describe('durable identity — uniqueness at the persistence layer', () => {
       securityQuestion: Q, securityAnswer: 'x1',
     });
 
-    // Hand-corrupt the store the way a bad migration or merge could.
-    const envelope = JSON.parse(await fs.readFile(file, 'utf8'));
-    envelope.value.records.push({
+    // Hand-corrupt the store the way a bad migration or merge could. The
+    // durable state is an envelope written by the backend, so the real file is
+    // the one the registry reports, not the slot path that was passed in.
+    const location = r.location();
+    assert.ok(location !== null, 'the filesystem backend must report a location');
+    const envelope = JSON.parse(await fs.readFile(location, 'utf8'));
+    // Two envelopes are layered on disk: the backend owns file freshness and
+    // the store owns schema versioning. The identity state is the innermost
+    // value.
+    const state = (envelope.value?.value ?? envelope.value) as {
+      records: unknown[];
+    };
+    state.records.push({
       id: 'ACC-999999',
       fullName: 'Second',
       username: 'second',
@@ -84,7 +98,7 @@ describe('durable identity — uniqueness at the persistence layer', () => {
       role: 'member',
       createdAt: new Date().toISOString(),
     });
-    await fs.writeFile(file, JSON.stringify(envelope), 'utf8');
+    await fs.writeFile(location, JSON.stringify(envelope), 'utf8');
 
     const reopened = await DurableIdentityRegistry.load(file, 60_000_000);
     assert.equal(reopened.count(), 1, 'the duplicate must be dropped on load');

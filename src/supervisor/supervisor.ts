@@ -215,7 +215,9 @@ export class ExecutionSupervisor implements RunSupervisor {
 
   /** Loads any prior control-plane trace and records the boot honestly. */
   async init(): Promise<void> {
-    await ensureDir(dirname(this.traceFilePath));
+    // The trace path names a durable SLOT, not a file: the backend owns the real
+    // storage (the database in production), so there is no directory to create
+    // here. Creating one would fail outright on a read-only function filesystem.
     const prior = await this.trace.load();
     this.bootId = randomUUID();
     if (prior !== null && prior.activeRuns > 0) {

@@ -3,9 +3,10 @@
   "framework": null,
   "installCommand": "npm ci && npm --prefix design-prototype ci",
   "buildCommand": "npm run build:frontend",
+  "outputDirectory": "src/web/public/nexona",
   "functions": {
     "api/index.ts": {
-      "memory": 3008,
+      "memory": 2048,
       "maxDuration": 300
     }
   },
@@ -26,6 +27,6 @@
     }
   ],
   "crons": [
-    { "path": "/api/internal/watchdog", "schedule": "* * * * *" }
+    { "path": "/api/internal/watchdog", "schedule": "0 3 * * *" }
   ]
 }

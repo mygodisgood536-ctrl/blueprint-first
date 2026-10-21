@@ -28,6 +28,8 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { ensureDir } from '../runtime/paths.ts';
 import { atomicWriteText } from '../core/json-file-store.ts';
+import { selectStorageKind } from '../storage/index.ts';
+import { JsonFileStore } from '../storage/snapshot-store.ts';
 import type { EventBus } from '../events/types.ts';
 import type { ControlPlaneCapability, ControlPlaneDecision } from './foundation.ts';
 
@@ -59,8 +61,38 @@ function failed(capability: ControlPlaneCapability, error: unknown): ControlPlan
   };
 }
 
-/** Probes durable storage with a real write/read/delete round trip. */
+/**
+ * Probes durable storage with a real write/read/delete round trip.
+ *
+ * The probe must exercise the substrate that will actually hold the data. In
+ * production that is PostgreSQL (Neon), and the function filesystem is
+ * read-only derived scratch - probing a file there would report a healthy
+ * foundation while the real substrate was untested. The durable backend is
+ * therefore probed directly whenever the live backend is the database, and the
+ * filesystem is used only when the filesystem backend is genuinely live.
+ */
 export async function probeDurableStorage(dataDir: string): Promise<ControlPlaneDecision> {
+  const live = selectStorageKind();
+  if (live === 'postgresql') {
+    try {
+      const store = new JsonFileStore<{ probe: string; at: string }>({
+        filePath: join(dataDir, 'startup-probe.json'),
+        schemaVersion: 1,
+      });
+      const payload = { probe: 'durable-storage', at: new Date().toISOString() };
+      await store.save(payload);
+      const readBack = await store.load();
+      if (readBack === null || readBack.probe !== payload.probe) {
+        throw new Error('read-back did not match what was written');
+      }
+      return ok(
+        'durable-storage',
+        'Atomic write/read round trip succeeded against the durable database backend.',
+      );
+    } catch (error) {
+      return failed('durable-storage', error);
+    }
+  }
   const dir = join(dataDir, 'startup-probe');
   try {
     await ensureDir(dir);

@@ -29,7 +29,7 @@ import { DurableDocumentStore, documentsFilePath } from './durable-documents.ts'
 import { DurableProjectStore, webProjectsFilePath } from './durable-projects.ts';
 import { DurableJudgmentLedger, judgmentFilePath } from '../judgment/store.ts';
 import { resolveAmbiguity, type IntentTrace } from '../judgment/product-judgment.ts';
-import { ensureDir, resolveDataDir } from '../runtime/paths.ts';
+import { ensureWritableDir, resolveDataDir } from '../runtime/paths.ts';
 import { DuplicateCredentialError, CredentialStore } from '../ai/credential-store.ts';
 import { DocumentStore, DocumentNotFoundError, sha256, type DocumentRef } from '../chat/document.ts';
 import { ModelCatalogue } from '../ai/model-catalogue.ts';
@@ -283,8 +283,22 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
 }> {
   const logger = createLogger({ level: 'warn', sink: consoleSink() });
   // --- Nexona durable application state (survives restarts) --------------------
-  const dataDir = resolveDataDir(options.dataDir);
-  await ensureDir(dataDir);
+  // Durable state lives in the database (Neon in production). The data
+  // directory holds only derived state, so on a read-only function filesystem
+  // it is resolved to a writable location and the substitution is REPORTED
+  // rather than hidden: a boot that cannot create its directory must not look
+  // like one that used it.
+  const requestedDataDir = resolveDataDir(options.dataDir);
+  const { dir: dataDir, fellBack: dataDirFellBack } = await ensureWritableDir(requestedDataDir);
+  if (dataDirFellBack) {
+    logger.warn('web.data_dir_not_writable', {
+      requested: requestedDataDir,
+      using: dataDir,
+      detail:
+        'The requested data directory is on a read-only filesystem; derived state is using a writable temporary root. ' +
+        'Durable state is unaffected because it is stored in the database.',
+    });
+  }
   // The certification/evidence trail is DURABLE across restarts: every append
   // this boot (demo scenario plus all web-stage, verification and supervised
   // run evidence) is written to evidence.json and replayed on the next boot.
