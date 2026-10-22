@@ -215,6 +215,33 @@ export class OpenCodeProvider implements DiscoverableProvider {
  * under the `opencode` provider are free with no user key because the runtime
  * itself serves them (proven by real zero-credential runs of these models).
  */
+/**
+ * Classifies a model from the catalogue's PUBLISHED PRICE.
+ *
+ * A model is free only when the published cost is zero for both input and
+ * output. Anything else - including a model whose price is unknown - is PAID.
+ * A provider advertising a free tier, or a model whose NAME contains "free",
+ * is never evidence that using it is free.
+ *
+ * The zero-cost models are classified `free_api_key_required` rather than
+ * `free_no_api_key` here, because the access route still depends on a key. The
+ * catalogue promotes them to `free_no_api_key` only once the platform's own
+ * OpenCode connection has actually been verified, which is what proves that a
+ * user needs to supply no further key.
+ */
+/**
+ * Access classification for a model served by the OpenCode runtime.
+ *
+ * The platform holds one OpenCode console credential of its own, so a model
+ * whose published cost is zero is reachable with NO additional user key:
+ * `free_no_api_key`.
+ *
+ * A cost-bearing model is NOT free. It is only reachable when the user
+ * supplies their own OpenCode key with credits, so it is classified
+ * `free_api_key_required` - the name that means "a key is required", never
+ * "this is free". `paid` is reserved for providers the platform bills for
+ * directly, and marking these as free would have shown real costs as free.
+ */
 function modelAccessCategory(providerId: string, modelId: string, free: boolean): ModelAccessCategory {
   return free ? 'free_no_api_key' : 'free_api_key_required';
 }
