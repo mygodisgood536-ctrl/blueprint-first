@@ -1,4 +1,4 @@
-// API client for Blueprint-First frontend to communicate with the real backend
+// API client for NEXORA frontend to communicate with the real backend
 
 const API_BASE = ''
 
@@ -432,6 +432,16 @@ export interface ApiSelectionState {
   userId: string; providerId: string; modelId: string; category: string
   connectionVerified: boolean; status: string; detail?: string | null
 }
+/** Freshness of the provider-pushed catalogue the model list came from. */
+export interface ApiCatalogueStatus {
+  provider: string
+  state: 'never-synced' | 'current' | 'expired' | 'failed'
+  syncedAt: string | null
+  expiresAt: string | null
+  expired: boolean
+  failure?: string | null
+  detail?: string | null
+}
 export const modelsApi = {
   list: (params?: { q?: string; accessCategory?: string[]; providerId?: string; availableOnly?: boolean }) => {
     const searchParams = new URLSearchParams()
@@ -439,8 +449,12 @@ export const modelsApi = {
     if (params?.providerId) searchParams.set('providerId', params.providerId)
     if (params?.accessCategory) params.accessCategory.forEach(c => searchParams.append('accessCategory', c))
     if (params?.availableOnly) searchParams.set('availableOnly', 'true')
-    return request<{ total: number; models: ApiModelRow[]; sources: string[]; localHubUnavailable?: boolean }>(`/api/models?${searchParams.toString()}`)
+    return request<{ total: number; models: ApiModelRow[]; sources: string[]; localHubUnavailable?: boolean; catalogue?: ApiCatalogueStatus }>(`/api/models?${searchParams.toString()}`)
   },
+
+  /** Asks the provider to publish its current catalogue. */
+  refresh: () =>
+    request<{ state: string; syncedAt: string | null; expiresAt: string | null; expired: boolean; availableModelCount: number | null; failure?: string | null; detail?: string | null }>('/api/models/refresh', { method: 'POST' }),
 
   stats: () =>
     request<{ totalModels: number; byCategory: Record<string, number>; byProvider: Record<string, number>; verifiedCount: number; sourceCount: number }>('/api/models/stats'),
@@ -563,7 +577,7 @@ export const dashboardApi = {
     request<{ availableNotExercised: Array<{ id: string; label: string; module: string; note: string }> }>('/api/caps'),
 }
 
-// Stage endpoints (Blueprint-First Workspace)
+// Stage endpoints (NEXORA Workspace)
 export const stagesApi = {
   discovery: () =>
     request<{ status: string; error: string | null; baseline: unknown; artifactIds: string[]; findingIds: string[]; diff: unknown; uncertainties: unknown }>('/api/discovery'),

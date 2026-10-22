@@ -24,6 +24,7 @@ import { OpenRouterProvider } from './openrouter-provider.ts';
 import { HostedProvider, hostedMetaFor, WIRED_HOSTED_PROVIDER_IDS } from './hosted-providers.ts';
 import { LocalProvider, type ProviderStatus } from './local-provider.ts';
 import { OpenCodeProvider } from './opencode/opencode-provider.ts';
+import { OpenCodeConsoleProvider } from './opencode/opencode-console-provider.ts';
 import { AiRouter } from './router.ts';
 import { AI_TASK_TYPES } from './types.ts';
 import {
@@ -71,6 +72,13 @@ export interface ProviderManagerOptions {
   logger?: Logger;
   /** The platform's integrated OpenCode execution layer (real runtime subprocess). */
   opencodeProvider?: OpenCodeProvider;
+  /**
+   * The OpenCode Console: the provider's own published catalogue and execution
+   * endpoints, reached over HTTPS. It is the execution path on a host that has
+   * no native OpenCode runtime, and the source of the account's authoritative
+   * model availability everywhere.
+   */
+  opencodeConsoleProvider?: OpenCodeConsoleProvider;
 }
 
 /** What the platform can configure for one supported provider (no secrets). */
@@ -112,6 +120,13 @@ export class ProviderManager {
   private local: LocalProvider | null = null;
   private openCode: OpenCodeProvider | null = null;
   /**
+   * The OpenCode Console: the provider's own published surface, reached over
+   * HTTPS. It is the execution path when the native runtime is not present on
+   * this host - a managed control plane has no 170 MB agent binary - and it is
+   * also the source of the account's authoritative model availability.
+   */
+  private openCodeConsole: OpenCodeConsoleProvider | null = null;
+  /**
    * Per-user current selection slot. Selections are account-scoped: one user's
    * selection must never mask or displace another's (a single process-wide
    * slot would leak identity across accounts).
@@ -125,6 +140,38 @@ export class ProviderManager {
     this.credentialStore = options?.credentialStore ?? new CredentialStore();
     this.logger = options?.logger;
     if (options?.opencodeProvider !== undefined) this.enableOpenCode(options.opencodeProvider);
+    if (options?.opencodeConsoleProvider !== undefined) this.enableOpenCodeConsole(options.opencodeConsoleProvider);
+  }
+
+  /**
+   * Enables the OpenCode Console as the provider's published execution path.
+   *
+   * Registration proves nothing: models become selectable only after the
+   * console has answered a real request with the account's own catalogue.
+   */
+  enableOpenCodeConsole(provider: OpenCodeConsoleProvider): this {
+    this.openCodeConsole = provider;
+    return this;
+  }
+
+  /** The wired OpenCode Console provider, or null when this build has none. */
+  getOpenCodeConsoleProvider(): OpenCodeConsoleProvider | null {
+    return this.openCodeConsole;
+  }
+
+  /**
+   * The OpenCode provider that can actually EXECUTE on this host.
+   *
+   * The native runtime is preferred when it is present and working. When it is
+   * not - a managed control plane cannot host it - the console is used, because
+   * OpenCode itself publishes the same provider and model catalogue over HTTPS.
+   * Returning null means OpenCode cannot run here, and the platform says so
+   * rather than pretending.
+   */
+  activeOpenCode(): OpenCodeProvider | OpenCodeConsoleProvider | null {
+    if (this.openCode !== null && this.openCode.available()) return this.openCode;
+    if (this.openCodeConsole !== null) return this.openCodeConsole;
+    return this.openCode;
   }
 
   /**
@@ -236,10 +283,10 @@ export class ProviderManager {
    * available on guesswork; failures are recorded with their true status.
    */
   async selectOpenCodeModel(userId: string, modelId: string): Promise<SelectionState> {
-    const provider = this.openCode;
+    const provider = this.activeOpenCode();
     if (provider === null) {
       throw new RoutingError(
-        'The OpenCode execution layer is not wired in this build. Nothing was selected.',
+        'The OpenCode execution layer is not available on this host: no working OpenCode runtime resolved and no OpenCode console credential is configured. Nothing was selected.',
       );
     }
     const verification = await provider.verifyConnection();
@@ -258,7 +305,13 @@ export class ProviderManager {
         `OpenCode verification failed (${status})${verification.errorMessage ? `: ${verification.errorMessage}` : ''}. The model was NOT made available.`,
       );
     }
-    if (!provider.opencodeRuntime.hasModel('opencode', modelId)) {
+    // The model must be one the provider actually publishes for this account.
+    // The runtime knows its own catalogue; the console knows the account's.
+    const present =
+      provider instanceof OpenCodeConsoleProvider
+        ? (await provider.availableModelIds())?.has(modelId) === true
+        : provider.opencodeRuntime.hasModel('opencode', modelId);
+    if (!present) {
       this.recordFailure(
         userId,
         'opencode',
@@ -266,10 +319,10 @@ export class ProviderManager {
         'free_no_api_key',
         false,
         'provider_unavailable',
-        `Model "${modelId}" is not present in the real OpenCode catalogue.`,
+        `Model "${modelId}" is not in the model list OpenCode currently publishes for this account.`,
       );
       throw new RoutingError(
-        `Model "${modelId}" is not present in the real OpenCode catalogue. Select a model the runtime actually exposes; nothing was substituted.`,
+        `Model "${modelId}" is not offered by OpenCode for this account right now. Nothing was substituted; choose a model from the current OpenCode list.`,
       );
     }
     return this.recordSelection(userId, 'opencode', modelId, 'free_no_api_key', true, 'connected');
@@ -436,10 +489,10 @@ export class ProviderManager {
       // OpenCode is a platform-level runtime, not a per-user credential: its
       // descriptor reflects the real installed runtime state, never a key.
       if (providerId === 'opencode') {
-        const oc = this.openCode;
+        const oc = this.activeOpenCode();
         const info = oc?.info;
         const cat = catalogueByProvider[providerId];
-        if (oc !== null) {
+        if (oc !== null && oc !== undefined) {
           wired.push({
             providerId,
             name: info?.name ?? 'OpenCode',
@@ -604,7 +657,9 @@ export class ProviderManager {
     if (selection.providerId === 'local') {
       provider = this.local;
     } else if (selection.providerId === 'opencode') {
-      provider = this.openCode;
+      // The platform's OpenCode console key is fixed: it is the platform's
+      // credential, not a per-user one, and it backs the free-model catalogue.
+      provider = this.activeOpenCode();
     } else {
       provider = this.userProviders.get(userId)?.get(selection.providerId) ?? null;
     }
@@ -625,11 +680,16 @@ export class ProviderManager {
     modelId: string,
   ): Promise<ExecutionRoute | null> {
     if (providerId === 'opencode') {
-      const openCode = this.openCode;
+      const openCode = this.activeOpenCode();
       if (openCode === null) return null;
       const verification = await openCode.verifyConnection();
       if (!verification.success) return null;
-      if (!openCode.opencodeRuntime.hasModel('opencode', modelId)) return null;
+      if (openCode instanceof OpenCodeConsoleProvider) {
+        const available = await openCode.availableModelIds();
+        if (available === null || !available.has(modelId)) return null;
+      } else if (!openCode.opencodeRuntime.hasModel('opencode', modelId)) {
+        return null;
+      }
       return this.buildRouter('opencode', modelId, openCode);
     }
     if (providerId === 'local') {

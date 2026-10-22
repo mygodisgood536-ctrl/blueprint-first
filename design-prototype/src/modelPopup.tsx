@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { api, ApiProjectAiConfig, ApiProviderDescriptor, ApiModelRow } from './api'
+import { api, ApiProjectAiConfig, ApiProviderDescriptor, ApiModelRow, ApiCatalogueStatus } from './api'
 import { I } from './icons2'
 import { SecretField } from './components/SecretField'
 
@@ -14,36 +14,20 @@ import { SecretField } from './components/SecretField'
 
 const FREE_CATS = ['free_no_api_key', 'free_api_key_required', 'free_oauth', 'local']
 
-/* § V.5 APPROVED FREE-MODELS CONTRACT (Decision D6).
-   The approved set is fixed and ordered. Availability is NOT hard-coded: an
-   entry is selectable only when the live, OpenCode-backed catalogue actually
-   offers it right now, and an entry the catalogue does not offer is shown as
-   unavailable rather than being silently dropped or, worse, presented as
-   available. The catalogue may offer additional genuinely-free models; those are
-   listed separately so a user is never blocked by a catalogue that has moved. */
-export const APPROVED_FREE_MODELS: readonly string[] = [
-  'Space Bunny Free',
-  'MiMo-V2.6-Flash Free',
-  'Muse Spark 1.3 Free',
-  'Ling 3.0 Flash Fin Free',
-  'Nemotron 3.5 Lightning Free',
-  'Muse Spark 1.2 Free',
-  'Nemotron 3 Ultra Free',
-  'Big Pickle',
-]
+/* § V.5 + §"PROJECT-WIDE AI PROVIDER AND MODEL" — the catalogue is PUSHED BY
+   THE PROVIDER.
 
-function normalizeModelName(name: string): string {
-  return name.trim().toLowerCase().replace(/[\s_]+/g, '-')
-}
+   There is deliberately NO approved list of model names in this file. The
+   architecture states that "their presence in the approved drawing does not
+   authorize hard-coding a permanent catalog" and that "provider and model
+   availability must be derived from the real integrated OpenCode state". A
+   model shown today may be withdrawn tomorrow, and a model that is free today
+   may be priced tomorrow - so the list, the free/paid classification and the
+   availability of every entry come from the live catalogue on each load.
 
-/** Matches an approved label to a live catalogue row, tolerating provider prefixes. */
-function matchApproved(label: string, rows: readonly ApiModelRow[]): ApiModelRow | null {
-  const target = normalizeModelName(label)
-  const exact = rows.find((r) => normalizeModelName(r.name) === target)
-  if (exact) return exact
-  const suffixed = rows.find((r) => normalizeModelName(r.name).endsWith(`/${target}`))
-  return suffixed ?? null
-}
+   A model is selectable only when the catalogue currently offers it; one the
+   provider has withdrawn is shown as unavailable rather than silently dropped
+   or, worse, presented as available. */
 
 /* The project page exposes the project's AI MODEL control. Clicking it opens
    the exact popup; Done returns to this compact AI MODEL state. */
@@ -110,7 +94,7 @@ export function AiModelControl({
       </button>
 
       {open && (
-        <AiModelPopup
+        <AiConfigurationPanel
           value={value}
           onClose={() => setOpen(false)}
           onChange={async (v) => {
@@ -123,15 +107,23 @@ export function AiModelControl({
   )
 }
 
-/* The exact AI MODEL popup — structure matches the authoritative drawing. */
-function AiModelPopup({
+/* The AI CONFIGURATION panel — the single provider/model control.
+   It is rendered in two places and they are the SAME control, not two
+   competing selectors: as the exact AI MODEL popup, and inline in the task
+   composer's side panel so the user can see and change the model that will
+   execute their instruction without leaving the composer. */
+export function AiConfigurationPanel({
   value,
-  onClose,
   onChange,
+  onClose,
+  variant = 'popup',
 }: {
   value: ApiProjectAiConfig | null
-  onClose: () => void
-  onChange: (v: ApiProjectAiConfig) => Promise<void>
+  onChange: (v: ApiProjectAiConfig) => Promise<void> | void
+  /** Optional: closes the surrounding popup after a successful save. */
+  onClose?: () => void
+  /** 'popup' is the modal shell; 'panel' is the inline composer panel. */
+  variant?: 'popup' | 'panel'
 }) {
   const [providers, setProviders] = useState<ApiProviderDescriptor[]>([])
   const [provider, setProvider] = useState(value?.providerId ?? '')
@@ -139,6 +131,10 @@ function AiModelPopup({
   const [model, setModel] = useState(value?.modelId ?? '')
   const [models, setModels] = useState<ApiModelRow[] | null>(null)
   const [freeModels, setFreeModels] = useState<ApiModelRow[]>([])
+  const [freeQuery, setFreeQuery] = useState('')
+  const [providerQuery, setProviderQuery] = useState('')
+  const [modelQuery, setModelQuery] = useState('')
+  const [catalogue, setCatalogue] = useState<ApiCatalogueStatus | null>(null)
   const [loadErr, setLoadErr] = useState('')
   const [freeErr, setFreeErr] = useState('')
   const [status, setStatus] = useState<{ ok: boolean; text: string } | null>(null)
@@ -165,12 +161,15 @@ function AiModelPopup({
       })
     api.models
       .list({ accessCategory: FREE_CATS, availableOnly: true })
-      .then((res) => { if (alive) setFreeModels(res.models) })
+      .then((res) => { if (alive) { setFreeModels(res.models); setCatalogue(res.catalogue ?? null) } })
       .catch(() => { if (alive) setFreeErr('Free model availability is unavailable right now — the list refreshes automatically.') })
     return () => { alive = false }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    // Escape closes the modal shell. The inline panel has no shell to close, so
+    // the listener is only bound when there is something to close.
+    if (onClose === undefined) return
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -178,12 +177,37 @@ function AiModelPopup({
 
   const current = providers.find((p) => p.providerId === provider) ?? null
 
-  // Catalogue entries that are genuinely free but are not part of the approved
-  // set. They are surfaced separately so a user is never blocked by a catalogue
-  // that has moved on, without ever being presented as part of the approved set.
-  const extraFree = freeModels.filter(
-    (row) => APPROVED_FREE_MODELS.every((label) => matchApproved(label, [row]) === null),
-  )
+  /*
+   * The free/paid split comes from the PUBLISHED PRICING the provider
+   * returned, never from the model's name. A model whose input and output
+   * price are both zero is free; anything else - including a model whose price
+   * is unknown - is paid. A model is only ever presented as free when the
+   * catalogue says so.
+   */
+  const freeGroups = (() => {
+    const term = freeQuery.trim().toLowerCase()
+    const matching = term.length === 0
+      ? freeModels
+      : freeModels.filter((r) =>
+          `${r.name} ${r.modelId} ${r.providerName}`.toLowerCase().includes(term),
+        )
+    const isFree = (r: ApiModelRow): boolean =>
+      r.inputCostPer1M !== null && r.inputCostPer1M === 0 &&
+      r.outputCostPer1M !== null && r.outputCostPer1M === 0
+    const free = matching.filter(isFree)
+    const paid = matching.filter((r) => !isFree(r))
+    return { free, paid }
+  })()
+
+  /* The provider selector lists the providers the platform can genuinely
+     offer, in the order the provider catalogue supplied them. */
+  const visibleProviders = (() => {
+    const term = providerQuery.trim().toLowerCase()
+    if (term.length === 0) return providers
+    return providers.filter((p) =>
+      `${p.name} ${p.providerId}`.toLowerCase().includes(term),
+    )
+  })()
 
   useEffect(() => {
     if (!provider) { setModels(null); return }
@@ -251,12 +275,242 @@ function AiModelPopup({
     setStatus(null)
     try {
       await onChange({ providerId: current.providerId, modelId: model, credentialId })
-      onClose()
+      onClose?.()
     } catch (err) {
       setStatus({ ok: false, text: err instanceof Error ? err.message : 'The AI model configuration could not be saved.' })
     } finally {
       setSaving(false)
     }
+  }
+
+  const body = (
+    <>
+      {/* FREE MODELS - the live, provider-pushed list. Free entries first,
+          then paid entries, clearly separated. Nothing is hard-coded. */}
+      <div className="aim-section">
+        <div className="aim-section-title">FREE MODELS</div>
+        {freeErr ? (
+          <div className="aim-free-empty">{freeErr}</div>
+        ) : (
+          <>
+            <div className="aim-field">
+              <input
+                type="search"
+                className="aim-search"
+                placeholder="Search free models…"
+                    aria-label="Search free models"
+                    value={freeQuery}
+                    onChange={(e) => setFreeQuery(e.target.value)}
+                    disabled={verifyBusy || saving}
+                    data-testid="model-popup-free-search"
+                  />
+                </div>
+                {catalogue && catalogue.expired && (
+                  <div className="aim-status err" data-testid="model-popup-catalogue-stale">
+                    The provider catalogue could not be refreshed
+                    {catalogue.detail ? `: ${catalogue.detail}` : ''}. The list below is the last one received
+                    {catalogue.syncedAt ? ` (${new Date(catalogue.syncedAt).toLocaleString()})` : ''} and may be out of date.
+                  </div>
+                )}
+                {freeGroups.free.length === 0 && freeGroups.paid.length === 0 ? (
+                  <div className="aim-free-empty">
+                    {freeQuery.trim().length > 0
+                      ? 'No model in the live catalogue matches that search.'
+                      : 'The integrated catalogue currently offers no free model.'}
+                  </div>
+                ) : (
+                  <>
+                    {freeGroups.free.length > 0 && (
+                      <>
+                        <div className="aim-free-group-title" data-testid="model-popup-free-group">
+                          Free — no additional provider key
+                        </div>
+                        <ul className="aim-free-list" role="listbox" aria-label="Free models">
+                          {freeGroups.free.map((row) => {
+                            const selected = row.providerId === provider && row.modelId === model
+                            return (
+                              <li key={`${row.providerId}:${row.modelId}`} role="option" aria-selected={selected}>
+                                <button
+                                  type="button"
+                                  className={`aim-free-row${selected ? ' is-selected' : ''}`}
+                                  disabled={verifyBusy || saving}
+                                  title={`Use ${row.name}`}
+                                  onClick={() => {
+                                    setProvider(row.providerId)
+                                    setModel(row.modelId)
+                                    setVerified(false)
+                                    setStatus(null)
+                                  }}
+                                >
+                                  <span className="aim-free-name">{row.name}</span>
+                                  <span className="aim-free-state">
+                                    {selected ? 'selected' : row.available ? 'available' : 'not offered'}
+                                  </span>
+                                </button>
+                              </li>
+                            )
+                          })}
+                        </ul>
+                      </>
+                    )}
+                    {freeGroups.paid.length > 0 && (
+                      <>
+                        <div className="aim-free-group-title" data-testid="model-popup-paid-group">
+                          Paid — requires credits
+                        </div>
+                        <ul className="aim-free-list" role="listbox" aria-label="Paid models">
+                          {freeGroups.paid.map((row) => {
+                            const selected = row.providerId === provider && row.modelId === model
+                            return (
+                              <li key={`${row.providerId}:${row.modelId}`} role="option" aria-selected={selected}>
+                                <button
+                                  type="button"
+                                  className={`aim-free-row${selected ? ' is-selected' : ''}`}
+                                  disabled={verifyBusy || saving}
+                                  title={`Use ${row.name}`}
+                                  onClick={() => {
+                                    setProvider(row.providerId)
+                                    setModel(row.modelId)
+                                    setVerified(false)
+                                    setStatus(null)
+                                  }}
+                                >
+                                  <span className="aim-free-name">{row.name}</span>
+                                  <span className="aim-free-state">
+                                    {selected ? 'selected' : row.available ? 'available' : 'not offered'}
+                                  </span>
+                                </button>
+                              </li>
+                            )
+                          })}
+                        </ul>
+                      </>
+                    )}
+                  </>
+                )}
+              </>
+            )}
+          </div>
+
+          <div className="aim-divider" />
+
+          {/* API PROVIDER */}
+          <div className="aim-section">
+            <div className="aim-section-title">API PROVIDER</div>
+
+            <label className="aim-field-label" htmlFor="aim-provider">Provider</label>
+            <div className="aim-field">
+              <input
+                type="search"
+                className="aim-search"
+                placeholder="Search providers…"
+                aria-label="Search providers"
+                value={providerQuery}
+                onChange={(e) => setProviderQuery(e.target.value)}
+                disabled={verifyBusy || saving}
+                data-testid="model-popup-provider-search"
+              />
+              <select
+                id="aim-provider"
+                value={provider}
+                onChange={(e) => selectProvider(e.target.value)}
+                disabled={verifyBusy || saving}
+                data-testid="model-popup-provider"
+              >
+                <option value="">Select API Provider</option>
+                {visibleProviders.map((p) => <option key={p.providerId} value={p.providerId}>{p.name}</option>)}
+              </select>
+            </div>
+
+            {/* The API key field appears ONLY when the selected provider really
+                requires one. A keyless provider must not be shown a disabled or
+                misleading key field. */}
+            {current !== null && current.authMethod !== 'none' && (
+              <>
+                <label className="aim-field-label" htmlFor="aim-key">API Key</label>
+                <div className="aim-field">
+                  <SecretField
+                    id="aim-key"
+                    value={keyValue}
+                    onChange={setKeyValue}
+                    placeholder="Paste your provider API key"
+                    disabled={verifyBusy || saving}
+                    data-testid="model-popup-api-key"
+                  />
+                </div>
+                <p className="aim-copy">This key is stored locally and only used to make API requests from this application.</p>
+              </>
+            )}
+
+            <label className="aim-field-label" htmlFor="aim-model">Model</label>
+            <div className="aim-field">
+              <input
+                type="search"
+                className="aim-search"
+                placeholder="Search models…"
+                aria-label="Search models"
+                value={modelQuery}
+                onChange={(e) => setModelQuery(e.target.value)}
+                disabled={!current || verifyBusy || saving}
+                data-testid="model-popup-model-search"
+              />
+              <select
+                id="aim-model"
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                disabled={!current || verifyBusy || saving}
+                data-testid="model-popup-model"
+              >
+                <option value="">Select Model</option>
+                {((models ?? []).filter((m) => {
+                  const term = modelQuery.trim().toLowerCase()
+                  return term.length === 0 || `${m.name} ${m.modelId}`.toLowerCase().includes(term)
+                })).map((m) => <option key={m.modelId} value={m.modelId}>{m.name}</option>)}
+              </select>
+              {model && (
+                <span className="aim-clear" role="button" aria-label="Clear model" onClick={() => setModel('')}>×</span>
+              )}
+            </div>
+            <p className="aim-copy">The application automatically fetches the latest available models from the selected provider.</p>
+
+            {/* Selecting a provider with no models must never present an
+                arbitrary list: the user is told to choose first. */}
+            {current !== null && (models ?? []).length === 0 && (
+              <div className="aim-status err" data-testid="model-popup-no-models">
+                {current.name} currently offers no model through the integrated catalogue.
+                {current.wired === false ? ' No execution adapter is wired for it in this build.' : ''}
+              </div>
+            )}
+
+            {loadErr && <div className="aim-status err">{loadErr}</div>}
+            {status && <div className={`aim-status ${status.ok ? 'ok' : 'err'}`}>{status.text}</div>}
+          </div>
+    </>
+  )
+
+  const actions = (
+    <>
+      <button className="btn btn-primary" onClick={verify} disabled={!current || verifyBusy || saving}>
+        {verifyBusy ? <><span className="spin" /> Verifying…</> : 'Verify'}
+      </button>
+      <button className="btn btn-primary" onClick={done} disabled={!verified || !model || saving}>
+        {saving ? <><span className="spin" /> Saving…</> : 'Done'}
+      </button>
+    </>
+  )
+
+  if (variant === 'panel') {
+    return (
+      <div className="aim-panel" data-testid="ai-configuration-panel">
+        <div className="aim-panel-header">
+          <h3 className="aim-popup-title">AI CONFIGURATION</h3>
+        </div>
+        <div className="aim-divider" />
+        <div className="aim-scroll">{body}</div>
+        <div className="aim-divider" />
+        <div className="aim-footer">{actions}</div>
+      </div>
+    )
   }
 
   return (
@@ -273,136 +527,9 @@ function AiModelPopup({
           <button className="btn btn-ghost btn-sm" onClick={onClose} aria-label="Close"><I name="close" size={14} /></button>
         </div>
         <div className="aim-divider" />
-
-        <div className="aim-scroll">
-          {/* FREE MODELS - the approved set, gated on live catalogue availability. */}
-          <div className="aim-section">
-            <div className="aim-section-title">FREE MODELS</div>
-            {freeErr ? (
-              <div className="aim-free-empty">{freeErr}</div>
-            ) : (
-              <>
-                <ul className="aim-free-list" role="listbox" aria-label="Approved free models">
-                  {APPROVED_FREE_MODELS.map((label) => {
-                    const row = matchApproved(label, freeModels)
-                    const selected = row !== null && row.providerId === provider && row.modelId === model
-                    return (
-                      <li key={label} role="option" aria-selected={selected}>
-                        <button
-                          type="button"
-                          className={`aim-free-row${selected ? ' is-selected' : ''}${row === null ? ' is-unavailable' : ''}`}
-                          disabled={row === null || verifyBusy || saving}
-                          title={
-                            row === null
-                              ? 'The integrated catalogue does not offer this model right now.'
-                              : `Use ${row.name}`
-                          }
-                          onClick={() => {
-                            if (row === null) return
-                            setProvider(row.providerId)
-                            setModel(row.modelId)
-                            setVerified(false)
-                            setStatus(null)
-                          }}
-                        >
-                          <span className="aim-free-name">{label}</span>
-                          <span className="aim-free-state">
-                            {row === null ? 'not offered' : selected ? 'selected' : 'available'}
-                          </span>
-                        </button>
-                      </li>
-                    )
-                  })}
-                </ul>
-                {extraFree.length > 0 && (
-                  <div className="aim-free-extra">
-                    <div className="aim-free-extra-title">Also available from the integrated catalogue</div>
-                    {extraFree.map((m) => (
-                      <button
-                        key={`${m.providerId}:${m.modelId}`}
-                        type="button"
-                        className={`aim-free-row${m.providerId === provider && m.modelId === model ? ' is-selected' : ''}`}
-                        disabled={verifyBusy || saving}
-                        onClick={() => {
-                          setProvider(m.providerId)
-                          setModel(m.modelId)
-                          setVerified(false)
-                          setStatus(null)
-                        }}
-                      >
-                        <span className="aim-free-name">{m.name}</span>
-                        <span className="aim-free-state">available</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-
-          <div className="aim-divider" />
-
-          {/* API PROVIDER */}
-          <div className="aim-section">
-            <div className="aim-section-title">API PROVIDER</div>
-
-            <label className="aim-field-label" htmlFor="aim-provider">Provider</label>
-            <div className="aim-field">
-              <select
-                id="aim-provider"
-                value={provider}
-                onChange={(e) => selectProvider(e.target.value)}
-                disabled={verifyBusy || saving}
-              >
-                <option value="">Select API Provider</option>
-                {providers.map((p) => <option key={p.providerId} value={p.providerId}>{p.name}</option>)}
-              </select>
-            </div>
-
-            <label className="aim-field-label" htmlFor="aim-key">API Key</label>
-            <div className="aim-field">
-              <SecretField
-                id="aim-key"
-                value={keyValue}
-                onChange={setKeyValue}
-                placeholder="Paste your provider API key"
-                disabled={verifyBusy || saving}
-                data-testid="model-popup-api-key"
-              />
-            </div>
-            <p className="aim-copy">This key is stored locally and only used to make API requests from this application.</p>
-
-            <label className="aim-field-label" htmlFor="aim-model">Model</label>
-            <div className="aim-field">
-              <select
-                id="aim-model"
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-                disabled={!current || verifyBusy || saving}
-              >
-                <option value="">Select Model</option>
-                {(models ?? []).map((m) => <option key={m.modelId} value={m.modelId}>{m.name}</option>)}
-              </select>
-              {model && (
-                <span className="aim-clear" role="button" aria-label="Clear model" onClick={() => setModel('')}>×</span>
-              )}
-            </div>
-            <p className="aim-copy">The application automatically fetches the latest available models from the selected provider.</p>
-
-            {loadErr && <div className="aim-status err">{loadErr}</div>}
-            {status && <div className={`aim-status ${status.ok ? 'ok' : 'err'}`}>{status.text}</div>}
-          </div>
-        </div>
-
+        <div className="aim-scroll">{body}</div>
         <div className="aim-divider" />
-        <div className="aim-footer">
-          <button className="btn btn-primary" onClick={verify} disabled={!current || verifyBusy || saving}>
-            {verifyBusy ? <><span className="spin" /> Verifying…</> : 'Verify'}
-          </button>
-          <button className="btn btn-primary" onClick={done} disabled={!verified || !model || saving}>
-            {saving ? <><span className="spin" /> Saving…</> : 'Done'}
-          </button>
-        </div>
+        <div className="aim-footer">{actions}</div>
       </div>
     </div>
   )

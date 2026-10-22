@@ -37,8 +37,22 @@ export interface ModelSearchQuery {
   /** Upper bound on USD-per-1M output price; null-priced models are excluded. */
   readonly maxOutputCostPer1M?: number;
   readonly contextLengthMin?: number;
-  /** Only include models whose provider connection is currently verified. */
+  /**
+   * Only include models that are CURRENTLY AVAILABLE.
+   *
+   * Availability is a catalogue fact, not a connection fact: a model is
+   * available when the authoritative source that publishes it still publishes
+   * it. That is a different question from whether a connection has been
+   * VERIFIED, and the two are reported separately on purpose - a model can be
+   * listed and still have no working credential behind it.
+   */
   readonly availableOnly?: boolean;
+  /**
+   * Only include models whose provider connection is currently VERIFIED, i.e.
+   * a real connection test succeeded. This is strictly stronger than
+   * `availableOnly`.
+   */
+  readonly verifiedOnly?: boolean;
 }
 
 export interface ModelCatalogueEntry extends ModelInfo {
@@ -95,6 +109,23 @@ export interface ModelCatalogueOptions {
     readonly modelId: string;
     readonly accessCategory: ModelAccessCategory;
   }[];
+  /**
+   * Authoritative AVAILABILITY for one provider, pushed by the provider itself.
+   *
+   * A catalogue says which models exist. Availability says which of them the
+   * connected account can actually use right now - and that list changes on the
+   * provider's schedule, not the platform's. When the overlay is present, a
+   * model that the provider no longer publishes for this account is marked
+   * unavailable, so it is never offered as a new selection.
+   */
+  availabilityOverlay?: {
+    readonly providerId: string;
+    /** Model ids the account can use. */
+    readonly availableModelIds: ReadonlySet<string>;
+    /** When the overlay was fetched, and whether it has expired. */
+    readonly checkedAt: string;
+    readonly expired: boolean;
+  };
 }
 
 const CATEGORY_ORDER: Record<ModelAccessCategory, number> = {
@@ -134,7 +165,12 @@ function matchesQuery(model: ModelCatalogueEntry, query: ModelSearchQuery): bool
     if (model.outputCostPer1M === null || model.outputCostPer1M > query.maxOutputCostPer1M) return false;
   }
   if (query.contextLengthMin !== undefined && model.contextLength < query.contextLengthMin) return false;
-  if (query.availableOnly === true && !model.verified) return false;
+  // Availability and verification are different facts and are filtered
+  // separately. Filtering availability on verification - as this once did -
+  // empties the catalogue, because a catalogue entry is never "verified" by
+  // virtue of being listed.
+  if (query.availableOnly === true && !model.available) return false;
+  if (query.verifiedOnly === true && !model.verified) return false;
   return true;
 }
 
@@ -182,17 +218,58 @@ export class ModelCatalogue {
   private readonly openRouterProvider?: OpenRouterProvider;
   private readonly opencodeSource?: OpencodeCatalogueSource;
   private readonly accessOverrides: ReadonlyMap<string, ModelAccessCategory>;
+  private availabilityOverlay?: NonNullable<ModelCatalogueOptions['availabilityOverlay']>;
 
   constructor(options: ModelCatalogueOptions = {}) {
     this.modelsDevSource = options.modelsDevSource;
     this.openRouterProvider = options.openRouterProvider;
     this.opencodeSource = options.opencodeSource;
+    this.availabilityOverlay = options.availabilityOverlay;
     this.accessOverrides = new Map(
       (options.accessOverrides ?? []).map((o) => [
         `${o.providerId}:${o.modelId}`,
         o.accessCategory,
       ]),
     );
+  }
+
+  /**
+   * Whether the platform's own OpenCode connection has been VERIFIED.
+   *
+   * Only then may a genuinely zero-cost OpenCode model be advertised as
+   * needing no further key from the user. Before that, the platform can prove
+   * the model exists and what it costs, but not that this deployment can reach
+   * it - so the honest category is "free, but a key is required".
+   */
+  private openCodeConnectionVerified = false;
+
+  /**
+   * Records whether the platform's OpenCode connection is verified.
+   *
+   * This is the only thing that can promote a zero-cost model to
+   * `free_no_api_key`: the vision requires that classification to come from a
+   * PROVEN access route, never from a catalogue's own claim.
+   */
+  setOpenCodeConnectionVerified(verified: boolean): void {
+    this.openCodeConnectionVerified = verified;
+  }
+
+  /**
+   * Replaces the provider's own availability list.
+   *
+   * The catalogue is refreshed from the provider on a schedule, and this is how
+   * a fresh list is applied without restarting anything. An EMPTY overlay is
+   * not the same as no overlay: an empty set means the provider published
+   * nothing for this account, which is a fact, and every model of that provider
+   * is genuinely unavailable.
+   */
+  setAvailabilityOverlay(overlay: NonNullable<ModelCatalogueOptions['availabilityOverlay']>): void {
+    this.availabilityOverlay = overlay;
+  }
+
+  /** The provider's current availability list, when one has been applied. */
+  currentAvailabilityOverlay(): NonNullable<ModelCatalogueOptions['availabilityOverlay']> | null {
+    return this.availabilityOverlay ?? null;
   }
 
   /** Stable identity for a model within the catalogue. */
@@ -278,10 +355,45 @@ export class ModelCatalogue {
 
     // Apply Blueprint-First's own proven access overrides last: they always
     // win over any third-party source classification.
+    //
+    // The provider's own availability list is applied AFTER that, because
+    // availability is a fact ABOUT THE ACCOUNT, not a classification: a model
+    // the provider still publishes but no longer offers to this account must be
+    // marked unavailable even though a catalogue lists it.
+    const overlay = this.availabilityOverlay;
     return [...map.values()]
       .map((entry) => {
         const override = this.accessOverrides.get(entry.key);
-        return override === undefined ? entry : { ...entry, accessCategory: override };
+        let classified = override === undefined ? entry : { ...entry, accessCategory: override };
+        // A genuinely zero-cost OpenCode model becomes "no key needed" ONLY
+        // once the platform's own OpenCode connection is verified. Until then
+        // the honest category is "free, but a key is required" - the price is
+        // known, the access route is not.
+        if (
+          classified.providerId === 'opencode' &&
+          classified.accessCategory === 'free_api_key_required' &&
+          this.openCodeConnectionVerified &&
+          classified.inputCostPer1M === 0 &&
+          classified.outputCostPer1M === 0
+        ) {
+          classified = { ...classified, accessCategory: 'free_no_api_key' };
+        }
+        if (overlay === undefined || classified.providerId !== overlay.providerId) return classified;
+        const available = overlay.availableModelIds.has(classified.modelId);
+        return {
+          ...classified,
+          available,
+          metadata: {
+            ...classified.metadata,
+            ...(available
+              ? { availabilitySource: 'provider-account', availabilityCheckedAt: overlay.checkedAt }
+              : {
+                  availabilitySource: 'provider-account',
+                  availabilityCheckedAt: overlay.checkedAt,
+                  availabilityExpired: overlay.expired,
+                }),
+          },
+        };
       })
       .sort((a, b) => {
         const byCategory = CATEGORY_ORDER[a.accessCategory] - CATEGORY_ORDER[b.accessCategory];

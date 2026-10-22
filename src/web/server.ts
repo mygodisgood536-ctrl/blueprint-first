@@ -38,6 +38,8 @@ import { ModelsDevSource } from '../ai/models-dev-source.ts';
 import { OpenCodeRuntime } from '../ai/opencode/opencode-runtime.ts';
 import { OpenCodeProvider } from '../ai/opencode/opencode-provider.ts';
 import { OpencodeCatalogueSource } from '../ai/opencode/opencode-catalogue-source.ts';
+import { OpenCodeConsoleProvider } from '../ai/opencode/opencode-console-provider.ts';
+import { CatalogueSync } from '../ai/opencode/catalogue-sync.ts';
 import { OpenRouterProvider } from '../ai/openrouter-provider.ts';
 import { ProviderManager, WIRED_PROVIDER_IDS } from '../ai/provider-manager.ts';
 import type { ModelAccessCategory } from '../ai/provider-metadata.ts';
@@ -326,6 +328,14 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
   const openCodeRuntime = new OpenCodeRuntime({});
   const openCodeProvider = new OpenCodeProvider({ runtime: openCodeRuntime });
   const openCodeSource = new OpencodeCatalogueSource({ provider: openCodeProvider });
+  // The OpenCode Console is the provider's own published surface: the account's
+  // model list, and the endpoint each model is served from. The console key is a
+  // platform secret read from the environment; it never reaches a browser.
+  const openCodeConsoleKey = process.env['OPENCODE_API_KEY']?.trim() ?? '';
+  const openCodeConsole =
+    openCodeConsoleKey.length > 0
+      ? new OpenCodeConsoleProvider({ apiKey: openCodeConsoleKey })
+      : null;
   const modelCatalogue =
     options.modelCatalogue ??
     new ModelCatalogue({
@@ -339,8 +349,37 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
           }
         : {}),
     });
+  // The provider's own account catalogue is fetched at boot and refreshed on a
+  // TTL, so the model list the product shows is the one OpenCode currently
+  // publishes for this account rather than a snapshot taken by the platform.
+  const openCodeCatalogueSync =
+    openCodeConsole === null ? null : new CatalogueSync({ provider: openCodeConsole });
+  if (openCodeCatalogueSync !== null) {
+    const synced = await openCodeCatalogueSync.sync();
+    if (synced.state === 'current' && synced.availableModelIds !== null) {
+      modelCatalogue.setAvailabilityOverlay({
+        providerId: 'opencode',
+        availableModelIds: new Set(synced.availableModelIds),
+        checkedAt: synced.syncedAt ?? new Date().toISOString(),
+        expired: false,
+      });
+    }
+    // A zero-cost model is only "no key needed" once the platform's own
+    // OpenCode connection has been VERIFIED against the provider. The sync
+    // succeeding proves the console key is accepted; the provider's own
+    // connection test proves the model route is reachable.
+    if (synced.state === 'current') {
+      const verification = await openCodeConsole?.verifyConnection();
+      modelCatalogue.setOpenCodeConnectionVerified(verification?.success === true);
+    }
+  }
   const providerManager =
-    options.providerManager ?? new ProviderManager({ logger, opencodeProvider: openCodeProvider });
+    options.providerManager ??
+    new ProviderManager({
+      logger,
+      opencodeProvider: openCodeProvider,
+      ...(openCodeConsole !== null ? { opencodeConsoleProvider: openCodeConsole } : {}),
+    });
   // LAW - OPENCODE IS A REAL INTEGRATION (§77): the OpenCode execution layer is a
   // mandatory component of the finished platform, so an INJECTED manager must be
   // wired to it too. Without this, a caller-supplied ProviderManager left
@@ -352,6 +391,13 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
   // getExecutionRouterFor - so this cannot manufacture a working AI.
   if (providerManager.getOpenCodeProvider() === null) {
     providerManager.enableOpenCode(openCodeProvider);
+  }
+  // The OpenCode Console is wired the same way: an INJECTED manager must be
+  // connected to the provider's published surface too, so the account's real
+  // model availability and the real execution path are available regardless of
+  // how the manager was constructed.
+  if (openCodeConsole !== null && providerManager.getOpenCodeConsoleProvider() === null) {
+    providerManager.enableOpenCodeConsole(openCodeConsole);
   }
 
   // --- durable identities, documents and web projects -------------------------
@@ -393,6 +439,20 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
 
   const app = express();
   app.use(express.json());
+  // A malformed body is a CLIENT error, not an internal failure. Without this
+  // the JSON parser's SyntaxError escapes as an unhandled 500, which tells the
+  // user their request broke the server when it simply was not JSON.
+  app.use((error: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    if (error instanceof SyntaxError && 'body' in (error as { body?: unknown })) {
+      res.status(400).json({ error: 'The request body was not valid JSON.' });
+      return;
+    }
+    if (typeof error === 'object' && error !== null && 'type' in error && (error as { type?: string }).type === 'entity.parse.failed') {
+      res.status(400).json({ error: 'The request body was not valid JSON.' });
+      return;
+    }
+    next(error);
+  });
   app.use(assertSameOrigin); // CSRF defense: cross-site writes are rejected
   app.use(attachIdentity(identities)); // identity = verified session cookie only
 
@@ -4052,10 +4112,73 @@ execution.router.complete({
         ...(categories.length > 0 ? { accessCategories: categories } : {}),
         ...(req.query['availableOnly'] === 'true' ? { availableOnly: true } : {}),
       });
-      res.json({ total: search.total, models: search.models, sources: search.sources });
+      // The catalogue's freshness is reported alongside it. A stale list must
+      // never be presented as freshly verified availability, so the client is
+      // told exactly when the provider's list was fetched and whether it has
+      // expired since.
+      const sync = openCodeCatalogueSync?.current() ?? null;
+      res.json({
+        total: search.total,
+        models: search.models,
+        sources: search.sources,
+        ...(sync !== null
+          ? {
+              catalogue: {
+                provider: 'opencode',
+                state: sync.state,
+                syncedAt: sync.syncedAt,
+                expiresAt: sync.expiresAt,
+                expired: sync.expired,
+                ...(sync.failure !== null ? { failure: sync.failure } : {}),
+                ...(sync.detail !== null ? { detail: sync.detail } : {}),
+              },
+            }
+          : {}),
+      });
     } catch (error) {
       jsonError(res, 502, error); // upstream catalogue failure, reported honestly
     }
+  });
+
+  /**
+   * Refreshes the provider's catalogue on demand.
+   *
+   * The catalogue is pushed by the provider, so a user who needs the current
+   * list asks for it rather than waiting for a code change. The response
+   * reports the provider's real answer, including a failure.
+   */
+  app.post('/api/models/refresh', async (req, res) => {
+    if (req.identity === undefined) {
+      res.status(401).json({ error: 'authentication required' });
+      return;
+    }
+    if (openCodeCatalogueSync === null) {
+      res.status(409).json({
+        error: 'no-refreshable-catalogue',
+        detail:
+          'No provider catalogue is connected on this deployment, so there is nothing to refresh. The list below is the ' +
+          'catalogue that is published, and it is not account-specific.',
+      });
+      return;
+    }
+    const status = await openCodeCatalogueSync.sync({ force: true });
+    if (status.state === 'current' && status.availableModelIds !== null) {
+      modelCatalogue.setAvailabilityOverlay({
+        providerId: 'opencode',
+        availableModelIds: new Set(status.availableModelIds),
+        checkedAt: status.syncedAt ?? new Date().toISOString(),
+        expired: false,
+      });
+    }
+    res.status(status.state === 'current' ? 200 : 502).json({
+      state: status.state,
+      syncedAt: status.syncedAt,
+      expiresAt: status.expiresAt,
+      expired: status.expired,
+      availableModelCount: status.availableModelIds?.length ?? null,
+      ...(status.failure !== null ? { failure: status.failure } : {}),
+      ...(status.detail !== null ? { detail: status.detail } : {}),
+    });
   });
 
   app.get('/api/models/stats', async (req, res) => {

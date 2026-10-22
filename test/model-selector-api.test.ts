@@ -386,7 +386,7 @@ describe('model selector API (honest surface, per-user isolation)', () => {
         assert.equal(bogus.status, 409);
         assert.match(
           ((await bogus.json()) as { error: string }).error,
-          /not present in the real OpenCode catalogue/,
+          /not offered by OpenCode for this account right now/,
         );
       } finally {
         await close();

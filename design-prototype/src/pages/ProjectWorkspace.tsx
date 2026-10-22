@@ -161,6 +161,7 @@ export function ProjectWorkspace({ id }: { id: string }) {
           busy={!!busyStage}
           onRun={(instruction) => { if (nextStage) void handleRunStage(nextStage, instruction) }}
           projectAiConfig={project.aiConfig ?? null}
+          onProjectAiConfigChange={async (cfg) => { await handleAiConfig(cfg) }}
         />
         {blueprintStage?.inScope && !blueprintRecorded && (
           <div className="hint mt-8">Run the Blueprint stage to unlock the human-approval gate ({project.mode} mode).</div>

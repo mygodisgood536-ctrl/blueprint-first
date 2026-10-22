@@ -73,17 +73,24 @@ export interface ModelsDevSourceOptions {
   fetchImpl?: FetchFn;
   /** Cache lifetime for a successful fetch, in milliseconds. */
   cacheTtlMs?: number;
+  /** Deadline for the catalogue request, in milliseconds. */
+  timeoutMs?: number;
 }
 
 export class ModelsDevSource {
   private readonly fetchImpl: FetchFn;
   private readonly cacheTtlMs: number;
+  private readonly timeoutMs: number;
   private cache: readonly ModelInfo[] | null = null;
   private cacheTimestamp = 0;
 
   constructor(options: ModelsDevSourceOptions = {}) {
     this.fetchImpl = options.fetchImpl ?? (globalThis.fetch as unknown as FetchFn);
     this.cacheTtlMs = options.cacheTtlMs ?? 5 * 60 * 1000;
+    // The catalogue is a multi-megabyte document. Without a deadline a slow
+    // upstream would hang the request indefinitely, and the platform would
+    // appear to have no providers at all rather than reporting a timeout.
+    this.timeoutMs = options.timeoutMs ?? 20_000;
   }
 
   /** True when the cached catalogue is present and still fresh. */
@@ -99,10 +106,26 @@ export class ModelsDevSource {
   async fetchCatalog(): Promise<readonly ModelInfo[]> {
     if (this.cacheFresh && this.cache !== null) return this.cache;
 
-    const response = await this.fetchImpl(MODELS_DEV_API_URL, {
-      method: 'GET',
-      headers: { accept: 'application/json' },
-    });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    let response: Awaited<ReturnType<FetchFn>>;
+    try {
+      response = await this.fetchImpl(MODELS_DEV_API_URL, {
+        method: 'GET',
+        headers: { accept: 'application/json' },
+        ...(this.fetchImpl === (globalThis.fetch as unknown as FetchFn)
+          ? { signal: controller.signal }
+          : {}),
+      } as never);
+    } catch (error) {
+      throw new ProviderHttpError(
+        `The provider catalogue could not be fetched: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    } finally {
+      clearTimeout(timer);
+    }
     if (!response.ok) {
       throw new ProviderHttpError(
         `models.dev catalogue request failed with HTTP ${response.status}.`,

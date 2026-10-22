@@ -586,6 +586,31 @@ select.input, .field > select {
 .composer-provider-btn:hover { border-color: rgb(var(--accent) / 0.45); color: rgb(var(--fg)); }
 .composer-run { display: flex; align-items: center; gap: 0.5rem; }
 
+/* The task composer and the AI configuration panel are one workspace: the model
+   that will execute the instruction is chosen right beside the instruction. */
+.composer-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 22rem);
+  gap: 1rem;
+  align-items: start;
+}
+.aim-panel {
+  border: 1px solid rgb(var(--line) / var(--line-alpha));
+  border-radius: var(--radius-lg);
+  background: rgb(var(--bg-elevated) / 0.6);
+  overflow: hidden;
+  min-width: 0;
+}
+.aim-panel-header { display: flex; align-items: center; justify-content: space-between; padding: 0.75rem 1.35rem 0.5rem; }
+.aim-panel .aim-scroll { max-height: 26rem; }
+
+/* On narrow screens the panel stacks under the composer and keeps every
+   control reachable. */
+@media (max-width: 900px) {
+  .composer-workspace { grid-template-columns: minmax(0, 1fr); }
+  .aim-panel .aim-scroll { max-height: none; }
+}
+
 .drop-zone { border: 1px dashed rgb(var(--line) / var(--line-alpha-strong)); border-radius: var(--radius-lg); padding: 1.5rem; text-align: center; color: rgb(var(--fg-muted)); }
 .drop-zone.over { border-color: rgb(var(--accent)); background: rgb(var(--accent) / var(--accent-soft)); }
 
@@ -688,6 +713,31 @@ select.input, .field > select {
 }
 .aim-free-extra button.aim-free-row:hover:not(:disabled) { background: rgb(var(--line) / 0.07); }
 .aim-free-extra button.aim-free-row.is-selected { border-color: rgb(var(--accent)); }
+
+/* The free and paid halves of the provider catalogue are separate groups, not
+   one mixed list. The rule makes the boundary unmistakable. */
+.aim-free-group-title {
+  display: flex; align-items: center; gap: 0.5rem;
+  font-family: var(--font-mono); font-size: 0.62rem; text-transform: uppercase;
+  letter-spacing: 0.07em; color: rgb(var(--fg-muted));
+  margin: 0.35rem 0 0.3rem;
+}
+.aim-free-group-title::after {
+  content: ''; flex: 1; height: 1px; background: rgb(var(--line) / var(--line-alpha));
+}
+
+/* Search control used by the free-model, provider and model selectors. */
+.aim-search {
+  width: 100%; margin-bottom: 0.45rem;
+  padding: 0.4rem 0.6rem;
+  background: rgb(var(--surface-2)); color: rgb(var(--fg));
+  border: 1px solid rgb(var(--line) / var(--line-alpha));
+  border-radius: var(--radius-sm);
+  font: inherit; font-size: 0.8rem;
+}
+.aim-search::placeholder { color: rgb(var(--fg-subtle)); }
+.aim-search:focus-visible { outline: 2px solid rgb(var(--accent)); outline-offset: 1px; border-color: rgb(var(--accent)); }
+.aim-search:disabled { opacity: 0.55; cursor: not-allowed; }
 
 /* ========================================================================== */
 /* Toasts                                                                     */
