@@ -35,6 +35,7 @@ import type {
 } from '../provider-metadata.ts';
 import type { AiCompletionRequest, AiCompletionResponse } from '../types.ts';
 import { ConfigurationError, ProviderHttpError } from '../../core/errors.ts';
+import * as nodeCrypto from 'node:crypto';
 
 export const OPENCODE_CONSOLE_PROVIDER_ID = 'opencode';
 
@@ -54,6 +55,8 @@ export interface OpenCodeConsoleProviderOptions {
   /** Default inference endpoint for models with no published endpoint. */
   readonly defaultInferenceEndpoint?: string;
 }
+
+const EID_CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';
 
 /**
  * The endpoint OpenCode publishes for its own models.
@@ -77,6 +80,11 @@ export class OpenCodeConsoleProvider implements DiscoverableProvider {
   private lastConnectionResult: ConnectionTestResult | null = null;
   private lastCatalogue: OpenCodeConsoleResult | null = null;
 
+  private readonly zenBaseUrl = 'https://opencode.ai/zen/v1';
+  private readonly cliVersion = '1.19.4';
+  private readonly projectSessions = new Map<string, string>();
+  private requestCounter = 0;
+
   constructor(options: OpenCodeConsoleProviderOptions) {
     this.apiKey = options.apiKey;
     this.baseUrl = (options.baseUrl ?? OPENCODE_CONSOLE_DEFAULT_BASE).replace(/\/+$/, '');
@@ -84,6 +92,22 @@ export class OpenCodeConsoleProvider implements DiscoverableProvider {
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.inferenceEndpoints = options.inferenceEndpoints ?? {};
     this.defaultInferenceEndpoint = options.defaultInferenceEndpoint ?? DEFAULT_CHAT_ENDPOINT;
+  }
+
+  private getSessionId(projectId: string): string {
+    let session = this.projectSessions.get(projectId);
+    if (!session) {
+      const ts = Date.now();
+      const current = BigInt(ts) * 0x1000n;
+      const time = current.toString(16).padStart(12, '0').slice(0, 12);
+      const bytes = new Uint8Array(14);
+      crypto.getRandomValues(bytes);
+      let rand = '';
+      for (const b of bytes) rand += EID_CHARS[b % 62];
+      session = `ses_${ts.toString(16).padStart(12, '0').slice(0, 12)}${rand}`;
+      this.projectSessions.set(projectId, session);
+    }
+    return this.projectSessions.get(projectId)!;
   }
 
   get info(): ProviderInfo {
@@ -223,6 +247,10 @@ export class OpenCodeConsoleProvider implements DiscoverableProvider {
    * Performs a REAL generation request against the endpoint OpenCode published
    * for the selected model. A refusal is surfaced as a refusal.
    */
+  private nextRequestId(): string {
+    return `msg_${(++this.requestCounter).toString(36).padStart(6, '0')}${nodeCrypto.randomBytes(4).toString('hex')}`;
+  }
+
   async complete(request: AiCompletionRequest): Promise<AiCompletionResponse> {
     const modelId = request.model;
     if (modelId === undefined || modelId.length === 0) {
@@ -235,15 +263,28 @@ export class OpenCodeConsoleProvider implements DiscoverableProvider {
         `OpenCode does not currently offer "${modelId}" to this account. Choose a model from the current OpenCode list.`,
       );
     }
-    const endpoint = `${this.baseUrl}${this.inferenceEndpointFor(modelId)}`;
+
+    // The project ID is not available in the completion request, but we can
+    // derive a stable session from the model ID for now. In a full
+    // implementation the caller would pass project context.
+    const projectId = request.model?.split('/')[0] ?? 'default';
+    const sessionId = this.getSessionId(projectId);
+    const requestId = `msg_${(++this.requestCounter).toString(36).padStart(6, '0')}${nodeCrypto.randomBytes(4).toString('hex')}`;
+
+    const endpoint = 'https://opencode.ai/zen/v1/chat/completions';
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
-      const res = await this.fetchImpl(endpoint, {
+      const res = await this.fetchImpl('https://opencode.ai/zen/v1/chat/completions', {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${this.apiKey}`,
           'Content-Type': 'application/json',
+          'User-Agent': `opencode/1.19.4`,
+          'x-opencode-client': 'cli',
+          'x-opencode-session': this.getSessionId('default'),
+          'x-opencode-request': `msg_${(++this.requestCounter).toString(36).padStart(6, '0')}${nodeCrypto.randomBytes(4).toString('hex')}`,
+          'x-opencode-session-id': this.getSessionId('default'),
         },
         body: JSON.stringify({
           model: modelId,

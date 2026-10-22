@@ -34,11 +34,17 @@ const ANSWER = 'Greenwood Primary';
 let url = '';
 let close: () => Promise<void>;
 let identityFile = '';
+/** Where the durable identity state ACTUALLY lives (the backend owns the name). */
+let identityStateFile = '';
 
 before(async () => {
   const dir = await mkdtemp(join(tmpdir(), 'bf-setup-'));
   identityFile = join(dir, 'identity.json');
   const identities = await DurableIdentityRegistry.load(identityFile, 60 * 60 * 1000);
+  // The path handed to load() names a SLOT. The storage backend owns the real
+  // file name, so the test has to ask the registry where the state lives
+  // instead of assuming the slot path is a file.
+  identityStateFile = identities.location() ?? identityFile;
   const app = express();
   app.use(express.json());
   // The same session-cookie resolution the real server installs, so these
@@ -126,7 +132,7 @@ describe('the first-time setup flow is retired', () => {
   });
 
   test('the security answer is never stored in plaintext', async () => {
-    const raw = await readFile(identityFile, 'utf8');
+    const raw = await readFile(identityStateFile, 'utf8');
     assert.ok(!raw.includes(ANSWER), 'the answer must never appear on disk');
     assert.match(raw, /scrypt|salt2/i, 'the answer must be stored as a salted hash');
   });
