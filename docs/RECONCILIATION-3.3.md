@@ -145,7 +145,7 @@ Evidence from a full read of `src/` and `test/` (detailed in the audit pass; key
 - Mock layer (`src/mock/*`) is mostly orphaned; `stagesForMode()` still fabricates stage
   status for project-list rows and post-create state until real detail loads — replaced by
   real state in the redesign.
-- Production serves the built bundle from `src/web/public/nexona`
+- Production serves the built bundle from `src/web/public/nexora`
   (`npm run build:serve` in `design-prototype/` copies `dist` there).
 
 ---

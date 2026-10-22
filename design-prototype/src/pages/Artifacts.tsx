@@ -182,7 +182,7 @@ export function ArtifactDetail({ id }: { id: string }) {
 
         <div className="card"><h4 className="mb-12">Provenance</h4>
           <div style={{ display: 'grid', gap: 8 }}>
-            <div className="row-between text-sm"><span className="muted">Produced by</span>the Blueprint-First engine</div>
+            <div className="row-between text-sm"><span className="muted">Produced by</span>the NEXORA engine</div>
             <div className="row-between text-sm"><span className="muted">Evidence</span>{linkedEvidence.length > 0 ? (
               <span>{linkedEvidence.map((e: any, i: number) => (
                 <span key={e.id}>{i > 0 ? ', ' : ''}<a href={'#/evidence/' + e.id} className="id-mono">{e.id}</a></span>
@@ -226,7 +226,7 @@ export function ArtifactDetail({ id }: { id: string }) {
       <div className="card mt-16">
         <h4 className="mb-8">Evidence supporting this artifact</h4>
         {linkedEvidence.length === 0 ? (
-          <p className="text-sm muted">No evidence linked yet. Evidence answers "why does Blueprint-First believe this?" — see <a href="#/evidence">Evidence</a>.</p>
+          <p className="text-sm muted">No evidence linked yet. Evidence answers "why does NEXORA believe this?" — see <a href="#/evidence">Evidence</a>.</p>
         ) : (
           <div style={{ display: 'grid', gap: 8 }}>
             {linkedEvidence.map((e: any) => (

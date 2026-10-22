@@ -22,12 +22,12 @@ import { join } from 'node:path';
 import { buildWorkingServer, workingTempDataDir as tempDataDir } from './working-harness.ts';
 import { signUp, signUpOwner } from './account-api-helper.ts';
 
-const NEXONA_DIR = join(process.cwd(), 'src', 'web', 'public', 'nexona');
+const NEXONA_DIR = join(process.cwd(), 'src', 'web', 'public', 'nexora');
 
 /** Reads the served index.html and the JS bundle it references. */
 async function readServedBundle(): Promise<{ html: string; js: string; name: string }> {
   const indexPath = join(NEXONA_DIR, 'index.html');
-  assert.ok(existsSync(indexPath), 'the built SPA must be present in src/web/public/nexona');
+  assert.ok(existsSync(indexPath), 'the built SPA must be present in src/web/public/nexora');
   const html = await readFile(indexPath, 'utf8');
   const match = html.match(/assets\/index-[A-Za-z0-9_-]+\.js/);
   assert.ok(match !== null, 'index.html must reference a built JS bundle');

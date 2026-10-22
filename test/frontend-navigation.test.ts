@@ -36,7 +36,7 @@ const ADMIN: AuthFacts = { ...READY, isAdministrator: true };
 
 /** The built bundle the server actually serves, when it has been built. */
 function builtBundle(): string | null {
-  const dir = join(process.cwd(), 'src', 'web', 'public', 'nexona', 'assets');
+  const dir = join(process.cwd(), 'src', 'web', 'public', 'nexora', 'assets');
   if (!existsSync(dir)) return null;
   const js = readdirSync(dir).find((f) => f.endsWith('.js'));
   return js === undefined ? null : readFileSync(join(dir, js), 'utf8');

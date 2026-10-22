@@ -4,7 +4,7 @@ import { stagesApi } from '../api'
 import { Status } from '../ui'
 import { I } from '../icons2'
 
-/* Verification — master verification dimensions from the Blueprint-First backend.
+/* Verification — master verification dimensions from the NEXORA backend.
    Each dimension represents a forward‑facing quality requirement. */
 
 export function Verification() {

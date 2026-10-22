@@ -279,7 +279,7 @@ describe('Stage 6 — Projects API (real registry + durable store)', () => {
   });
 
   it('iteration persistence: project survives a server restart on the same data dir', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'nexona-s6-persist-'));
+    const dataDir = mkdtempSync(join(tmpdir(), 'nexora-s6-persist-'));
     // Servers are closed in a finally so an assertion failure can never leak a
     // listener and hang the test process instead of reporting the failure.
     let s1: Awaited<ReturnType<typeof buildProjectServer>> | null = null;
@@ -316,7 +316,7 @@ describe('Stage 6 — Projects API (real registry + durable store)', () => {
   });
 
   it('real-boot persistence: web projects replay into a freshly rebuilt store', async () => {
-    const dataDir = mkdtempSync(join(tmpdir(), 'nexona-s6-replay-'));
+    const dataDir = mkdtempSync(join(tmpdir(), 'nexora-s6-replay-'));
     let s1: Awaited<ReturnType<typeof buildProjectServer>> | null = null;
     try {
       s1 = await buildProjectServer(dataDir);

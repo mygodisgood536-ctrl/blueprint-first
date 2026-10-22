@@ -124,13 +124,13 @@ export function Shell({
 
       <header className="topbar">
         <div className="container-page topbar-inner">
-          <a className="logo" href="#/dashboard" aria-label="Blueprint-First dashboard">
+          <a className="logo" href="#/dashboard" aria-label="NEXORA dashboard">
             <span className="logo-mark" aria-hidden="true">
-              BF
+              NX
             </span>
             <span className="brand-text">
-              <span className="brand-name">Blueprint-First</span>
-              <span className="brand-sub">AI software engineering</span>
+              <span className="brand-name">NEXORA</span>
+              <span className="brand-sub">Blueprint First AI Engineering</span>
             </span>
           </a>
 

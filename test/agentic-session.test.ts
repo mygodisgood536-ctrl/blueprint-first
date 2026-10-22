@@ -13,7 +13,7 @@ import { AiRouter } from '../src/ai/router.ts';
 import { ScriptedProvider } from '../src/ai/scripted-provider.ts';
 
 async function tempWorkspace(): Promise<LocalWorkspaceEnvAdapter> {
-  const dir = await fs.mkdtemp(join(tmpdir(), 'nexona-agent-' + randomBytes(4).toString('hex')));
+  const dir = await fs.mkdtemp(join(tmpdir(), 'nexora-agent-' + randomBytes(4).toString('hex')));
   const adapter = new LocalWorkspaceEnvAdapter(dir);
   const health = await adapter.provision({ label: 'agentic workspace', gitEnabled: true });
   assert.equal(health.ok, true);

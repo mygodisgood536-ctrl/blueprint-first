@@ -109,7 +109,7 @@ export function Preferences() {
       <div style={{ display: 'grid', gap: 16 }}>
         <div>
           <h2 style={{ fontSize: 18, marginBottom: 4 }}>Preferences</h2>
-          <p className="muted" style={{ fontSize: 13 }}>Personalize your Blueprint-First workspace. Preferences are stored per account.</p>
+          <p className="muted" style={{ fontSize: 13 }}>Personalize your NEXORA workspace. Preferences are stored per account.</p>
         </div>
         <div className="card">
           <h4 className="mb-12">Notifications</h4>

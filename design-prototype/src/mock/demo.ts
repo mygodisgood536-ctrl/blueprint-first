@@ -9,7 +9,7 @@
    Use these on the login screen at http://localhost:5180/#/login:
 
      Username or email : cornelius
-     Password          : Blueprint-First2026
+     Password          : NEXORA2026
      Authenticator code: 123456   (any 6 digits works;
                                    000000 simulates a rejected code)
      Recovery code     : N7K4-Q9W2 (from "Lost your authenticator?")
@@ -23,8 +23,8 @@
 
 export const DEMO = {
   username: 'cornelius',
-  email: 'cornelius@Blueprint-First.demo',
-  password: 'Blueprint-First2026',
+  email: 'cornelius@nexora.demo',
+  password: 'NEXORA2026',
   totp: '123456',
   totpRejected: '000000',
   recovery: 'N7K4-Q9W2',

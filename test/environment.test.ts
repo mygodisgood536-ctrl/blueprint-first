@@ -61,8 +61,8 @@ describe('EnvironmentManager (real local workspace)', () => {
     // The real directory and manifest exist on disk.
     const stat = await fs.stat(ready.workspaceRoot!);
     assert.ok(stat.isDirectory());
-    const manifest = await fs.readFile(join(ready.workspaceRoot!, '.nexona-manifest.json'), 'utf8');
-    assert.ok(manifest.includes('nexona-project-environment'));
+    const manifest = await fs.readFile(join(ready.workspaceRoot!, '.nexora-manifest.json'), 'utf8');
+    assert.ok(manifest.includes('nexora-project-environment'));
     assert.ok(ready.lastHealth?.ok === true);
     // Events were recorded with full attribution. The readiness event is
     // published asynchronously after the status flips, so poll for it rather

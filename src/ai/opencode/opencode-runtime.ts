@@ -35,7 +35,7 @@ export function defaultOpenCodeCachePath(): string {
 
 /** Default scratch directory used for headless runs (never the repo cwd). */
 export function defaultOpenCodeScratchDir(): string {
-  return join(tmpdir(), 'nexona-opencode');
+  return join(tmpdir(), 'nexora-opencode');
 }
 
 export class OpenCodeError extends Error {

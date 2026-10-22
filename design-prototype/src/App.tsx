@@ -126,7 +126,7 @@ function SessionPending() {
       <div className="auth-card-wrap">
         <div className="auth-brand">
           <span className="splash-monogram" style={{ width: 44, height: 44, fontSize: 14 }} aria-hidden="true">
-            BF
+            NX
           </span>
         </div>
         <div className="auth-card center" style={{ padding: '2.5rem 2rem' }}>

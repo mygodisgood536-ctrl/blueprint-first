@@ -193,7 +193,7 @@ applied automatically at boot.
 ## 8. Deploying
 
 ```bash
-npm run build:frontend     # build the SPA into src/web/public/nexona
+npm run build:frontend     # build the SPA into src/web/public/nexora
 npx vercel --prod          # or let a push to the production branch trigger it
 ```
 

@@ -1,7 +1,7 @@
 /**
- * Nexona web application server.
+ * NEXORA web application server.
  *
- * Serves the Nexona browser product: a single-page application backed by an
+ * Serves the NEXORA browser product: a single-page application backed by an
  * authenticated REST API that orchestrates the existing Blueprint-First
  * engineering core (src/demo/main.ts pipeline = single source of truth for the
  * engine showcase). The engineering core is untouched â€” this layer wires real
@@ -72,7 +72,7 @@ import { lineageStatus } from '../traceability/trace.ts';
 import { runWatchdogTick } from './watchdog.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const PUBLIC_DIR = join(__dirname, 'public', 'nexona');
+const PUBLIC_DIR = join(__dirname, 'public', 'nexora');
 
 /** Session lifetime: 12 hours (the session cookie Max-Age matches this). */
 const SESSION_TTL_MS = 12 * 60 * 60 * 1000;
@@ -283,7 +283,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
   stageState?: StageStateStore;
 }> {
   const logger = createLogger({ level: 'warn', sink: consoleSink() });
-  // --- Nexona durable application state (survives restarts) --------------------
+  // --- NEXORA durable application state (survives restarts) --------------------
   // Durable state lives in the database (Neon in production). The data
   // directory holds only derived state, so on a read-only function filesystem
   // it is resolved to a writable location and the substitution is REPORTED
@@ -396,7 +396,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
   app.use(assertSameOrigin); // CSRF defense: cross-site writes are rejected
   app.use(attachIdentity(identities)); // identity = verified session cookie only
 
-  app.use('/nexona', express.static(PUBLIC_DIR, { maxAge: '365d', immutable: true, setHeaders: (res, filePath) => { if (filePath.endsWith('.html')) res.setHeader('Cache-Control', 'no-store'); res.setHeader('X-Nexona-Asset', 'ok'); } }));
+  app.use('/nexora', express.static(PUBLIC_DIR, { maxAge: '365d', immutable: true, setHeaders: (res, filePath) => { if (filePath.endsWith('.html')) res.setHeader('Cache-Control', 'no-store'); res.setHeader('X-NEXORA-Asset', 'ok'); } }));
   app.use('/assets', express.static(join(PUBLIC_DIR, 'assets'), { maxAge: '365d', immutable: true, setHeaders: (res) => { res.setHeader('Cache-Control', 'public, max-age=31536000, immutable'); } }));
   app.use('/favicon.svg', express.static(join(PUBLIC_DIR, 'favicon.svg'), { maxAge: '1h' }));
 
@@ -416,7 +416,7 @@ export async function buildServer(options: BuildServerOptions = {}): Promise<{
     });
   });
 
-  // --- Nexona authentication (the ONLY authentication surface) ----------------
+  // --- NEXORA authentication (the ONLY authentication surface) ----------------
   // signup / login / logout / session / security-questions. There is no owner
   // or user entry point, no password, no OTP, no authenticator and no recovery
   // route registered anywhere in this application.
@@ -1039,7 +1039,7 @@ res.json({ project: projectSummary(updated) });
         owner: { userId: user, label: account !== undefined ? account.fullName || account.username : user },
         actor: { kind: 'human', id: user },
         scope: [name],
-        config: { vision, source: 'nexona-web', ...(visionDocumentRef ? { visionDocument: visionDocumentRef } : {}), ...(aiConfig !== null ? { aiConfig } : {}) },
+        config: { vision, source: 'nexora-web', ...(visionDocumentRef ? { visionDocument: visionDocumentRef } : {}), ...(aiConfig !== null ? { aiConfig } : {}) },
       });
       // Creating a project records a PROJECT artifact; it does NOT fabricate
       // a pipeline run, so the discovery artifact count is honestly zero.
@@ -4461,7 +4461,7 @@ export async function startServer(): Promise<void> {
       const server = app.listen(port, host, () => {
     logger.info('web.listening', { host, port });
     console.log('');
-    console.log('Nexona - The Blueprint AI Software Engineering Platform');
+    console.log('NEXORA - Blueprint First AI Engineering');
     console.log('-------------------------------------------------------');
     console.log(`  Open in Chrome : http://${host}:${port}`);
     console.log(`  Identities      : ${identities.filePath}`);

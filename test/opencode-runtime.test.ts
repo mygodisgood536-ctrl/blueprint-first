@@ -67,7 +67,7 @@ const CACHE_FIXTURE = JSON.stringify({
 });
 
 function fixtureDir(): string {
-  return mkdtempSync(join(tmpdir(), 'nexona-opencode-test-'));
+  return mkdtempSync(join(tmpdir(), 'nexora-opencode-test-'));
 }
 
 function runtimeWithFixture(): OpenCodeRuntime {

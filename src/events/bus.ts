@@ -1,7 +1,7 @@
 /**
  * Durable append-only event bus.
  *
- * Same durability philosophy as the other Nexona stores: a schema-versioned
+ * Same durability philosophy as the other NEXORA stores: a schema-versioned
  * JSON snapshot written atomically on every publish, re-hydrated on boot.
  * Statement ordering is guaranteed by the monotonic `seq`, and the seq
  * counter is persisted together with the events so a crash cannot reuse or

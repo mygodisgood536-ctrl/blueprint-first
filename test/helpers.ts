@@ -1,5 +1,5 @@
 /**
- * Shared test helpers for the Nexona product-layer API tests.
+ * Shared test helpers for the NEXORA product-layer API tests.
  *
  * The web layer authenticates via the `bf_session` cookie only, resolved
  * server-side from the opaque session token. These helpers create real accounts
@@ -16,7 +16,7 @@ import { SECURITY_QUESTIONS } from '../src/account/identity.ts';
 
 /** Creates a fresh, isolated data directory for one server instance. */
 export async function tempDataDir(): Promise<string> {
-  return await fs.mkdtemp(join(tmpdir(), 'nexona-test-'));
+  return await fs.mkdtemp(join(tmpdir(), 'nexora-test-'));
 }
 
 /** The security question every helper uses unless told otherwise. */

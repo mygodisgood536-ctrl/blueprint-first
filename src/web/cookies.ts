@@ -1,7 +1,7 @@
 /**
  * Cookie parsing/serialization helpers (dependency-free).
  *
- * Nexona uses exactly one cookie: the opaque session token. It is set
+ * NEXORA uses exactly one cookie: the opaque session token. It is set
  * HttpOnly + SameSite=Lax so it is unreachable from scripts and is not sent
  * on cross-site requests. The connection is plain HTTP in local deployments,
  * so `Secure` is deliberately not set there; a TLS deployment should set it.

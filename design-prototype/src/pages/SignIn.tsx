@@ -36,19 +36,19 @@ function AuthShell({ children }: { children: React.ReactNode }) {
       />
       <div className="auth-card-wrap">
         <div className="auth-brand">
-          <a href="#/welcome" className="entry-mark" aria-label="Blueprint-First home">
+          <a href="#/welcome" className="entry-mark" aria-label="NEXORA home">
             <span className="splash-monogram" style={{ width: 40, height: 40, fontSize: 13 }} aria-hidden="true">
-              BF
+              NX
             </span>
             <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-              <span className="brand-name">Blueprint-First</span>
-              <span className="brand-sub">AI software engineering</span>
+              <span className="brand-name">NEXORA</span>
+              <span className="brand-sub">Blueprint First AI Engineering</span>
             </span>
           </a>
         </div>
         <div className="auth-card">{children}</div>
         <p className="center text-sm dim" style={{ marginTop: '1.5rem' }}>
-          &copy; 2026 Blueprint-First
+          &copy; 2026 NEXORA
         </p>
       </div>
     </div>
@@ -238,7 +238,7 @@ return (
       </form>
       <div className="divider" />
       <p className="auth-switch text-sm muted">
-        {creating ? 'Already have an account? ' : 'New to Blueprint-First? '}
+        {creating ? 'Already have an account? ' : 'New to NEXORA? '}
         <a
           href="#/signin"
           onClick={(e) => {

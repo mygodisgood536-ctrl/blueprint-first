@@ -3,7 +3,7 @@
   "framework": null,
   "installCommand": "npm ci && npm --prefix design-prototype ci",
   "buildCommand": "npm run build:frontend",
-  "outputDirectory": "src/web/public/nexona",
+  "outputDirectory": "src/web/public/nexora",
   "functions": {
     "api/index.ts": {
       "memory": 2048,

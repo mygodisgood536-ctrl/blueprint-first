@@ -1,5 +1,5 @@
 /**
- * Durable document store for the Nexona product layer.
+ * Durable document store for the NEXORA product layer.
  *
  * The existing chat DocumentStore is in-memory by design ("content held in
  * backside memory"); uploaded project context must survive restarts, so this

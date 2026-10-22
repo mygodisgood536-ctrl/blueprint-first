@@ -17,9 +17,9 @@ const articles: Article[] = [
       'After signing up you will be guided to set up two-factor authentication with an authenticator app before you continue.'] },
   { slug: 'your-first-project', cat: 'Getting started', title: 'Your first project',
     body: ['Open the dashboard and choose New project. Give it a name and optional description, then choose a mode: Design-only, Design-plus-code, or Full-product.',
-      'Upload source documents so Blueprint-First can classify them. Once created, the Blueprint-First pipeline starts and your workspace opens with the design stage.'] },
+      'Upload source documents so NEXORA can classify them. Once created, the NEXORA pipeline starts and your workspace opens with the design stage.'] },
   { slug: 'understanding-the-lifecycle', cat: 'Getting started', title: 'Understanding the lifecycle',
-    body: ['Blueprint-First is blueprint-first: every product moves through design → engineering → verification before anything ships.',
+    body: ['NEXORA is blueprint-first: every product moves through design → engineering → verification before anything ships.',
       'Design produces blueprint artifacts. Engineering turns them into implementation artifacts. Verification checks the result and records evidence.'] },
   { slug: 'creating-a-project', cat: 'Projects', title: 'Creating a project',
     body: ['Go to Projects and choose New project. Fill in the name and choose a mode.',
@@ -32,13 +32,13 @@ const articles: Article[] = [
       'Use the stage tabs to move through the pipeline and open any artifact to see its detail.'] },
   { slug: 'uploading-documents', cat: 'Documents', title: 'Uploading documents',
     body: ['From the Documents page choose Upload. You can upload markdown, PDF, or text files.',
-      'Blueprint-First classifies each document and records it in the document store as source material for your blueprint.'] },
+      'NEXORA classifies each document and records it in the document store as source material for your blueprint.'] },
   { slug: 'ingestion-classification', cat: 'Documents', title: 'How ingestion classification works',
     body: ['Uploaded documents are scanned and classified by type: product idea, requirement, constraint, or reference.',
       'Classification decides which blueprint artifacts the document contributes to. Seek Classification on each row.'] },
   { slug: 'adding-a-provider', cat: 'Providers', title: 'Adding a provider',
     body: ['Go to Providers to browse the model catalogue. Choose a provider and select Add credential.',
-      'Enter a label and the API key. The secret is never shown again — Blueprint-First only records that it is verified.'] },
+      'Enter a label and the API key. The secret is never shown again — NEXORA only records that it is verified.'] },
   { slug: 'managing-credentials', cat: 'Providers', title: 'Managing credentials',
     body: ['The Credentials page lists each provider credential with its verification status.',
       'You can add, verify, or remove credentials. Removing a credential does not delete the provider.'] },
@@ -183,12 +183,12 @@ export function HelpArticle({ slug }: { slug: string }) {
 
 const faqGroups = [
   { name: 'Visitors', qa: [
-    ['What is Blueprint-First?', 'Blueprint-First is an AI software engineering platform that takes an idea and turns it into a structured, understandable, and verifiable system — blueprint first.'],
-    ['Is Blueprint-First free to try?', 'You can create an account and explore the workspace. Provider costs depend on the model you select.'],
+    ['What is NEXORA?', 'NEXORA is an AI software engineering platform that takes an idea and turns it into a structured, understandable, and verifiable system — blueprint first.'],
+    ['Is NEXORA free to try?', 'You can create an account and explore the workspace. Provider costs depend on the model you select.'],
   ]},
   { name: 'New users', qa: [
     ['Which project mode should I choose?', 'Design-only explores and designs. Design-plus-code adds engineering. Full-product covers the entire lifecycle including deployment and operations.'],
-    ['How is this different from an AI code generator?', 'Blueprint-First builds a verifiable blueprint with evidence before any code is written.'],
+    ['How is this different from an AI code generator?', 'NEXORA builds a verifiable blueprint with evidence before any code is written.'],
   ]},
   { name: 'Returning users', qa: [
     ['How do I add a provider?', 'Go to Providers, choose a provider, and add your API key. The system verifies it before the model becomes selectable.'],
@@ -241,7 +241,7 @@ export function Founder() {
         </a>
         <div className="card" style={{ marginBottom: 16 }}>
           <h1 style={{ fontSize: 28, marginBottom: 4 }}>About the Founder</h1>
-          <p className="muted" style={{ fontSize: 15 }}>The person behind Blueprint-First's vision for blueprint-first engineering.</p>
+          <p className="muted" style={{ fontSize: 15 }}>The person behind NEXORA's vision for blueprint-first engineering.</p>
         </div>
 
         <div className="card mb-16">
@@ -249,14 +249,14 @@ export function Founder() {
             <div style={{ width: 64, height: 64, borderRadius: '50%', background: 'linear-gradient(135deg, var(--green-500), var(--green-700))', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 800, fontSize: 24 }}>CV</div>
             <div>
               <h2 style={{ fontSize: 20, marginBottom: 2 }}>Cornelius Adedeji Victor</h2>
-              <p className="muted" style={{ fontSize: 14 }}>Founder & Creator of Blueprint-First</p>
+              <p className="muted" style={{ fontSize: 14 }}>Founder & Creator of NEXORA</p>
             </div>
           </div>
 
           <div className="article-body" style={{ display: 'grid', gap: 14 }}>
-            <h3 style={{ fontSize: 17 }}>Why Blueprint-First exists</h3>
+            <h3 style={{ fontSize: 17 }}>Why NEXORA exists</h3>
             <p className="text-sm" style={{ lineHeight: 1.7 }}>
-              Blueprint-First began with a question: What if AI software development worked more like an engineering organization?
+              NEXORA began with a question: What if AI software development worked more like an engineering organization?
             </p>
             <p className="text-sm" style={{ lineHeight: 1.7 }}>
               Today, an idea can become code incredibly quickly. But speed does not guarantee that the right thing was built. Requirements can be misunderstood. Important decisions can disappear inside conversations. Different parts of a product can become disconnected. Risks can be overlooked.
@@ -265,7 +265,7 @@ export function Founder() {
               The deeper problem was not that AI couldn't write code. It was that code was being written without a blueprint.
             </p>
             <p className="text-sm" style={{ lineHeight: 1.7 }}>
-              That led to the idea behind Blueprint-First: an organization that does not simply generate. It explores, designs, blueprints, reviews, and verifies before engineering moves forward.
+              That led to the idea behind NEXORA: an organization that does not simply generate. It explores, designs, blueprints, reviews, and verifies before engineering moves forward.
             </p>
 
             <h3 style={{ fontSize: 17, marginTop: 12 }}>The vision</h3>
@@ -276,7 +276,7 @@ export function Founder() {
               <p className="text-sm" style={{ lineHeight: 1.6, fontWeight: 600, color: 'var(--green-700)' }}>It should be verified.</p>
             </div>
             <p className="text-sm" style={{ lineHeight: 1.7 }}>
-              Blueprint-First was conceived to give people a better engineering environment around increasingly capable AI — one where every decision is traceable, every artifact carries evidence, and nothing is built without a blueprint.
+              NEXORA was conceived to give people a better engineering environment around increasingly capable AI — one where every decision is traceable, every artifact carries evidence, and nothing is built without a blueprint.
             </p>
             <p className="text-sm" style={{ lineHeight: 1.7 }}>
               The goal is not simply to produce more software. The goal is to build software that can be understood, challenged, verified, and trusted.
@@ -286,7 +286,7 @@ export function Founder() {
 
         <div className="card" style={{ borderColor: 'var(--green-200)', background: 'linear-gradient(135deg, var(--green-50), rgb(var(--surface)))' }}>
           <h3 style={{ fontSize: 17, marginBottom: 6 }}>Contact the founder</h3>
-          <p className="text-sm muted" style={{ marginBottom: 14 }}>Questions, ideas, or feedback about Blueprint-First? Reach Cornelius directly — typically answered within 24 hours.</p>
+          <p className="text-sm muted" style={{ marginBottom: 14 }}>Questions, ideas, or feedback about NEXORA? Reach Cornelius directly — typically answered within 24 hours.</p>
           <div className="row" style={{ gap: 12, flexWrap: 'wrap' }}>
                         <a className="btn btn-outline" href={GMAIL_COMPOSE_URL} target="_blank" rel="noreferrer"><I name="mail" /> Gmail</a>
             <a className="btn btn-outline" href={WHATSAPP_URL} target="_blank" rel="noreferrer"><I name="moreH" /> WhatsApp</a>

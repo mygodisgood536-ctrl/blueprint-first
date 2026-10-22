@@ -1,5 +1,5 @@
 /**
- * Durable project store for the Nexona product layer.
+ * Durable project store for the NEXORA product layer.
  *
  * The engineering-core demo pipeline (runDemoPipeline) deliberately REBUILDS
  * its artifact store from scratch on every server start (it resets its own

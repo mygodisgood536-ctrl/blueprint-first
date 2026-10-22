@@ -24,3 +24,6 @@ Thumbs.db
 # Local commit-message scratch file
 .git-commit-msg.txt
 
+# Local test-runner output
+suite-out.txt
+

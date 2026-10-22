@@ -1,5 +1,5 @@
 /**
- * Durable EvidenceLog adapter (Nexona product layer).
+ * Durable EvidenceLog adapter (NEXORA product layer).
  *
  * The verification engine's EvidenceLog port (verification/evidence.ts) is
  * append-only and small; this adapter keeps the exact MemoryEvidenceLog

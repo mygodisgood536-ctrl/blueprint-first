@@ -24,7 +24,7 @@ import type {
 } from './types.ts';
 
 const MAX_READ_CHARS = 3 * 1024 * 1024;
-const MANIFEST_NAME = '.nexona-manifest.json';
+const MANIFEST_NAME = '.nexora-manifest.json';
 
 /** Masks obvious credential material in captured terminal output. */
 export function redactTerminal(text: string): string {
@@ -67,7 +67,7 @@ export class LocalWorkspaceEnvAdapter implements EnvAdapter {
   async provision(spec: EnvSpec): Promise<EnvHealth> {
     await fs.mkdir(this.root, { recursive: true });
     const manifest = {
-      kind: 'nexona-project-environment',
+      kind: 'nexora-project-environment',
       adapter: 'local-workspace',
       label: spec.label,
       gitEnabled: spec.gitEnabled,
@@ -234,14 +234,14 @@ export class LocalWorkspaceEnvAdapter implements EnvAdapter {
   }
 
   async gitCommit(message: string): Promise<{ commit: string }> {
-    await this.runReal('git', ['-C', this.root, '-c', 'user.name=Nexona Workspace', '-c', 'user.email=nexona@local', 'add', '-A']);
+    await this.runReal('git', ['-C', this.root, '-c', 'user.name=NEXORA Workspace', '-c', 'user.email=nexora@local', 'add', '-A']);
     const commit = await this.runReal('git', [
       '-C',
       this.root,
       '-c',
-      'user.name=Nexona Workspace',
+      'user.name=NEXORA Workspace',
       '-c',
-      'user.email=nexona@local',
+      'user.email=nexora@local',
       'commit',
       '-m',
       message,

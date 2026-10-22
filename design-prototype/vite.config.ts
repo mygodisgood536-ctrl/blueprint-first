@@ -25,7 +25,7 @@ export default defineConfig({
         // host and let the CSRF check see a matching Origin.
         headers: {},
       },
-      '/nexona': { target: controlPlane, changeOrigin: false },
+      '/nexora': { target: controlPlane, changeOrigin: false },
       '/assets': { target: controlPlane, changeOrigin: false },
     },
     // Never watch test-run artifacts (headless-Chrome profile, logs,

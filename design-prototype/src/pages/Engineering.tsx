@@ -201,7 +201,7 @@ export function Continuous() {
 
   return (
     <Shell breadcrumb={[{ label: 'Continuous engineering' }]}>
-      <div className="page-head"><div><h1>Continuous engineering</h1><p className="subtitle">Blueprint-First re-engineers the running system against its blueprint - honestly and with evidence.</p></div>
+      <div className="page-head"><div><h1>Continuous engineering</h1><p className="subtitle">NEXORA re-engineers the running system against its blueprint - honestly and with evidence.</p></div>
         <span className="badge badge-yellow">{pendingCount} drift item(s)</span></div>
 
       <div className="card mb-16" style={{ borderColor: 'rgb(var(--warning))', background: 'var(--warning-soft)' }}>

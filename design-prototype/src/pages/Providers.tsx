@@ -243,7 +243,7 @@ function ProviderCard({
 }
 
 export function Providers() {
-  return <ProviderHub title="Providers & models" subtitle="Which provider is Blueprint-First using, and is it working? Configure, verify, then select a model to run stages for real." breadcrumb={[{ label: 'Providers' }]} />
+  return <ProviderHub title="Providers & models" subtitle="Which provider is NEXORA using, and is it working? Configure, verify, then select a model to run stages for real." breadcrumb={[{ label: 'Providers' }]} />
 }
 
 /** Fast Provider Hub: provider cards from /api/providers (small), models loaded

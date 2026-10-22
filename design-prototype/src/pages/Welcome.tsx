@@ -53,7 +53,7 @@ function Monogram({ size = 84 }: { size?: number }) {
       style={{ width: size, height: size, fontSize: size * 0.18 }}
       aria-hidden="true"
     >
-      BF
+      NX
     </div>
   )
 }
@@ -110,7 +110,7 @@ export function Splash() {
       style={{ opacity: leaving ? 0 : 1 }}
       role="status"
       aria-live="polite"
-      aria-label="Starting Blueprint-First"
+      aria-label="Starting NEXORA"
     >
       <div className="grid-backdrop" aria-hidden="true" />
       <div
@@ -127,9 +127,9 @@ export function Splash() {
       <div className="splash-inner">
         <Monogram />
         <div>
-          <div className="splash-word">Blueprint-First</div>
+          <div className="splash-word">NEXORA</div>
           <div className="splash-strap" style={{ marginTop: '0.75rem' }}>
-            AI software engineering
+            Blueprint First AI Engineering
           </div>
         </div>
         <p className="splash-sub">
@@ -223,11 +223,11 @@ export function Welcome() {
 
       <div className="auth-wide" ref={introRef}>
         <div className="welcome-head">
-          <a className="entry-mark" href="#/" aria-label="Blueprint-First home">
+          <a className="entry-mark" href="#/" aria-label="NEXORA home">
             <Monogram size={44} />
             <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start' }}>
-              <span className="brand-name">Blueprint-First</span>
-              <span className="brand-sub">AI software engineering</span>
+              <span className="brand-name">NEXORA</span>
+              <span className="brand-sub">Blueprint First AI Engineering</span>
             </span>
           </a>
         </div>

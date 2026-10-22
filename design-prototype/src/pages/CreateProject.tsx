@@ -52,7 +52,7 @@ export function CreateProject() {
     try {
       const visionDocumentId = attached.length > 0 ? attached[0].id : undefined
       const project = await api.projects.create(name, vision, mode, visionDocumentId, aiConfig)
-      pushToast(aiConfig ? `Project created — starting the Blueprint-First pipeline through ${aiConfig.providerId}…` : 'Project created — starting the Blueprint-First pipeline…', 'success')
+      pushToast(aiConfig ? `Project created — starting the NEXORA pipeline through ${aiConfig.providerId}…` : 'Project created — starting the NEXORA pipeline…', 'success')
       navigate('#/projects/' + project.project.id)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to create project'

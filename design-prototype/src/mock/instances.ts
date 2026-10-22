@@ -5,7 +5,7 @@ export const mockProjects = [
   { id: 'prj_lumina_8k2m', name: 'Lumina Dashboard', mode: 'full-product' as const, status: 'active' as const, owner: 'cornelius', description: 'An analytics dashboard for engineering teams to visualize lifecycle progress and evidence quality.', lastActivity: '2026-09-10T08:32:00Z', visionDocId: 'doc_vision_001', stages: stagesForMode('full-product', 5) },
   { id: 'prj_aurora_3f7x', name: 'Aurora API', mode: 'design-plus-code' as const, status: 'active' as const, owner: 'cornelius', description: 'A RESTful API service for document ingestion and classification.', lastActivity: '2026-09-09T14:15:00Z', stages: stagesForMode('design-plus-code', 3) },
   { id: 'prj_helix_9q4t', name: 'Helix Design System', mode: 'design-only' as const, status: 'active' as const, owner: 'cornelius', description: 'A design-only exploration of a reusable component library.', lastActivity: '2026-09-08T11:00:00Z', stages: stagesForMode('design-only', 1) },
-  { id: 'prj_nimbus_6w1p', name: 'Nimbus Mobile', mode: 'full-product' as const, status: 'paused' as const, owner: 'cornelius', description: 'Mobile companion for the Blueprint-First engineering workspace.', lastActivity: '2026-08-21T09:45:00Z', stages: stagesForMode('full-product', 2) },
+  { id: 'prj_nimbus_6w1p', name: 'Nimbus Mobile', mode: 'full-product' as const, status: 'paused' as const, owner: 'cornelius', description: 'Mobile companion for the NEXORA engineering workspace.', lastActivity: '2026-08-21T09:45:00Z', stages: stagesForMode('full-product', 2) },
 ]
 
 export const mockDocuments = [

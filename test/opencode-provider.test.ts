@@ -46,7 +46,7 @@ const RUN_FIXTURE = [
 ].join('\n');
 
 function fixtureRuntime(runner: (args: readonly string[]) => Promise<{ stdout: string; stderr: string; exitCode: number }>): OpenCodeRuntime {
-  const dir = mkdtempSync(join(tmpdir(), 'nexona-opencode-provider-'));
+  const dir = mkdtempSync(join(tmpdir(), 'nexora-opencode-provider-'));
   const cachePath = join(dir, 'models.json');
   writeFileSync(cachePath, CACHE, 'utf8');
   return new OpenCodeRuntime({ cachePath, runner });
@@ -170,7 +170,7 @@ describe('OpencodeCatalogueSource', () => {
   it('throws honestly when the runtime catalogue is unavailable (degrades per-source)', async () => {
     const provider = new OpenCodeProvider({
       runtime: new OpenCodeRuntime({
-        cachePath: join(mkdtempSync(join(tmpdir(), 'nexona-opencode-provider-')), 'missing.json'),
+        cachePath: join(mkdtempSync(join(tmpdir(), 'nexora-opencode-provider-')), 'missing.json'),
         disableFallback: true,
       }),
     });
