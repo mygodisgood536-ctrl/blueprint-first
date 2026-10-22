@@ -57,7 +57,7 @@ import type { Artifact, ProvenanceEntry } from '../core/artifact.ts';
 import type { ArtifactType } from '../core/ids.ts';
 
 import { validateBrief } from './brief.ts';
-import { extractJson, renderBrief } from './prompt.ts';
+import { extractJson, renderBrief, BOSS_EXPECTATION_SCHEMA } from './prompt.ts';
 import type { ProductUnderstandingBrief } from './types.ts';
 import { artifactIdsOf } from './baseline-utils.ts';
 import type { DiscoveryBaseline } from './materialize.ts';
@@ -1606,7 +1606,10 @@ export async function runDiscoveryPassSequence(
             role: 'system',
             content:
               'You are the Discovery Boss. Your judgment is independent of the worker corps by construction: ' +
-              'this conversation contains no worker output and must never receive any.',
+              'this conversation contains no worker output and must never receive any.' +
+              '\nReply with ONLY a JSON object, with no prose and no markdown fence. ' +
+              'Copy this template exactly and fill in every field:\n' +
+              BOSS_EXPECTATION_SCHEMA,
           },
           { role: 'user', content: renderBossPrompt(brief) },
         ],

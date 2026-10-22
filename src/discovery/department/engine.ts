@@ -32,7 +32,7 @@ import type { VerificationReport } from '../../verification/verifier.ts';
 import type { BossDecision } from '../../orchestration/worker-boss.ts';
 import { validateBrief } from '../brief.ts';
 import type { ProductUnderstandingBrief } from '../types.ts';
-import { extractJson, renderBrief } from '../prompt.ts';
+import { extractJson, renderBrief, DISCOVERY_UNDERSTANDING_SCHEMA, DISCOVERY_STRUCTURAL_SCHEMA } from '../prompt.ts';
 import {
   normalizeDepartmentInventory,
   parseUnderstanding,
@@ -138,7 +138,10 @@ export class DiscoveryDepartment {
               '(DW-A1). State what the user is asking to build, in the user\'s own ' +
               'terms, plus a short domain profile. Do NOT enumerate modules, ' +
               'features, pages or any other structure - that is Cluster B\'s job. ' +
-              'Surface uncertainties via selfCheck.uncertainties instead of guessing.',
+              'Surface uncertainties via selfCheck.uncertainties instead of guessing.' +
+              '\nReply with ONLY a JSON object, with no prose and no markdown fence. ' +
+              'Copy this template exactly and fill in every field:\n' +
+              DISCOVERY_UNDERSTANDING_SCHEMA,
           },
           { role: 'user', content: renderBrief(brief) },
         ],
@@ -186,7 +189,10 @@ export class DiscoveryDepartment {
               'workflows, pages (with sections/actions/states/validations), ' +
               'rules, permissions, entities, apis, integrations. Use slug keys; ' +
               'reference existing modules/entities/actions only. Surface ' +
-              'uncertainties via selfCheck.uncertainties instead of guessing.',
+              'uncertainties via selfCheck.uncertainties instead of guessing.' +
+              '\nReply with ONLY a JSON object, with no prose and no markdown fence. ' +
+              'Copy this template exactly and fill in every field:\n' +
+              DISCOVERY_STRUCTURAL_SCHEMA,
           },
           {
             role: 'user',

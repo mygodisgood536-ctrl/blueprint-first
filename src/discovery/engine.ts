@@ -28,7 +28,7 @@ import { executeMaterializationPlan } from './materialize.ts';
 import type { DiscoveryBaseline } from './materialize.ts';
 import { createDiscoverySpecialist } from './verify.ts';
 import { artifactIdsOf, promoteBaseline } from './baseline-utils.ts';
-import { extractJson, renderBrief } from './prompt.ts';
+import { extractJson, renderBrief, DISCOVERY_SYSTEM_PROMPT } from './prompt.ts';
 
 export const DISCOVERY_WORKER_ID = 'discovery-worker-01';
 export const DISCOVERY_BOSS: Actor = { kind: 'verifier', id: 'discovery-boss-01' };
@@ -73,8 +73,7 @@ export class SinglePassDiscoveryEngine {
         messages: [
           {
             role: 'system',
-            content:
-              'You are a single-pass product discovery worker. Reply with ONLY a JSON object matching the agreed discovery schema.',
+            content: DISCOVERY_SYSTEM_PROMPT,
           },
           { role: 'user', content: renderBrief(brief) },
         ],
